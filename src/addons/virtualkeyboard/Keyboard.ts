@@ -1,47 +1,42 @@
 import * as xb from 'xrblocks';
 
-// --- Interfaces ---
+// --- Types & Interfaces ---
 
-/** Defines the structure for special functional keys. */
 interface SpecialKey {
   position: 'left'|'right'|'center';
   type: 'tab'|'backspace'|'shift_lock'|'enter'|'shift'|'space';
-  iconName: string;
+  iconName?: string;
   weight?: number;
   backgroundColor?: string;
+  text?: string;
 }
 
-/** Defines the layout for a single row of the keyboard. */
-interface LayoutRow {
+interface RowLayout {
   textKeys?: string;
-  shiftKeys?: string;
   specialKeys: SpecialKey[];
 }
 
-/** Configuration options for individual keyboard buttons. */
-interface KeyboardButtonOptions {
-  text: string;
-  fontSize: number;
-  backgroundColor: string;
+interface KeyboardButtonOptions extends xb.ButtonOptions {
   originalKey: string;
-  shiftKey?: string|null;
+  shiftKey: string|null;
 }
 
 // --- Constants ---
+const KEY_WIDTH = 0.07;
+const KEY_HEIGHT = 0.08;
+const FONT_SIZE = 0.45;
 
-const KEY_WIDTH: number = 0.068;
-const KEY_HEIGHT: number = 0.10;
-const FONT_SIZE: number = 0.45;
-const KEYBOARD_COLOR: string = '#5149ae';
-const DEFAULT_KEY_COLOR: string = '#aa3939';
-const SPECIAL_KEY_COLOR: string = '#3cb436';
+const KEYBOARD_COLOR = '#1a1a1b';
+const DEFAULT_KEY_COLOR = '#333334';
+const SPECIAL_KEY_COLOR = '#3e4a59';
+const ACTION_KEY_COLOR = '#449eb9';
 
-const KEY_LAYOUT: LayoutRow[] = [
-  {
-    textKeys: '`1234567890-+',
-    shiftKeys: '~!@#$%^&*()_+',
-    specialKeys: [],
-  },
+const COL_SPACER = 0.01;
+const ROW_SPACER = 0.015;
+
+const KEY_LAYOUT: RowLayout[] = [
+  {textKeys: '~!@#$%^&*()_+', specialKeys: []},
+  {textKeys: '`1234567890<>', specialKeys: []},
   {
     textKeys: 'qwertyuiop',
     specialKeys: [
@@ -67,7 +62,7 @@ const KEY_LAYOUT: LayoutRow[] = [
         position: 'right',
         type: 'enter',
         iconName: 'keyboard_return',
-        backgroundColor: '#449eb9'
+        backgroundColor: ACTION_KEY_COLOR
       },
     ],
   },
@@ -95,17 +90,15 @@ const KEY_LAYOUT: LayoutRow[] = [
   },
 ];
 
-const COL_SPACER: number = 0.01;
-const ROW_SPACER: number = 0.015;
-const TOTAL_KEYBOARD_WIDTH: number = 1.0;
-const TOTAL_KEYBOARD_HEIGHT: number =
+const TOTAL_KEYBOARD_WIDTH = 1.0;
+const TOTAL_KEYBOARD_HEIGHT =
     (KEY_LAYOUT.length * KEY_HEIGHT) + ((KEY_LAYOUT.length - 1) * ROW_SPACER);
 
 // --- Classes ---
 
 class KeyboardButton extends xb.TextButton {
   public originalKey: string;
-  public shiftKey?: string|null;
+  public shiftKey: string|null;
 
   constructor(options: KeyboardButtonOptions) {
     super(options);
@@ -120,13 +113,11 @@ class Keyboard extends xb.Script {
   private isCapsLockOn: boolean = false;
   private textButtons: KeyboardButton[] = [];
 
-  /** Callback triggered when text content changes. */
   public onTextChanged: ((text: string) => void)|null = null;
-  /** Callback triggered when the enter key is pressed. */
   public onEnterPressed: ((text: string) => void)|null = null;
 
-  private subspace: any;  // Using any for specialized SDK UI components
-  private mainGrid: any;
+  private subspace: xb.SpatialPanel;
+  private mainGrid: xb.Grid;
 
   constructor() {
     super();
@@ -134,21 +125,34 @@ class Keyboard extends xb.Script {
     this.subspace = new xb.SpatialPanel({
       showEdge: true,
       backgroundColor: KEYBOARD_COLOR,
-      width: 1.0,
+      width: TOTAL_KEYBOARD_WIDTH,
       height: TOTAL_KEYBOARD_HEIGHT,
     });
     this.subspace.isRoot = true;
     this.add(this.subspace);
 
-    this.mainGrid = new xb.Grid({height: 1.0});
+    this.mainGrid = new xb.Grid({height: TOTAL_KEYBOARD_WIDTH});
     this.subspace.add(this.mainGrid);
 
     this.createKeyboard();
+    this.applyZOrder(this.subspace, 1000);
     this.subspace.updateLayouts();
   }
 
-  public override init(): void {
+  override init(): void {
     this.subspace.position.set(0, 1.2, -1);
+  }
+
+  private applyZOrder(entity: any, order: number = 1000): void {
+    entity.renderOrder = order;
+    if (entity.object3D) {
+      entity.object3D.renderOrder = order;
+    }
+
+    if (entity.children) {
+      entity.children.forEach(
+          (child: any) => this.applyZOrder(child, order + 1));
+    }
   }
 
   private createKeyboard(): void {
@@ -160,8 +164,8 @@ class Keyboard extends xb.Script {
     });
   }
 
-  private createRow(rowData: LayoutRow): void {
-    const row = this.mainGrid.addRow({weight: KEY_HEIGHT});
+  private createRow(rowData: RowLayout): void {
+    const row = this.mainGrid.addRow({weight: KEY_HEIGHT * (1.0 / 0.56)});
 
     if (rowData.specialKeys.some(k => k.type === 'space')) {
       const spaceKey = rowData.specialKeys.find(k => k.type === 'space')!;
@@ -177,41 +181,37 @@ class Keyboard extends xb.Script {
     const rightSpecial =
         rowData.specialKeys.filter(k => k.position === 'right');
     const textKeys = rowData.textKeys ? rowData.textKeys.split('') : [];
-    const shiftKeys = rowData.shiftKeys ? rowData.shiftKeys.split('') : [];
-
-    let currentOccupiedWeight: number = 0;
+    let usedWidth = 0;
 
     leftSpecial.forEach(keyData => {
+      const w = keyData.weight || KEY_WIDTH;
       this.addKey(row, keyData);
-      currentOccupiedWeight += (keyData.weight || KEY_WIDTH);
+      usedWidth += w + COL_SPACER;
+      row.addCol({weight: COL_SPACER});
     });
 
-    if (leftSpecial.length > 0 && textKeys.length > 0) {
-      row.addCol({weight: COL_SPACER});
-      currentOccupiedWeight += COL_SPACER;
-    }
-
     textKeys.forEach((char, i) => {
-      const shiftChar = shiftKeys[i] || null;
-      this.addKey(row, char, shiftChar);
-      currentOccupiedWeight += KEY_WIDTH;
+      this.addKey(row, char);
+      usedWidth += KEY_WIDTH;
+
       if (i < textKeys.length - 1 || rightSpecial.length > 0) {
         row.addCol({weight: COL_SPACER});
-        currentOccupiedWeight += COL_SPACER;
+        usedWidth += COL_SPACER;
       }
     });
 
     rightSpecial.forEach(keyData => {
-      const remainingWidth = Math.max(0.05, 1.0 - currentOccupiedWeight);
+      const remainingWidth = (TOTAL_KEYBOARD_WIDTH + 0.03) - usedWidth;
       this.addKey(row, {...keyData, weight: remainingWidth});
     });
   }
 
   private addKey(
-      row: any, data: string|SpecialKey, shiftChar: string|null = null): void {
-    const isSpecial = typeof data === 'object';
-    const weight = isSpecial ? (data.weight || KEY_WIDTH) : KEY_WIDTH;
-    const backgroundColor = isSpecial ?
+      row: xb.GridRow, data: string|SpecialKey,
+      shiftChar: string|null = null): void {
+    const isObject = typeof data === 'object';
+    const weight = isObject ? (data.weight || KEY_WIDTH) : KEY_WIDTH;
+    const backgroundColor = isObject ?
         (data.backgroundColor || SPECIAL_KEY_COLOR) :
         DEFAULT_KEY_COLOR;
 
@@ -219,9 +219,10 @@ class Keyboard extends xb.Script {
       backgroundColor: backgroundColor,
       margin: 0.05
     });
+
     keyPanel.useBorderlessShader = true;
 
-    if (isSpecial && data.iconName) {
+    if (isObject && data.iconName) {
       const btn = new xb.IconButton({
         text: data.iconName,
         fontSize: FONT_SIZE,
@@ -230,7 +231,7 @@ class Keyboard extends xb.Script {
       btn.onTriggered = () => this.handleSpecialKey(data.type);
       keyPanel.add(btn);
     } else {
-      const char = typeof data === 'string' ? data : (data as any).text;
+      const char = typeof data === 'string' ? data : (data.text || '');
       const btn = new KeyboardButton({
         text: char,
         fontSize: FONT_SIZE,
@@ -246,9 +247,7 @@ class Keyboard extends xb.Script {
 
   private handleKeyPress(char: string): void {
     this.keyText += char;
-    console.log(`Current Text: "${this.keyText}"`);
     this.onTextChanged?.(this.keyText);
-
     if (this.isShifted) {
       this.isShifted = false;
       this.refreshKeyboard();
@@ -259,7 +258,6 @@ class Keyboard extends xb.Script {
     switch (type) {
       case 'backspace':
         this.keyText = this.keyText.slice(0, -1);
-        console.log(`Deleted. Current Text: "${this.keyText}"`);
         break;
       case 'space':
         this.handleKeyPress(' ');
@@ -276,7 +274,6 @@ class Keyboard extends xb.Script {
         this.handleKeyPress('\t');
         break;
       case 'enter':
-        console.log(`Enter pressed. Current Text: "${this.keyText}"`);
         this.onEnterPressed?.(this.keyText);
         break;
       default:
@@ -303,7 +300,6 @@ class Keyboard extends xb.Script {
     });
   }
 
-  /** Externally update the current text buffer. */
   public setText(text: string): void {
     this.keyText = text;
     this.onTextChanged?.(this.keyText);

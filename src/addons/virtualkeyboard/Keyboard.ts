@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import * as xb from 'xrblocks';
 
 // --- Types & Interfaces ---
@@ -143,7 +144,7 @@ class Keyboard extends xb.Script {
     this.subspace.position.set(0, 1.2, -1);
   }
 
-  private applyZOrder(entity: any, order: number = 1000): void {
+  private applyZOrder(entity: THREE.Object3D, order: number = 1000): void {
     entity.renderOrder = order;
     if (entity.object3D) {
       entity.object3D.renderOrder = order;
@@ -151,7 +152,7 @@ class Keyboard extends xb.Script {
 
     if (entity.children) {
       entity.children.forEach(
-          (child: any) => this.applyZOrder(child, order + 1));
+          (child: THREE.Object3D) => this.applyZOrder(child, order + 1));
     }
   }
 
@@ -207,7 +208,8 @@ class Keyboard extends xb.Script {
   }
 
   private addKey(
-      row: any, data: string|SpecialKey, shiftChar: string|null = null): void {
+      row: ReturnType<xb.Grid['addRow']>, data: string|SpecialKey,
+      shiftChar: string|null = null): void {
     const isObject = typeof data === 'object';
     const weight = isObject ? (data.weight || KEY_WIDTH) : KEY_WIDTH;
     const backgroundColor = isObject ?
@@ -305,4 +307,4 @@ class Keyboard extends xb.Script {
   }
 }
 
-export {Keyboard};
+export {Keyboard, Keyboard};

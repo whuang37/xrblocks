@@ -12,7 +12,7 @@ describe('GamepadBindings', () => {
     expect(bindings.getBinding('select')).toBe(0);
     expect(bindings.getBinding('cycleHandPoseLeft')).toBe(14);
     expect(bindings.getBinding('cycleHandPoseRight')).toBe(15);
-    expect(bindings.getBinding('cycleSimulatorMode')).toBe(8);
+    expect(bindings.getBinding('cycleSimulatorMode')).toBe(3);
     expect(bindings.getBinding('toggleUI')).toBe(5);
     expect(bindings.getBinding('openSettings')).toBe(9);
   });

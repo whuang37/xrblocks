@@ -12,7 +12,7 @@ const DEFAULT_BINDINGS: Record<GamepadAction, number> = {
   select: 0, // A / Cross
   cycleHandPoseLeft: 14, // D-pad left
   cycleHandPoseRight: 15, // D-pad right
-  cycleSimulatorMode: 8, // Back / Select
+  cycleSimulatorMode: 3, // Y
   toggleUI: 5, // RB / R1
   openSettings: 9, // Start / Menu
 };

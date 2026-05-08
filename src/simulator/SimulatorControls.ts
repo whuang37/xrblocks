@@ -66,27 +66,36 @@ export class SimulatorControls {
     const toggleUserInterface = () => {
       this.userInterface.toggleInterfaceVisible();
     };
+    const cycleSimulatorMode = () => {
+      if (!this.simulatorOptions) return;
+      this.setSimulatorMode(
+        this.simulatorOptions.modeToggle.toggleOrder[this.simulatorMode]
+      );
+    };
     this.simulatorModes = {
       [SimulatorMode.USER]: new SimulatorUserMode(
         this.simulatorControllerState,
         this.downKeys,
         hands,
         setStereoRenderMode,
-        toggleUserInterface
+        toggleUserInterface,
+        cycleSimulatorMode
       ),
       [SimulatorMode.POSE]: new SimulatorPoseMode(
         this.simulatorControllerState,
         this.downKeys,
         hands,
         setStereoRenderMode,
-        toggleUserInterface
+        toggleUserInterface,
+        cycleSimulatorMode
       ),
       [SimulatorMode.CONTROLLER]: new SimulatorControllerMode(
         this.simulatorControllerState,
         this.downKeys,
         hands,
         setStereoRenderMode,
-        toggleUserInterface
+        toggleUserInterface,
+        cycleSimulatorMode
       ),
     };
 

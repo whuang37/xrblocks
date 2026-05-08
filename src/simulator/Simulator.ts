@@ -113,7 +113,7 @@ export class Simulator extends Script {
     const deviceCamera = registry.get(XRDeviceCamera);
     this.options = simulatorOptions;
     camera.position.copy(this.options.initialCameraPosition);
-    this.userInterface.init(simulatorOptions, this.controls, this.hands);
+    this.userInterface.init(simulatorOptions, this.controls, this.hands, input);
     renderer.autoClearColor = false;
     await this.simulatorScene.init(simulatorOptions);
     await this.simulatorWorld.init(options, world);

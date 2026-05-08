@@ -123,9 +123,10 @@ export class SimulatorControlMode {
         cameraRotation.setFromEuler(euler);
       }
 
-      // Triggers → vertical movement (RT up, LT down) in world space.
-      const [lt, rt] = gp.getTriggers();
-      const verticalDelta = (rt - lt) * deltaTime;
+      // Configurable vertical movement bindings (defaults LT/RT, analog).
+      const downVal = gp.getButtonValue(gp.bindings.getBinding('moveDown'));
+      const upVal = gp.getButtonValue(gp.bindings.getBinding('moveUp'));
+      const verticalDelta = (upVal - downVal) * deltaTime;
       if (verticalDelta !== 0) {
         cameraPosition.y += verticalDelta;
       }

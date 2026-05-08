@@ -44,12 +44,13 @@ export class SimulatorControllerMode extends SimulatorControlMode {
       .multiplyScalar(deltaTime);
     localPos.add(vector3);
 
-    // Gamepad: left stick moves hand on XZ; triggers move hand on Y.
+    // Gamepad: left stick moves hand on XZ; configurable buttons on Y.
     const gp = this.input.gamepadController;
     if (gp.userData.connected && !gp.menuActive) {
       const [lx, ly] = gp.getAxes();
-      const [lt, rt] = gp.getTriggers();
-      vector3.set(lx, rt - lt, ly).multiplyScalar(deltaTime);
+      const downVal = gp.getButtonValue(gp.bindings.getBinding('moveDown'));
+      const upVal = gp.getButtonValue(gp.bindings.getBinding('moveUp'));
+      vector3.set(lx, upVal - downVal, ly).multiplyScalar(deltaTime);
       localPos.add(vector3);
     }
 

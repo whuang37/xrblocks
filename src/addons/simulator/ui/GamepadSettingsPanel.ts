@@ -12,6 +12,8 @@ const ACTION_LABELS: Record<xb.GamepadAction, string> = {
   cycleHandPoseRight: 'Next Hand Pose',
   cycleSimulatorMode: 'Cycle Simulator Mode',
   toggleUI: 'Toggle UI',
+  moveDown: 'Move Down',
+  moveUp: 'Move Up',
   openSettings: 'Open Settings',
 };
 

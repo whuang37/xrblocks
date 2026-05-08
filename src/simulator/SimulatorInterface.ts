@@ -172,7 +172,9 @@ export class SimulatorInterface {
     this._gamepadToast.show({
       'Left Stick': 'Move (or Hand in Controller mode)',
       'Right Stick': 'Look',
-      'LT / RT': 'Down / Up',
+      [btnName(b.getBinding('moveDown')) +
+      ' / ' +
+      btnName(b.getBinding('moveUp'))]: 'Down / Up',
       [btnName(b.getBinding('select'))]: 'Select / Interact',
       [btnName(b.getBinding('cycleHandPoseLeft')) +
       ' / ' +

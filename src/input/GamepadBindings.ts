@@ -6,6 +6,8 @@ export type GamepadAction =
   | 'cycleHandPoseRight'
   | 'cycleSimulatorMode'
   | 'toggleUI'
+  | 'moveDown'
+  | 'moveUp'
   | 'openSettings';
 
 const DEFAULT_BINDINGS: Record<GamepadAction, number> = {
@@ -14,6 +16,8 @@ const DEFAULT_BINDINGS: Record<GamepadAction, number> = {
   cycleHandPoseRight: 15, // D-pad right
   cycleSimulatorMode: 3, // Y
   toggleUI: 5, // RB / R1
+  moveDown: 6, // LT (analog)
+  moveUp: 7, // RT (analog)
   openSettings: 9, // Start / Menu
 };
 

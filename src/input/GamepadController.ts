@@ -170,6 +170,15 @@ export class GamepadController
   }
 
   /**
+   * Returns the analog value (0..1) of the given button index, or 0 if
+   * unbound or no gamepad. Useful for triggers (which expose .value).
+   */
+  getButtonValue(index: number): number {
+    if (index < 0) return 0;
+    return this.activeGamepad?.buttons[index]?.value ?? 0;
+  }
+
+  /**
    * Returns the analog values of the left and right triggers (LT, RT) on a
    * standard-mapped gamepad, in [0, 1]. Returns [0, 0] when no gamepad.
    */

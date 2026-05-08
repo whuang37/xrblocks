@@ -16,9 +16,15 @@ export class CyberpunkImmersive extends THREE.Object3D {
     this._buildSphere();
   }
 
-  show(portalWorldMatrix) {
-    this._entryMatrix = portalWorldMatrix.clone();
-    this._entryMatrixInv = portalWorldMatrix.clone().invert();
+  show(portalWorldMatrix, fromSide = 'front') {
+    let m = portalWorldMatrix.clone();
+    if (fromSide === 'back') {
+      // User entered through the back face of the portal — apply a 180° yaw
+      // so they spawn facing the scene rather than the wall behind it.
+      m.multiply(new THREE.Matrix4().makeRotationY(Math.PI));
+    }
+    this._entryMatrix = m;
+    this._entryMatrixInv = m.clone().invert();
     this.visible = true;
   }
 

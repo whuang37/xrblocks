@@ -354,5 +354,13 @@ export class SimulatorHands {
     this.simulatorControllerState.currentControllerIndex =
       (this.simulatorControllerState.currentControllerIndex + 1) % 2;
     this.updateHandPosePanel();
+    this.onHandednessChanged?.(
+      this.simulatorControllerState.currentControllerIndex === 0
+        ? 'left'
+        : 'right'
+    );
   }
+
+  /** Optional callback fired after the active hand changes. */
+  onHandednessChanged?: (handedness: 'left' | 'right') => void;
 }

@@ -20,6 +20,7 @@ export class SimulatorControllerMode extends SimulatorControlMode {
   }
 
   override update() {
+    this.updateGamepad();
     this.updateControllerPositions();
   }
 
@@ -30,6 +31,10 @@ export class SimulatorControllerMode extends SimulatorControlMode {
   updateControllerPositions() {
     const deltaTime = this.timer.getDelta();
     const downKeys = this.downKeys;
+    const localPos =
+      this.simulatorControllerState.localControllerPositions[
+        this.simulatorControllerState.currentControllerIndex
+      ];
     vector3
       .set(
         Number(downKeys.has(D_CODE)) - Number(downKeys.has(A_CODE)),
@@ -37,9 +42,18 @@ export class SimulatorControllerMode extends SimulatorControlMode {
         Number(downKeys.has(S_CODE)) - Number(downKeys.has(W_CODE))
       )
       .multiplyScalar(deltaTime);
-    this.simulatorControllerState.localControllerPositions[
-      this.simulatorControllerState.currentControllerIndex
-    ].add(vector3);
+    localPos.add(vector3);
+
+    // Gamepad: left stick moves hand on XZ; configurable buttons on Y.
+    const gp = this.input.gamepadController;
+    if (gp.userData.connected && !gp.menuActive) {
+      const [lx, ly] = gp.getAxes();
+      const downVal = gp.getButtonValue(gp.bindings.getBinding('moveDown'));
+      const upVal = gp.getButtonValue(gp.bindings.getBinding('moveUp'));
+      vector3.set(lx, upVal - downVal, ly).multiplyScalar(deltaTime);
+      localPos.add(vector3);
+    }
+
     super.updateControllerPositions();
   }
 

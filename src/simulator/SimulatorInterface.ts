@@ -1,3 +1,5 @@
+import {GamepadController} from '../input/GamepadController.js';
+import {Input} from '../input/Input.js';
 import {
   SimulatorControls,
   SimulatorModeIndicatorElement,
@@ -8,6 +10,45 @@ import {
   SimulatorOptions,
 } from './SimulatorOptions.js';
 
+/** Minimal interface for the gamepad toast element. */
+interface GamepadToastElement extends HTMLElement {
+  show(controls: Record<string, string>, duration?: number): void;
+  flash(message: string, duration?: number): void;
+  dismiss(): void;
+}
+
+/** Minimal interface for the gamepad settings element. */
+interface GamepadSettingsElement extends HTMLElement {
+  bindings: unknown;
+  gamepadController: unknown;
+  show(): void;
+  hide(): void;
+}
+
+/** Standard gamepad button names for display. */
+const BUTTON_NAMES: Record<number, string> = {
+  0: 'A',
+  1: 'B',
+  2: 'X',
+  3: 'Y',
+  4: 'LB',
+  5: 'RB',
+  6: 'LT',
+  7: 'RT',
+  8: 'Back',
+  9: 'Start',
+  10: 'L3',
+  11: 'R3',
+  12: 'D-Up',
+  13: 'D-Down',
+  14: 'D-Left',
+  15: 'D-Right',
+};
+
+function btnName(index: number): string {
+  return BUTTON_NAMES[index] ?? `Btn ${index}`;
+}
+
 type SimulatorInstructionsHTMLElement = HTMLElement & {
   customInstructions: SimulatorCustomInstruction[];
 };
@@ -15,6 +56,8 @@ type SimulatorInstructionsHTMLElement = HTMLElement & {
 export class SimulatorInterface {
   private elements: HTMLElement[] = [];
   private interfaceVisible = true;
+  private _gamepadToast?: GamepadToastElement;
+  private _gamepadSettings?: GamepadSettingsElement;
 
   /**
    * Initialize the simulator interface.
@@ -22,12 +65,19 @@ export class SimulatorInterface {
   init(
     simulatorOptions: SimulatorOptions,
     simulatorControls: SimulatorControls,
-    simulatorHands: SimulatorHands
+    simulatorHands: SimulatorHands,
+    input?: Input
   ) {
     this.createModeIndicator(simulatorOptions, simulatorControls);
     this.showGeminiLivePanel(simulatorOptions);
     this.createHandPosePanel(simulatorOptions, simulatorHands);
+    simulatorHands.onHandednessChanged = (handedness) => {
+      this._ensureGamepadToast().flash(
+        `Active Hand: ${handedness === 'left' ? 'Left' : 'Right'}`
+      );
+    };
     this.showInstructions(simulatorOptions);
+    if (input) this._initGamepadUI(input);
   }
 
   createModeIndicator(
@@ -103,6 +153,64 @@ export class SimulatorInterface {
       this.hideUiElements();
     } else {
       this.showUiElements();
+    }
+  }
+
+  private _initGamepadUI(input: Input) {
+    const gp = input.gamepadController;
+    gp.addEventListener('connected', () => {
+      if (!gp.hasShownToast) {
+        gp.hasShownToast = true;
+        this.showGamepadToast(gp);
+      }
+    });
+    gp.onOpenSettings = () => this.toggleGamepadSettings(gp);
+  }
+
+  private _ensureGamepadToast(): GamepadToastElement {
+    if (!this._gamepadToast) {
+      this._gamepadToast = document.createElement(
+        'xrblocks-gamepad-toast'
+      ) as GamepadToastElement;
+      document.body.appendChild(this._gamepadToast);
+    }
+    return this._gamepadToast;
+  }
+
+  showGamepadToast(gp: GamepadController) {
+    const toast = this._ensureGamepadToast();
+    const b = gp.bindings;
+    toast.show({
+      'Left Stick': 'Move (or Hand in Controller mode)',
+      'Right Stick': 'Look',
+      [btnName(b.getBinding('moveDown')) +
+      ' / ' +
+      btnName(b.getBinding('moveUp'))]: 'Down / Up',
+      [btnName(b.getBinding('select'))]: 'Select / Interact',
+      [btnName(b.getBinding('cycleHandPoseLeft')) +
+      ' / ' +
+      btnName(b.getBinding('cycleHandPoseRight'))]: 'Cycle Hand Pose',
+      [btnName(b.getBinding('cycleSimulatorMode'))]: 'Cycle Simulator Mode',
+      [btnName(b.getBinding('toggleUI'))]: 'Toggle UI',
+      [btnName(b.getBinding('toggleHand'))]: 'Swap Active Hand',
+      [btnName(b.getBinding('openSettings'))]: 'Gamepad Settings',
+    });
+  }
+
+  toggleGamepadSettings(gp: GamepadController) {
+    if (!this._gamepadSettings) {
+      this._gamepadSettings = document.createElement(
+        'xrblocks-gamepad-settings'
+      ) as GamepadSettingsElement;
+      this._gamepadSettings.bindings = gp.bindings;
+      this._gamepadSettings.gamepadController = gp;
+      this._gamepadSettings.hidden = true;
+      document.body.appendChild(this._gamepadSettings);
+    }
+    if (this._gamepadSettings.hidden) {
+      this._gamepadSettings.show();
+    } else {
+      this._gamepadSettings.hide();
     }
   }
 }

@@ -347,23 +347,8 @@ export const LavaScene = {
     // The 3D cone reads on its own; immersive view has its own properly-anchored
     // sky-projected plume.
 
-    // ---- Eruption every 9s (mega blast) ----
-    {
-      float cycle = 9.0;
-      float k = floor(uTime / cycle);
-      float local = uTime - k * cycle;
-      float blast = smoothstep(0.0, 0.2, local) * smoothstep(2.5, 0.3, local);
-      vec2 cr = vec2(0.0, volcCenter.y + volcH);
-      float dr = length(pBack - cr);
-      // Bright dome expanding out of crater.
-      float dome = smoothstep(0.0, 1.5, local) * 0.5;
-      float front = smoothstep(0.04, 0.0, abs(dr - dome))
-                  * step(0.0, pBack.y - cr.y);
-      col += vec3(1.0, 0.75, 0.30) * front * blast * 2.0;
-      // Bright flash on whole crater.
-      float flash = smoothstep(0.4, 0.0, dr) * blast;
-      col += vec3(1.0, 0.95, 0.55) * flash * 1.2;
-    }
+    // Removed: 2D screen-space mega-blast dome — the 3D bombs already convey
+    // eruption energy and the flat semicircle didn't sit naturally on the cone.
 
     // ---- Volcanic lightning in ash plume every 7s ----
     {

@@ -302,15 +302,25 @@
                   required: ['text'],
                 },
               },
+              text: {
+                type: 'STRING',
+                description:
+                  'Single-label shortcut. Prefer items[] for one or more.',
+              },
+              style: {
+                type: 'STRING',
+                enum: ['dot', 'arrow', 'pulse'],
+                description: 'Style for the single-label shortcut.',
+              },
             },
-            required: ['items'],
           },
-          onTriggered: async ({items}) => {
+          onTriggered: async ({items, text, style}) => {
             if (!xb.core.world?.objects) {
               console.warn('[placeLabel] object detector unavailable');
               return {success: false, error: 'object detector unavailable'};
             }
-            const list = Array.isArray(items) ? items : [];
+            let list = Array.isArray(items) ? items.slice() : [];
+            if (text) list.push({text, style});
             if (!list.length) {
               return {success: false, error: 'no items provided'};
             }

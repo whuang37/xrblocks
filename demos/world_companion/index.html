@@ -521,8 +521,8 @@
         backgroundColor: '#000000d9',
         showEdge: false,
       });
-      xrPanel.position.set(0, 1.2, -1.2);
-      xb.core.scene.add(xrPanel);
+      xrPanel.position.set(0, -0.25, -0.7);
+      xb.core.camera.add(xrPanel);
 
       const xrGrid = xrPanel.addGrid();
       const statusRow = xrGrid.addRow({weight: 0.3});

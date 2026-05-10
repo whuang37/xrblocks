@@ -275,9 +275,12 @@
           description:
             'Run object detection once and drop one or more markers. Pass an ' +
             'array of items so you can label several things in a single call ' +
-            '(e.g. ["mug","laptop","keys"]). Choose a style per item: "dot" ' +
-            'for casual noting, "arrow" when pointing something out (e.g. ' +
-            '"find my bag"), "pulse" for small or hard-to-spot things.',
+            '(e.g. ["mug","laptop","keys"]). The response returns ' +
+            '`detected[]` with all object names the detector saw — if your ' +
+            'requested label is missed, retry with a name from that list. ' +
+            'Choose a style per item: "dot" for casual noting, "arrow" when ' +
+            'pointing something out (e.g. "find my bag"), "pulse" for small ' +
+            'or hard-to-spot things.',
           parameters: {
             type: 'OBJECT',
             properties: {
@@ -369,13 +372,17 @@
                 free.find((d) =>
                   needle.includes(d.label?.toLowerCase() || '\0')
                 ) ||
-                free[0]
+                null
               );
             };
             const placed = [];
+            const missed = [];
             for (const item of list) {
               const match = findMatch(item.text);
-              if (!match) break;
+              if (!match) {
+                missed.push(item.text);
+                continue;
+              }
               used.add(match);
               const style = item.style || 'dot';
               placeMarker(match.position, match.label || item.text, style);
@@ -387,7 +394,11 @@
             }
             return {
               success: placed.length > 0,
-              data: {placed, count: placed.length},
+              data: {
+                placed,
+                missed,
+                detected: detected.map((d) => d.label),
+              },
             };
           },
         });

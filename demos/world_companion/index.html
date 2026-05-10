@@ -343,12 +343,25 @@
             } catch (e) {
               console.warn('[placeLabel] detection threw', e);
             }
+            const camPos = new THREE.Vector3();
+            xb.core.camera.getWorldPosition(camPos);
             console.log(
               '[placeLabel]',
               list,
+              'cam:',
+              camPos.toArray().map((n) => n.toFixed(2)),
               'detected:',
-              detected.map((d) => d.label)
+              detected.map((d) => ({
+                label: d.label,
+                pos: d.position.toArray().map((n) => n.toFixed(2)),
+                dist: camPos.distanceTo(d.position).toFixed(2),
+              }))
             );
+            if (xrStatusText) {
+              const want = list.map((it) => it.text).join(',');
+              const got = detected.map((d) => d.label).join(',') || '(none)';
+              xrStatusText.text = `want: ${want} | got: ${got}`;
+            }
 
             const used = new Set();
             const findMatch = (text) => {
@@ -586,6 +599,7 @@
       options.depth.matchDepthView = false;
       options.enableObjectDetection();
       options.world.objects.backendConfig.activeBackend = 'gemini';
+      options.world.objects.showDebugVisualizations = true;
       options.reticles.enabled = true;
       options.setAppTitle('World Companion');
 

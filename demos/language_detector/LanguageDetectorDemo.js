@@ -150,8 +150,16 @@ export class LanguageDetectorDemo extends xb.Script {
       this.utterances.push({...lang, text});
       if (this.utterances.length > MAX_UTTERANCES) this.utterances.shift();
       this.interim = '';
+      this.interimLang = null;
+      if (this.interimTimer) clearTimeout(this.interimTimer);
     } else {
       this.interim = text;
+      // Debounce interim detection so we're not running it on every char.
+      if (this.interimTimer) clearTimeout(this.interimTimer);
+      this.interimTimer = setTimeout(() => {
+        this.interimLang = this._detect(text);
+        this._renderList();
+      }, 200);
     }
     this._renderList();
   }
@@ -180,7 +188,11 @@ export class LanguageDetectorDemo extends xb.Script {
     ${u.text}`
     );
     if (this.interim) {
-      lines.push(`···  …
+      const live = this.interimLang;
+      const label = live
+        ? `${live.code.padEnd(3)} ${live.name}  ${Math.round(live.prob * 100)}%`
+        : '···  detecting…';
+      lines.push(`${label}
     ${this.interim}`);
     }
     this.listView.setText(lines.join('\n\n'));

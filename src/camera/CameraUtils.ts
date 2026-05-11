@@ -6,10 +6,7 @@ import {
   MOOHAN_PROJECTION_MATRIX,
   getMoohanCameraPose,
 } from './GalaxyXRCameraParams';
-import {
-  QUEST_PROJECTION_MATRIX,
-  getQuestCameraPose,
-} from './QuestCameraParams';
+import {QUEST_PROJECTION_MATRIX, getQuestCameraPose} from './QuestCameraParams';
 
 export type DeviceCameraParameters = {
   projectionMatrix: THREE.Matrix4;

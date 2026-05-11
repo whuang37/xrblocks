@@ -35,9 +35,7 @@ export const QUEST_CAMERA_POSE_IN_RIGHT_CAMERA_POSITION = new THREE.Vector3(
 // Quest 3 passthrough RGB cameras are physically tilted downward (Meta design
 // favours seeing hands and the desk surface). Roughly ~15° pitch down.
 export const QUEST_CAMERA_POSE_IN_RIGHT_CAMERA_ROTATION =
-  new THREE.Quaternion().setFromEuler(
-    new THREE.Euler(-0.26, 0, 0, 'YXZ')
-  );
+  new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.26, 0, 0, 'YXZ'));
 
 const QUEST_CAMERA_POSE_IN_RIGHT_CAMERA_SCALE = new THREE.Vector3(1, 1, 1);
 

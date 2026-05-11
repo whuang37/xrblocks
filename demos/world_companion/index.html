@@ -334,8 +334,12 @@
               placeLabel._lastKey === callKey &&
               now - (placeLabel._lastAt || 0) < 2000
             ) {
-              return placeLabel._lastResult ||
-                {success: true, data: {placed: [], detected: []}};
+              return (
+                placeLabel._lastResult || {
+                  success: true,
+                  data: {placed: [], detected: []},
+                }
+              );
             }
             placeLabel._lastKey = callKey;
             placeLabel._lastAt = now;

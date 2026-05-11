@@ -30,17 +30,21 @@ export class LanguageDetectorDemo extends xb.Script {
   }
 
   _buildUi() {
-    const panel = new xb.SpatialPanel({backgroundColor: '#101218e6'});
+    const panel = new xb.SpatialPanel({
+      backgroundColor: '#101218e6',
+      width: 1.8,
+      height: 1.3,
+    });
     this.add(panel);
 
     const grid = panel.addGrid();
 
     // Title bar.
-    const titleRow = grid.addRow({weight: 0.1});
+    const titleRow = grid.addRow({weight: 0.13});
     this.titleText = titleRow.addText({
       text: 'Live Language Detector',
       fontColor: '#ffffff',
-      fontSize: 0.06,
+      fontSize: 0.055,
     });
 
     // Status bar (red dot when listening, hint otherwise).
@@ -48,20 +52,27 @@ export class LanguageDetectorDemo extends xb.Script {
     this.statusText = statusRow.addText({
       text: 'Idle',
       fontColor: '#94a3b8',
-      fontSize: 0.038,
+      fontSize: 0.032,
     });
 
-    // Utterance list — flat TextView (no auto-scroll), capped at MAX_UTTERANCES.
-    const listRow = grid.addRow({weight: 0.66});
-    this.listView = listRow.addText({
+    // Spacer so the scroller's overflow can't bleed into the status/title.
+    grid.addRow({weight: 0.06});
+
+    // Utterance list (smooth scrolling).
+    const listRow = grid.addRow({weight: 0.55});
+    this.listView = new xb.ScrollingTroikaTextView({
       text: PLACEHOLDER,
-      fontSize: 0.034,
+      fontSize: 0.05,
       textAlign: 'left',
       fontColor: '#e7eaf2',
     });
+    listRow.add(this.listView);
+
+    // Spacer above controls.
+    grid.addRow({weight: 0.06});
 
     // Controls row.
-    const controlRow = grid.addRow({weight: 0.17});
+    const controlRow = grid.addRow({weight: 0.13});
     const controlGrid = controlRow.addPanel({showEdge: false}).addGrid();
 
     controlGrid.addCol({weight: 0.25});
@@ -151,16 +162,18 @@ export class LanguageDetectorDemo extends xb.Script {
       this.interim = '';
       this.interimLang = null;
       if (this.interimTimer) clearTimeout(this.interimTimer);
+      this._renderList();
+      this._renderInterim();
     } else {
       this.interim = text;
       // Debounce interim detection so we're not running it on every char.
       if (this.interimTimer) clearTimeout(this.interimTimer);
       this.interimTimer = setTimeout(() => {
         this.interimLang = this._detect(text);
-        this._renderList();
+        this._renderInterim();
       }, 200);
+      this._renderInterim();
     }
-    this._renderList();
   }
 
   _detect(text) {
@@ -178,21 +191,25 @@ export class LanguageDetectorDemo extends xb.Script {
   }
 
   _renderList() {
-    if (!this.utterances.length && !this.interim) {
+    if (!this.utterances.length) {
       this.listView.setText(PLACEHOLDER);
       return;
     }
-    const fmt = (u, text) =>
-      `[${u.code}] ${u.name} ${Math.round(u.prob * 100)}%  ${text}`;
-    const lines = this.utterances.map((u) => fmt(u, u.text));
-    if (this.interim) {
-      const live = this.interimLang;
-      lines.push(
-        live
-          ? fmt(live, this.interim) + '  …'
-          : `[..] detecting…  ${this.interim}`
-      );
+    const fmt = (u) =>
+      `[${u.code}] ${u.name} ${Math.round(u.prob * 100)}%  ${u.text}`;
+    this.listView.setText(this.utterances.map(fmt).join('\n'));
+  }
+
+  _renderInterim() {
+    if (!this.listening) return;
+    if (!this.interim) {
+      this._setStatus('● Listening — speak any language');
+      return;
     }
-    this.listView.setText(lines.join('\n'));
+    const live = this.interimLang;
+    const tag = live
+      ? `[${live.code}] ${live.name} ${Math.round(live.prob * 100)}%`
+      : '[..] detecting…';
+    this._setStatus(`${tag}  ${this.interim}`);
   }
 }

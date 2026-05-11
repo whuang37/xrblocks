@@ -74,5 +74,10 @@
   },
   "peerDependencies": {
     "three": "^0.182.0"
+  },
+  "overrides": {
+    "@sparkjsdev/spark": {
+      "three": ">=0.180.0"
+    }
   }
 }

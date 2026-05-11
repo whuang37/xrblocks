@@ -74,6 +74,7 @@ const sidebars: SidebarsConfig = {
       label: 'Advanced Demos',
       collapsed: false,
       items: [
+        'samples/Portals',
         'samples/Ballpit',
         'samples/BalloonPop',
         'samples/Paint',

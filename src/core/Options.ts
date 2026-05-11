@@ -266,7 +266,6 @@ export class Options {
    */
   enableCamera(facingMode: 'environment' | 'user' = 'environment') {
     this.permissions.camera = true;
-    this.permissions.microphone = true;
     this.deviceCamera = new DeviceCameraOptions(
       facingMode === 'environment'
         ? xrDeviceCameraEnvironmentOptions

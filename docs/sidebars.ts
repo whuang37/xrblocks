@@ -66,6 +66,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'samples/XR-Poet',
         'samples/Gemini-XRObject',
+        'samples/Language-Detector',
         'samples/Gemini-Icebreakers',
       ],
     },

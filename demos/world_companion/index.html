@@ -274,14 +274,13 @@
           name: 'placeLabel',
           description:
             'Drop one or more labels. Pass items[] to mark several things at ' +
-            'once (e.g. ["mug","laptop","keys"]). For each item the tool ' +
-            'tries to anchor the label to the matching detected object; if ' +
-            'no match it places the label in front of the user as a ' +
-            'fallback. The response returns `placed[]` with `anchored: ' +
-            'true|false` so you know whether it landed on a real object. ' +
-            'Choose a style per item: "dot" for casual noting, "arrow" when ' +
-            'pointing something out, "pulse" for small or hard-to-spot ' +
-            'things.',
+            'once (e.g. ["mug","laptop","keys"]). Each item is anchored to a ' +
+            'matching detected object; if no match is found the item is ' +
+            'skipped (no marker placed) and reported back with ' +
+            '`anchored: false, reason: "not_found"` so you can tell the user ' +
+            'you could not see it. Choose a style per item: "dot" for casual ' +
+            'noting, "arrow" when pointing something out, "pulse" for small ' +
+            'or hard-to-spot things.',
           parameters: {
             type: 'OBJECT',
             properties: {
@@ -343,26 +342,6 @@
             }
             placeLabel._lastKey = callKey;
             placeLabel._lastAt = now;
-
-            const fallbackRaycaster = new THREE.Raycaster();
-            const fallbackPosition = (i) => {
-              const cam = xb.core.camera;
-              const ndcX = (i - (list.length - 1) / 2) * 0.15;
-              const depthMesh = xb.core.depth?.depthMesh;
-              if (depthMesh) {
-                fallbackRaycaster.setFromCamera(
-                  new THREE.Vector2(ndcX, 0),
-                  cam
-                );
-                const hits = [];
-                depthMesh.raycast(fallbackRaycaster, hits);
-                if (hits.length > 0) {
-                  return hits[0].point.clone();
-                }
-              }
-              const offset = new THREE.Vector3(ndcX * 1.6, 0, -1.2);
-              return offset.applyMatrix4(cam.matrixWorld);
-            };
 
             let detected = [];
             try {
@@ -466,17 +445,11 @@
                   anchored: true,
                 });
               } else {
-                placeMarker(
-                  fallbackPosition(i),
-                  item.text,
-                  itemStyle,
-                  batchKey
-                );
                 placed.push({
-                  placed: item.text,
                   requested: item.text,
                   style: itemStyle,
                   anchored: false,
+                  reason: 'not_found',
                 });
               }
             });

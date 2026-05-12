@@ -449,14 +449,31 @@
             const camForRange = xb.core.camera;
             const camPosForRange = new THREE.Vector3();
             if (camForRange) camForRange.getWorldPosition(camPosForRange);
+            const snapRaycaster = new THREE.Raycaster();
+            const snapToDepth = (target) => {
+              const depthMesh = xb.core.depth?.depthMesh;
+              if (!depthMesh) return null;
+              const dir = target.clone().sub(camPosForRange).normalize();
+              snapRaycaster.set(camPosForRange, dir);
+              snapRaycaster.far = MAX_ANCHOR_DIST;
+              const hits = [];
+              depthMesh.raycast(snapRaycaster, hits);
+              return hits.length ? hits[0].point.clone() : null;
+            };
             const batchKey = `b${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
             const placed = [];
             list.forEach((item, i) => {
               let match = findMatch(item.text);
+              const initialMatch = match;
               if (match && camForRange) {
                 const d = camPosForRange.distanceTo(match.position);
                 if (d > MAX_ANCHOR_DIST) {
-                  match = null;
+                  const snapped = snapToDepth(match.position);
+                  if (snapped) {
+                    match = {...match, position: snapped};
+                  } else {
+                    match = null;
+                  }
                 }
               }
               const itemStyle = item.style || 'dot';

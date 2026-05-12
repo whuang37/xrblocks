@@ -24,6 +24,7 @@
           "lit": "https://cdn.jsdelivr.net/gh/lit/dist@3/core/lit-core.min.js",
           "lit/": "https://esm.run/lit@3/",
           "xrblocks": "../../build/xrblocks.js",
+          "xrblocks/addons/": "../../build/addons/",
           "@google/genai": "https://cdn.jsdelivr.net/npm/@google/genai/+esm",
           "marked": "https://esm.sh/marked@14",
           "dompurify": "https://esm.sh/dompurify@3"
@@ -242,6 +243,7 @@
     <script type="module">
       import * as THREE from 'three';
       import * as xb from 'xrblocks';
+      import 'xrblocks/addons/simulator/SimulatorAddons.js';
       import {Text} from 'troika-three-text';
       import {marked} from 'marked';
       import DOMPurify from 'dompurify';

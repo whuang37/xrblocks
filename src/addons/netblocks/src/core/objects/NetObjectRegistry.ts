@@ -37,7 +37,13 @@ export class NetObjectRegistry {
   applyClaim(id: string, peerId: string): boolean {
     const obj = this._byId.get(id);
     if (!obj) return false;
-    obj.ownerId = peerId;
+    if (obj.ownerId !== peerId) {
+      obj.ownerId = peerId;
+      // Drop any stale interp target buffered from a previous remote-owner
+      // period; otherwise the new ownership state would lerp the object
+      // back toward an ancient position before the new owner sends one.
+      obj._hasTarget = false;
+    }
     return true;
   }
 
@@ -47,6 +53,7 @@ export class NetObjectRegistry {
     if (!obj) return false;
     if (obj.ownerId !== peerId) return false;
     obj.ownerId = '';
+    obj._hasTarget = false;
     return true;
   }
 

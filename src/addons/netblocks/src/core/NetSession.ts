@@ -228,6 +228,16 @@ export class NetSession extends EventTarget {
   /** Release ownership of an object (e.g., on release). */
   release(obj: NetObject): void {
     if (this.netObjects.applyRelease(obj.netId, this.localPeerId)) {
+      // Send a final canonical xform before relinquishing ownership so any
+      // peer whose interpolation hadn't converged snaps to the same resting
+      // position; otherwise tabs can be left showing the cube in different
+      // places when both peers stop dragging at the same time.
+      this._sendNet({
+        type: 'netobject',
+        id: obj.netId,
+        xform: obj.toXform(),
+        state: Object.keys(obj.state).length ? obj.state : undefined,
+      });
       this._sendNet({type: 'netobject.release', id: obj.netId});
     }
   }
@@ -431,6 +441,13 @@ export class NetSession extends EventTarget {
           obj.ownerId = msg.from;
         }
         if (obj.ownerId !== this.localPeerId) {
+          // Only accept xform updates from the current owner. A netobject
+          // message from anyone else is necessarily stale (in-flight from
+          // a previous owner whose release/claim has since been processed)
+          // and applying it would lerp the object back to an old position.
+          if (obj.ownerId && msg.from !== obj.ownerId) {
+            break;
+          }
           obj.setTargetXform(msg.xform);
           if (msg.state) Object.assign(obj.state, msg.state);
         }

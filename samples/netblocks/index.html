@@ -211,6 +211,12 @@
         update(time, frame) {
           this.net.update(time, frame);
           if (this.grab) {
+            // If we lost ownership mid-drag (someone else claimed it), stop
+            // overriding locally so the network's lerp can resync our view.
+            if (this.grab.cube.ownerId !== this._session.localPeerId) {
+              this.grab = null;
+              return;
+            }
             const cw = new THREE.Vector3();
             this.grab.controller.getWorldPosition(cw);
             this.grab.cube.position.copy(cw).add(this.grab.offset);

@@ -30,7 +30,9 @@ const HOST = process.env.HOST ?? '0.0.0.0';
 
 const rooms = new Map(); // roomId -> Map<peerId, ws>
 
-const wss = new WebSocketServer({host: HOST, port: PORT});
+// 64 KiB cap mirrors MAX_MESSAGE_BYTES on the client; relay never inspects
+// payloads but a hostile client could otherwise stream gigabytes.
+const wss = new WebSocketServer({host: HOST, port: PORT, maxPayload: 64 * 1024});
 
 console.log(`[netblocks-relay] listening on ws://${HOST}:${PORT}`);
 
@@ -60,6 +62,20 @@ wss.on('connection', (ws) => {
       if (!room) {
         room = new Map();
         rooms.set(roomId, room);
+      }
+      // Reject the join if someone else already holds this peerId in the
+      // room. Otherwise a second client could overwrite the slot, then
+      // their disconnect would evict the original.
+      if (room.has(peerId)) {
+        send(ws, {type: 'error', reason: 'peer-id-taken', peerId});
+        try {
+          ws.close();
+        } catch {
+          // ignore
+        }
+        peerId = null;
+        roomId = null;
+        return;
       }
       // Tell the joiner who's already here.
       const peers = [...room.keys()];

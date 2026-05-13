@@ -15,7 +15,7 @@ shared, real-time XR experience. It gives you:
   - `BroadcastChannelTransport` — zero-config, two browser tabs see each
     other instantly. Perfect for local dev.
   - `WebRTCTransport` — peer-to-peer over the public PeerJS broker (or
-    your own); no backend, low latency, ≤ ~6 peers.
+    your own); no backend, low latency, ≤ ~12 peers.
   - `WebSocketTransport` — connect to a tiny relay (`server/relay.js`)
     for reliable, scalable multi-user rooms.
 
@@ -190,7 +190,7 @@ All messages are JSON envelopes carrying a tagged union:
 | `voice`             | unicast       | WebRTC SDP/ICE for spatial voice negotiation.      |
 | `ping` / `pong`     | reserved      | Keepalive (currently unused).                      |
 
-Pose snapshots are encoded as a fixed 358-byte binary blob (head pose +
+Pose snapshots are encoded as a fixed 386-byte binary blob (head pose +
 two hands × 25 quantized joints) wrapped in base64 inside the JSON
 envelope. See `src/core/codec/PoseCodec.ts` for the byte layout.
 

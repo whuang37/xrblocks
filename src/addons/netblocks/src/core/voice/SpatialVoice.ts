@@ -31,7 +31,7 @@ export class SpatialVoice {
     camera.add(this.listener);
     this._opts = {
       refDistance: opts.refDistance ?? 0.5,
-      rolloffFactor: opts.rolloffFactor ?? 2,
+      rolloffFactor: opts.rolloffFactor ?? 4,
       maxDistance: opts.maxDistance ?? 20,
     };
   }

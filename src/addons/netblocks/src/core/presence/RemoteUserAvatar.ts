@@ -9,6 +9,7 @@
  * their own meshes to `avatar.headPivot` / `avatar.handPivots[h]`.
  */
 import * as THREE from 'three';
+import * as xb from 'xrblocks';
 import {InterpolatedPose} from './InterpolatedPose';
 import {hashStringToHue} from '../utils/IdUtils';
 
@@ -21,7 +22,14 @@ export interface RemoteUserAvatarOptions {
 
 export class RemoteUserAvatar extends THREE.Group {
   readonly peerId: string;
-  displayName?: string;
+  private _displayName?: string;
+
+  get displayName(): string | undefined {
+    return this._displayName;
+  }
+  set displayName(name: string | undefined) {
+    this.setDisplayName(name);
+  }
 
   /** Smoothed pose buffer fed by NetSession. */
   readonly pose = new InterpolatedPose();
@@ -46,12 +54,18 @@ export class RemoteUserAvatar extends THREE.Group {
   private _handGroups: [THREE.Group, THREE.Group];
   private _wristSpheres: [THREE.Mesh, THREE.Mesh];
   private _fingertipDots: [THREE.Mesh[], THREE.Mesh[]];
+  private _nameLabel?: THREE.Object3D & {
+    text?: string;
+    sync?: () => void;
+    dispose?: () => void;
+  };
+  private _nameLabelText = '';
 
   constructor(opts: RemoteUserAvatarOptions) {
     super();
     this.name = `RemoteUserAvatar(${opts.peerId})`;
     this.peerId = opts.peerId;
-    this.displayName = opts.displayName;
+    this._displayName = opts.displayName;
 
     const hue = hashStringToHue(opts.peerId);
     this.color = new THREE.Color().setHSL(hue, 0.65, 0.55);
@@ -96,6 +110,29 @@ export class RemoteUserAvatar extends THREE.Group {
     );
     this.add(this.defaultMesh);
     this._headSphere.visible = false; // until a pose arrives
+
+    // Lazy-load troika SDF text for the name label so we don't pay the
+    // import cost in samples that don't need it.
+    this._initNameLabel();
+  }
+
+  private async _initNameLabel(): Promise<void> {
+    const {Text} = await import('troika-three-text');
+    if ((this as unknown as {_disposed?: boolean})._disposed) return;
+    const label = new Text() as unknown as typeof this._nameLabel & object;
+    (label as {text: string}).text = this._labelString();
+    Object.assign(label as object, {
+      fontSize: 0.04,
+      color: 0xffffff,
+      outlineWidth: 0.004,
+      outlineColor: 0x000000,
+      anchorX: 'center',
+      anchorY: 'bottom',
+    });
+    (label as THREE.Object3D).position.set(0, 0, 0);
+    this._nameLabel = label;
+    this.add(label as unknown as THREE.Object3D);
+    label.sync?.();
   }
 
   /** Sample the smoothed pose at `now` and update the local meshes. */
@@ -131,9 +168,31 @@ export class RemoteUserAvatar extends THREE.Group {
         }
       }
     }
+
+    // Billboard the SDF name label ~13cm above the head, facing the camera.
+    if (this._nameLabel) {
+      this._nameLabel.position.copy(snap.head.position);
+      this._nameLabel.position.y += 0.13;
+      const cam = xb.core?.camera;
+      if (cam) this._nameLabel.lookAt(cam.position);
+    }
+  }
+
+  /** Update the displayed name; safe to call before troika finishes loading. */
+  setDisplayName(name: string | undefined): void {
+    this._displayName = name;
+    if (this._nameLabel) {
+      this._nameLabel.text = this._labelString();
+      this._nameLabel.sync?.();
+    }
+  }
+
+  private _labelString(): string {
+    return this._displayName || this.peerId.slice(0, 6);
   }
 
   dispose(): void {
+    (this as unknown as {_disposed: boolean})._disposed = true;
     this._headSphere.geometry.dispose();
     (this._headSphere.material as THREE.Material).dispose();
     for (let h = 0; h < 2; h++) {
@@ -144,5 +203,6 @@ export class RemoteUserAvatar extends THREE.Group {
         (dot.material as THREE.Material).dispose();
       }
     }
+    this._nameLabel?.dispose?.();
   }
 }

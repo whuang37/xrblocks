@@ -84,7 +84,21 @@ export class VoiceChat {
       audio: this._opts.audioConstraints,
     });
     this._enabled = true;
+    // Back-fill local tracks onto any peer connections that were created
+    // earlier as answerers (remote enabled voice before us). Without this
+    // those PCs would carry only the inbound audio, never our outbound.
+    for (const [pid, entry] of this._peers) {
+      if (entry.pc.getSenders().some((s) => s.track?.kind === 'audio')) {
+        continue;
+      }
+      for (const t of this._localStream.getTracks()) {
+        entry.pc.addTrack(t, this._localStream);
+      }
+      // Re-offer so the remote learns about our newly added track.
+      void this._makeOffer(pid, entry);
+    }
     for (const pid of currentPeers) {
+      if (this._peers.has(pid)) continue;
       this._connectTo(pid, /* asOfferer */ this._localId < pid);
     }
   }

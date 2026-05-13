@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import * as xb from 'xrblocks';
+import {Keyboard} from 'xrblocks/addons/virtualkeyboard/Keyboard.js';
 import {BroadcastChannelTransport, NetObject} from 'netblocks';
 import {NetSample} from '../Sample';
 
@@ -48,6 +49,11 @@ class IntegrationSample extends NetSample {
   private _voiceOn = false;
   private _log?: HTMLDivElement;
   private _chatPanel?: HTMLDivElement;
+  private _spatialLog?: xb.ScrollingTroikaTextView;
+  private _spatialLogLines: string[] = [];
+  private _spatialVoiceBtn?: xb.TextButton;
+  private _spatialDraft?: xb.TextView;
+  private _keyboard?: Keyboard;
   // Last canvas-relative pointer position (NDC space), used to bypass
   // the platform mouse raycaster (which has been returning intersections
   // mirrored around the origin in this sample) and pick cubes ourselves
@@ -72,6 +78,7 @@ class IntegrationSample extends NetSample {
     this._wireMouse();
     this._buildChatPanel(session);
     this._buildVoiceButton(session);
+    this._buildSpatialHud(session);
   }
 
   // Track the canvas-relative cursor in NDC and our own mousedown
@@ -440,17 +447,120 @@ class IntegrationSample extends NetSample {
   }
 
   private _appendLine(p: ChatPayload, self: boolean) {
-    if (!this._log) return;
-    const line = document.createElement('div');
-    line.style.padding = '2px 0';
-    const who = document.createElement('span');
-    who.textContent = self ? 'you' : p.from;
-    who.style.color = self ? '#9177c7' : '#7ac0ff';
-    who.style.fontWeight = '600';
-    line.appendChild(who);
-    line.appendChild(document.createTextNode(`: ${p.text}`));
-    this._log.appendChild(line);
-    this._log.scrollTop = this._log.scrollHeight;
+    if (this._log) {
+      const line = document.createElement('div');
+      line.style.padding = '2px 0';
+      const who = document.createElement('span');
+      who.textContent = self ? 'you' : p.from;
+      who.style.color = self ? '#9177c7' : '#7ac0ff';
+      who.style.fontWeight = '600';
+      line.appendChild(who);
+      line.appendChild(document.createTextNode(`: ${p.text}`));
+      this._log.appendChild(line);
+      this._log.scrollTop = this._log.scrollHeight;
+    }
+    this._appendSpatialLine(`${self ? 'you' : p.from}: ${p.text}`);
+  }
+
+  private _appendSpatialLine(text: string) {
+    if (!this._spatialLog) return;
+    this._spatialLogLines.push(text);
+    if (this._spatialLogLines.length > 12) this._spatialLogLines.shift();
+    this._spatialLog.setText(this._spatialLogLines.join('\n'));
+  }
+
+  // ---- Spatial HUD (visible in immersive XR) -----------------------------
+
+  private _buildSpatialHud(session: NonNullable<this['net']['session']>) {
+    const panel = new xb.SpatialPanel({
+      width: 1.4,
+      height: 1.0,
+      backgroundColor: '#1a1a2add',
+    });
+    const grid = panel.addGrid();
+
+    grid.addRow({weight: 0.1}).addText({
+      text: `💬 ${this._displayName}`,
+      fontSize: 0.05,
+      fontColor: '#bfa9ff',
+      textAlign: 'center',
+    });
+
+    this._spatialLog = new xb.ScrollingTroikaTextView({
+      text: '(start typing on the keyboard below to chat)',
+      fontSize: 0.04,
+      textAlign: 'left',
+    });
+    grid.addRow({weight: 0.55}).add(this._spatialLog);
+
+    this._spatialDraft = grid.addRow({weight: 0.13}).addText({
+      text: '› ',
+      fontSize: 0.04,
+      fontColor: '#7ac0ff',
+      textAlign: 'left',
+    });
+
+    this._spatialVoiceBtn = grid.addRow({weight: 0.22}).addTextButton({
+      text: '🎙️ Enable voice',
+      fontColor: '#ffffff',
+      backgroundColor: '#9177c7',
+      fontSize: 0.18,
+    });
+    this._spatialVoiceBtn.onTriggered = () => this._toggleVoice(session);
+
+    panel.position.set(-1.2, 1.5, -1.5);
+    panel.rotation.y = Math.PI / 8;
+    this.add(panel);
+
+    this._buildKeyboard(session);
+  }
+
+  private _buildKeyboard(session: NonNullable<this['net']['session']>) {
+    // Subclass to override init() (which would otherwise reset the
+    // keyboard's transform to its default position above the user).
+    class PositionedKeyboard extends Keyboard {
+      override init(): void {
+        super.init();
+        const sub = (this as unknown as {subspace: xb.SpatialPanel}).subspace;
+        sub.position.set(-0.7, 0.7, -0.7);
+        sub.scale.setScalar(0.6);
+        sub.rotation.set(-Math.PI / 6, 0, 0);
+      }
+    }
+    const keyboard = new PositionedKeyboard();
+    this._keyboard = keyboard;
+    xb.add(keyboard);
+    keyboard.onTextChanged = (text: string) => {
+      this._spatialDraft?.setText(`› ${text}`);
+    };
+    keyboard.onEnterPressed = (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      const payload: ChatPayload = {
+        from: this._displayName,
+        text: trimmed,
+        ts: Date.now(),
+      };
+      session.events.emit('chat-message', payload);
+      this._appendLine(payload, true);
+      keyboard.clearText();
+    };
+  }
+
+  private async _toggleVoice(session: NonNullable<this['net']['session']>) {
+    if (this._voiceOn) {
+      session.voice.disable();
+      this._voiceOn = false;
+      this._spatialVoiceBtn?.setText('🎙️ Enable voice');
+    } else {
+      try {
+        await session.voice.enable(session.transport.remotePeerIds);
+        this._voiceOn = true;
+        this._spatialVoiceBtn?.setText('🔇 Disable voice');
+      } catch (err) {
+        this._appendSpatialLine(`voice error: ${(err as Error).message}`);
+      }
+    }
   }
 
   // ---- Voice button ------------------------------------------------------
@@ -471,19 +581,8 @@ class IntegrationSample extends NetSample {
     } as Partial<CSSStyleDeclaration>);
     (this._chatPanel ?? document.body).appendChild(btn);
     btn.addEventListener('click', async () => {
-      if (this._voiceOn) {
-        session.voice.disable();
-        this._voiceOn = false;
-        btn.textContent = '🎙️ Enable voice';
-      } else {
-        try {
-          await session.voice.enable(session.transport.remotePeerIds);
-          this._voiceOn = true;
-          btn.textContent = '🔇 Disable voice';
-        } catch (err) {
-          alert(`Could not start voice: ${(err as Error).message}`);
-        }
-      }
+      await this._toggleVoice(session);
+      btn.textContent = this._voiceOn ? '🔇 Disable voice' : '🎙️ Enable voice';
     });
   }
 }

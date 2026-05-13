@@ -18,6 +18,8 @@ import {NetSample} from '../../Sample';
 class VoiceSample extends NetSample {
   private _voiceOn = false;
   private _btn?: HTMLButtonElement;
+  private _spatialVoiceBtn?: xb.TextButton;
+  private _spatialStatus?: xb.TextView;
   private _keys = new Set<string>();
   private _yaw = 0;
   private _pitch = 0;
@@ -125,21 +127,66 @@ class VoiceSample extends NetSample {
       zIndex: '999',
     } as Partial<CSSStyleDeclaration>);
     document.body.appendChild(this._btn);
-    this._btn.addEventListener('click', async () => {
-      if (this._voiceOn) {
-        session.voice.disable();
-        this._voiceOn = false;
-        this._btn!.textContent = '🎙️ Enable voice';
-      } else {
-        try {
-          await session.voice.enable(session.transport.remotePeerIds);
-          this._voiceOn = true;
-          this._btn!.textContent = '🔇 Disable voice';
-        } catch (err) {
-          alert(`Could not start voice: ${(err as Error).message}`);
-        }
+    this._btn.addEventListener('click', () => this._toggleVoice(session));
+
+    this._buildSpatialHud(session);
+  }
+
+  private async _toggleVoice(session: NonNullable<this['net']['session']>) {
+    if (this._voiceOn) {
+      session.voice.disable();
+      this._voiceOn = false;
+      if (this._btn) this._btn.textContent = '🎙️ Enable voice';
+      this._spatialVoiceBtn?.setText('🎙️ Enable voice');
+      this._spatialStatus?.setText('voice: off');
+    } else {
+      try {
+        await session.voice.enable(session.transport.remotePeerIds);
+        this._voiceOn = true;
+        if (this._btn) this._btn.textContent = '🔇 Disable voice';
+        this._spatialVoiceBtn?.setText('🔇 Disable voice');
+        this._spatialStatus?.setText('voice: on');
+      } catch (err) {
+        const msg = (err as Error).message;
+        alert(`Could not start voice: ${msg}`);
+        this._spatialStatus?.setText(`voice error: ${msg}`);
       }
+    }
+  }
+
+  private _buildSpatialHud(session: NonNullable<this['net']['session']>) {
+    const panel = new xb.SpatialPanel({
+      width: 1.0,
+      height: 0.5,
+      backgroundColor: '#1a1a2add',
     });
+    const grid = panel.addGrid();
+
+    grid.addRow({weight: 0.25}).addText({
+      text: '🎙️ Spatial voice',
+      fontSize: 0.06,
+      fontColor: '#bfa9ff',
+      textAlign: 'center',
+    });
+
+    this._spatialStatus = grid.addRow({weight: 0.25}).addText({
+      text: 'voice: off',
+      fontSize: 0.05,
+      fontColor: '#7ac0ff',
+      textAlign: 'center',
+    });
+
+    this._spatialVoiceBtn = grid.addRow({weight: 0.5}).addTextButton({
+      text: '🎙️ Enable voice',
+      fontColor: '#ffffff',
+      backgroundColor: '#9177c7',
+      fontSize: 0.18,
+    });
+    this._spatialVoiceBtn.onTriggered = () => this._toggleVoice(session);
+
+    panel.position.set(-1.0, 1.5, -1.4);
+    panel.rotation.y = Math.PI / 8;
+    this.add(panel);
   }
   private _applyLook() {
     const cam = this._moveCamera;

@@ -131,7 +131,11 @@ describe('NetSession late-join state-reset regression', () => {
     transport.receive('existing-peer', {
       type: 'netobject.snapshot',
       objects: [
-        {id: 'cube-1', xform: [5, 6, 7, 0, 0, 0, 1, 1, 1, 1], ownerId: 'existing-peer'},
+        {
+          id: 'cube-1',
+          xform: [5, 6, 7, 0, 0, 0, 1, 1, 1, 1],
+          ownerId: 'existing-peer',
+        },
       ],
     } as NetObjectSnapshotMessage);
 

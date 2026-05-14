@@ -128,9 +128,11 @@ mostly interact with `session.events`, `session.users`, and
 
 ### NetUser
 
-Per-peer state — `peerId`, `displayName`, `avatar` (a
-`RemoteUserAvatar` `THREE.Group`), and `lastSeenMs`. Iterate via
-`session.users`.
+Per-peer state — `peerId`, `displayName`, `role` (`'user' | 'device' |
+'agent'`, self-reported), `avatar` (a `RemoteUserAvatar` `THREE.Group`),
+and `lastSeenMs`. Iterate via `session.users`. Pass `role` to
+`joinRoom({role: 'agent'})` to label the local peer; defaults to
+`'user'`.
 
 ### Transport
 

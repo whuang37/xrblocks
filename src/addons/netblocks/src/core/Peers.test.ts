@@ -120,4 +120,21 @@ describe('Peers facade', () => {
   it('net.send throws before joinRoom', () => {
     expect(() => net.send('chat', 'hi')).toThrow(/joinRoom/);
   });
+
+  it('propagates role from local opts and remote hello', async () => {
+    const transport = new FakeTransport();
+    await net.joinRoom('room', {transport, role: 'agent'});
+    expect(net.user.role).toBe('agent');
+
+    transport.fakePeerJoin('peer-d');
+    transport.receive('peer-d', {
+      type: 'hello',
+      protocol: NET_PROTOCOL_VERSION,
+      displayName: 'TV',
+      role: 'device',
+      capabilities: {pose: true, voice: false, netobject: true},
+    });
+    const remote = net.peers.list()[0];
+    expect(remote.role).toBe('device');
+  });
 });

@@ -29,6 +29,7 @@ import {
   NetMessage,
   NetObjectSnapshotMessage,
   PeerCapabilities,
+  PeerRole,
   RpcMessage,
   VoiceSignalMessage,
   WelcomeMessage,
@@ -55,6 +56,12 @@ import {VoiceChat} from './voice/VoiceChat';
 export interface NetSessionOptions {
   /** Display name announced to other peers. */
   displayName?: string;
+  /**
+   * Coarse role announced to other peers. Defaults to `'user'`. Use
+   * `'agent'` for autonomous bots and `'device'` for shared/headless
+   * room participants (TVs, kiosks, etc).
+   */
+  role?: PeerRole;
   /** Override the presence broadcast frequency in Hz (default: 20). */
   presenceHz?: number;
   /** Override the netobject broadcast frequency in Hz (default: 20). */
@@ -106,7 +113,7 @@ export class NetSession extends EventTarget {
   private _opts: Required<
     Pick<
       NetSessionOptions,
-      'presenceHz' | 'netObjectHz' | 'netObjectInterpRate' | 'voice'
+      'presenceHz' | 'netObjectHz' | 'netObjectInterpRate' | 'voice' | 'role'
     >
   > &
     NetSessionOptions;
@@ -132,6 +139,7 @@ export class NetSession extends EventTarget {
       netObjectInterpRate: opts.netObjectInterpRate ?? 12,
       voice: opts.voice ?? false,
       displayName: opts.displayName,
+      role: opts.role ?? 'user',
     };
     this.presence = new PresenceBroadcaster(
       (msg) => this._sendNet(msg),
@@ -176,6 +184,11 @@ export class NetSession extends EventTarget {
     return this._opts.displayName;
   }
 
+  /** Local self-reported role. Defaults to `'user'`. */
+  get role(): PeerRole {
+    return this._opts.role;
+  }
+
   get users(): ReadonlyMap<string, NetUser> {
     return this._users;
   }
@@ -199,6 +212,7 @@ export class NetSession extends EventTarget {
       type: 'hello',
       protocol: NET_PROTOCOL_VERSION,
       displayName: this._opts.displayName,
+      role: this._opts.role,
       capabilities: this._capabilities,
     };
     this._sendNet(hello);
@@ -361,6 +375,7 @@ export class NetSession extends EventTarget {
       type: 'hello',
       protocol: NET_PROTOCOL_VERSION,
       displayName: this._opts.displayName,
+      role: this._opts.role,
       capabilities: this._capabilities,
       to: peerId,
     } as HelloMessage);
@@ -409,9 +424,16 @@ export class NetSession extends EventTarget {
     if (!user) {
       const initialDisplayName =
         msg.type === 'hello' ? msg.displayName : undefined;
+      const initialRole: PeerRole | undefined =
+        msg.type === 'hello' ? msg.role : undefined;
       const initialCapabilities =
         msg.type === 'hello' ? msg.capabilities : {...DEFAULT_CAPABILITIES};
-      user = new NetUser(msg.from, initialCapabilities, initialDisplayName);
+      user = new NetUser(
+        msg.from,
+        initialCapabilities,
+        initialDisplayName,
+        initialRole
+      );
       user.avatar.displayName = user.displayName;
       this._users.set(msg.from, user);
       this._root.add(user.avatar);
@@ -442,6 +464,7 @@ export class NetSession extends EventTarget {
     switch (msg.type) {
       case 'hello': {
         user.displayName = msg.displayName ?? user.displayName;
+        if (msg.role) user.role = msg.role;
         user.capabilities = msg.capabilities;
         user.avatar.displayName = user.displayName;
         // Flush any deferred user-join now that we have the displayName.
@@ -460,6 +483,7 @@ export class NetSession extends EventTarget {
           peers: [...this._users.values()].map((u) => ({
             id: u.peerId,
             displayName: u.displayName,
+            role: u.role,
             capabilities: u.capabilities,
           })),
         } as WelcomeMessage);
@@ -495,7 +519,7 @@ export class NetSession extends EventTarget {
           if (p.id === this.localPeerId) continue;
           let other = this._users.get(p.id);
           if (!other) {
-            other = new NetUser(p.id, p.capabilities, p.displayName);
+            other = new NetUser(p.id, p.capabilities, p.displayName, p.role);
             this._users.set(p.id, other);
             this._root.add(other.avatar);
             this.dispatchEvent(
@@ -505,6 +529,7 @@ export class NetSession extends EventTarget {
             );
           } else {
             other.displayName = p.displayName ?? other.displayName;
+            if (p.role) other.role = p.role;
             other.capabilities = p.capabilities;
             other.avatar.displayName = other.displayName;
           }

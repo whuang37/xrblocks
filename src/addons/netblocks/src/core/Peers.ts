@@ -7,6 +7,7 @@
 import {NetCore} from './NetCore';
 import {NetSession, UserEventDetail} from './NetSession';
 import {NetUser} from './NetUser';
+import {PeerRole} from './codec/MessageCodec';
 
 export type PeerEvent = 'join' | 'leave';
 export type PeerListener = (user: NetUser) => void;
@@ -114,5 +115,10 @@ export class LocalUser {
   /** The local display name, or undefined when not joined to a room. */
   get displayName(): string | undefined {
     return this._net.session?.displayName;
+  }
+
+  /** The local self-reported role, or undefined when not joined. */
+  get role(): PeerRole | undefined {
+    return this._net.session?.role;
   }
 }

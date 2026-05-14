@@ -35,10 +35,19 @@ export interface BaseMessage {
   ts?: number;
 }
 
+/**
+ * Coarse role label for a peer. Cooperative metadata only — like
+ * `displayName`, peers self-report this and netblocks does not verify
+ * it. Useful for UI ("show only humans", "filter agents") and for
+ * routing (e.g. only forward chat to other `'user'` peers).
+ */
+export type PeerRole = 'user' | 'device' | 'agent';
+
 export interface HelloMessage extends BaseMessage {
   type: 'hello';
   protocol: number;
   displayName?: string;
+  role?: PeerRole;
   capabilities: PeerCapabilities;
 }
 
@@ -47,6 +56,7 @@ export interface WelcomeMessage extends BaseMessage {
   peers: Array<{
     id: string;
     displayName?: string;
+    role?: PeerRole;
     capabilities: PeerCapabilities;
   }>;
 }
@@ -178,12 +188,14 @@ export function decodeMessage(
 
 export function makeHello(
   displayName: string | undefined,
-  capabilities: PeerCapabilities
+  capabilities: PeerCapabilities,
+  role?: PeerRole
 ): HelloMessage {
   return {
     type: 'hello',
     protocol: NET_PROTOCOL_VERSION,
     displayName,
+    role,
     capabilities,
   };
 }

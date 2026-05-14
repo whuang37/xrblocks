@@ -7,12 +7,18 @@
  * place children in 3D space, read `lastSeenMs` to detect stale peers,
  * subscribe to `displayName` changes, etc.
  */
-import {PeerCapabilities} from './codec/MessageCodec';
+import {PeerCapabilities, PeerRole} from './codec/MessageCodec';
 import {RemoteUserAvatar} from './presence/RemoteUserAvatar';
 
 export class NetUser {
   readonly peerId: string;
   displayName?: string;
+  /**
+   * Self-reported peer role. Cooperative metadata only — do not trust
+   * for authority decisions. Defaults to `'user'` when the remote did
+   * not send one.
+   */
+  role: PeerRole;
   capabilities: PeerCapabilities;
   /** Three.js avatar — also a child of `xb.core.scene` while the peer is connected. */
   readonly avatar: RemoteUserAvatar;
@@ -22,10 +28,12 @@ export class NetUser {
   constructor(
     peerId: string,
     capabilities: PeerCapabilities,
-    displayName?: string
+    displayName?: string,
+    role: PeerRole = 'user'
   ) {
     this.peerId = peerId;
     this.displayName = displayName;
+    this.role = role;
     this.capabilities = capabilities;
     this.lastSeenMs = performance.now();
     this.avatar = new RemoteUserAvatar({peerId, displayName});

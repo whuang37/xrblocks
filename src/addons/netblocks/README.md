@@ -107,7 +107,13 @@ for a fully wired example.
 ### NetCore
 
 The single facade you instantiate per app. Holds the active `NetSession`
-and exposes `joinRoom`, `leaveRoom`, and `update`.
+and exposes `joinRoom`, `leaveRoom`, and `update`. Also exposes two
+session-spanning shortcuts:
+
+- `xb.core.net.peers` — `list()`, `remoteUsers`, `on('join'|'leave', cb)`.
+  Subscriptions persist across rejoins.
+- `xb.core.net.user` — local network identity (`peerId`, `displayName`).
+  Distinct from `xb.user`, which is the local XR input device.
 
 ### NetSession
 

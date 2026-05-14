@@ -171,6 +171,11 @@ export class NetSession extends EventTarget {
     return this.transport.localPeerId;
   }
 
+  /** Local display name, as supplied via `NetSessionOptions.displayName`. */
+  get displayName(): string | undefined {
+    return this._opts.displayName;
+  }
+
   get users(): ReadonlyMap<string, NetUser> {
     return this._users;
   }

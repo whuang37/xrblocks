@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 
+import {LocalUser, Peers} from './Peers';
 import {NetSession, NetSessionOptions} from './NetSession';
 import {Transport} from './transport/Transport';
 
@@ -35,6 +36,13 @@ export interface JoinRoomOptions extends NetSessionOptions {
 export class NetCore {
   /** The currently active session, or undefined when not joined. */
   session?: NetSession;
+  /**
+   * Lazy facade over the connected peer roster. Safe to read and subscribe
+   * on before `joinRoom()`; subscriptions persist across rejoins.
+   */
+  readonly peers: Peers;
+  /** The local network identity (peerId, displayName). */
+  readonly user: LocalUser;
   private _root: THREE.Object3D;
 
   /**
@@ -44,6 +52,8 @@ export class NetCore {
    */
   constructor(root: THREE.Object3D) {
     this._root = root;
+    this.peers = new Peers(this);
+    this.user = new LocalUser(this);
   }
 
   /** Connect to a room with the given transport. Disposes any prior session. */
@@ -51,6 +61,7 @@ export class NetCore {
     if (this.session) this.leaveRoom();
     const {transport, ...sessionOpts} = opts;
     this.session = new NetSession(transport, this._root, sessionOpts);
+    this.peers._onSessionChanged();
     await this.session.open(roomId);
     return this.session;
   }
@@ -59,6 +70,7 @@ export class NetCore {
   leaveRoom(): void {
     this.session?.close();
     this.session = undefined;
+    this.peers._onSessionChanged();
   }
 
   /** Per-frame tick. Driven automatically when registered via `enableNet()`. */

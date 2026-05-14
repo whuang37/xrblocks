@@ -2,6 +2,7 @@ export * from './enableNet';
 export * from './NetCore';
 export * from './NetSession';
 export * from './NetUser';
+export * from './Peers';
 export * from './codec/MessageCodec';
 export * from './codec/PoseCodec';
 export * from './constants/NetConstants';

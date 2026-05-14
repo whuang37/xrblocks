@@ -9,8 +9,9 @@ action.
 
 - **presence** — `basic/presence/index.html`
   Minimal demo. Shows how to join a room with `WebRTCTransport` (the
-  default for all basic samples) and how each peer's head + hands appear
-  as a default avatar.
+  default for all basic samples) and how each peer's head appears as a
+  default avatar (hands appear too when a peer is in XR with hand
+  tracking).
 
 - **objects** — `basic/objects/index.html`
   Demonstrates `NetObject`. A shared cube hovers in the middle of the room;

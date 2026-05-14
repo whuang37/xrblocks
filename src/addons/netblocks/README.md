@@ -5,7 +5,8 @@
 `netblocks` is a batteries-included addon that turns any xrblocks app into a
 shared, real-time XR experience. It gives you:
 
-- 👥 **Presence** — see other users' heads and hands as live avatars,
+- 👥 **Presence** — see other users' heads (and hands when they're in XR
+  with hand tracking) as live avatars,
   with an SDF name label floating above each one.
 - 📦 **Shared objects** — `NetObject` syncs `position`/`quaternion`/`scale`
   with cooperative ownership (claim on grab, release on drop).
@@ -58,8 +59,9 @@ xb.init();
 ```
 
 Open the same page in two browser tabs and you'll instantly see the other
-tab's head and hands rendered as a colored ball-and-stick avatar with a
-name label hovering above it.
+tab's head rendered as a colored ball-and-stick avatar with a name label
+hovering above it. Open the page in XR with hand tracking and the avatar
+also gets two stick-figure hands.
 
 ---
 
@@ -200,7 +202,8 @@ envelope. See `src/core/codec/PoseCodec.ts` for the byte layout.
 
 See [`samples/SAMPLES.md`](./samples/SAMPLES.md). Highlights:
 
-- `samples/basic/presence` — see remote heads + hands.
+- `samples/basic/presence` — see remote heads (and hands in XR with hand
+  tracking).
 - `samples/basic/objects` — drag a shared cube; ownership transfers on grab.
 - `samples/basic/events` — broadcast emoji bursts via the RPC bus.
 - `samples/basic/voice` — push-to-talk spatial voice chat. WASD/mouse

@@ -93,13 +93,16 @@ export class DepthMesh extends MeshScript {
         uOpacity: {value: options.opacity},
         uDebug: {value: options.showDebugTexture ? 1.0 : 0.0},
         uLightDirection: {value: new THREE.Vector3(1.0, 1.0, 1.0).normalize()},
-        uUsingFloatDepth: {value: depthOptions.useFloat32},
+        uUsingFloatDepth: {
+          value: depthOptions.dataFormatPreference[0] === 'float32',
+        },
+        uNormDepthBufferFromNormView: {value: new THREE.Matrix4()},
       };
       material = new THREE.ShaderMaterial({
         uniforms: uniforms,
         vertexShader: DepthMeshTexturedShader.vertexShader,
         fragmentShader: DepthMeshTexturedShader.fragmentShader,
-        side: THREE.FrontSide,
+        side: THREE.DoubleSide,
         transparent: true,
       });
     } else {
@@ -146,7 +149,8 @@ export class DepthMesh extends MeshScript {
    */
   updateDepth(
     depthData: Readonly<XRCPUDepthInformation>,
-    projectionMatrixInverse: Readonly<THREE.Matrix4>
+    projectionMatrixInverse: Readonly<THREE.Matrix4>,
+    depthDataFormat: XRDepthDataFormat
   ) {
     this.projectionMatrixInverse = projectionMatrixInverse;
 
@@ -154,10 +158,10 @@ export class DepthMesh extends MeshScript {
     this.maxDepth = 0;
 
     if (this.options.updateFullResolutionGeometry) {
-      this.updateFullResolutionGeometry(depthData);
+      this.updateFullResolutionGeometry(depthData, depthDataFormat);
     }
     if (this.downsampledGeometry) {
-      this.updateGeometry(depthData, this.downsampledGeometry);
+      this.updateGeometry(depthData, this.downsampledGeometry, depthDataFormat);
     }
 
     this.minDepthPrev = this.minDepth;
@@ -166,6 +170,15 @@ export class DepthMesh extends MeshScript {
 
     const depthTextureLeft = this.depthTextures?.get(0);
     if (depthTextureLeft && this.depthTextureMaterialUniforms) {
+      this.depthTextureMaterialUniforms.uUsingFloatDepth.value =
+        depthDataFormat === 'float32';
+      if (depthData.normDepthBufferFromNormView) {
+        this.depthTextureMaterialUniforms.uNormDepthBufferFromNormView.value.fromArray(
+          depthData.normDepthBufferFromNormView.matrix
+        );
+      } else {
+        this.depthTextureMaterialUniforms.uNormDepthBufferFromNormView.value.identity();
+      }
       const isTextureArray = depthTextureLeft instanceof THREE.ExternalTexture;
       this.depthTextureMaterialUniforms.uIsTextureArray.value = isTextureArray
         ? 1.0
@@ -203,9 +216,14 @@ export class DepthMesh extends MeshScript {
 
   updateGPUDepth(
     depthData: Readonly<XRWebGLDepthInformation>,
-    projectionMatrixInverse: Readonly<THREE.Matrix4>
+    projectionMatrixInverse: Readonly<THREE.Matrix4>,
+    depthDataFormat: XRDepthDataFormat
   ) {
-    this.updateDepth(this.convertGPUToGPU(depthData), projectionMatrixInverse);
+    this.updateDepth(
+      this.convertGPUToGPU(depthData),
+      projectionMatrixInverse,
+      depthDataFormat
+    );
   }
 
   convertGPUToGPU(depthData: Readonly<XRWebGLDepthInformation>) {
@@ -304,8 +322,11 @@ export class DepthMesh extends MeshScript {
    * Method to manually update the full resolution geometry.
    * Only needed if options.updateFullResolutionGeometry is false.
    */
-  updateFullResolutionGeometry(depthData: XRCPUDepthInformation) {
-    this.updateGeometry(depthData, this.geometry);
+  updateFullResolutionGeometry(
+    depthData: XRCPUDepthInformation,
+    depthDataFormat: XRDepthDataFormat
+  ) {
+    this.updateGeometry(depthData, this.geometry, depthDataFormat);
   }
 
   /**
@@ -313,21 +334,42 @@ export class DepthMesh extends MeshScript {
    */
   private updateGeometry(
     depthData: XRCPUDepthInformation,
-    geometry: THREE.BufferGeometry
+    geometry: THREE.BufferGeometry,
+    depthDataFormat: XRDepthDataFormat
   ) {
     const width = depthData.width;
     const height = depthData.height;
-    const depthArray = this.depthOptions.useFloat32
-      ? new Float32Array(depthData.data)
-      : new Uint16Array(depthData.data);
+    const depthArray =
+      depthDataFormat === 'float32'
+        ? new Float32Array(depthData.data)
+        : new Uint16Array(depthData.data);
     const vertexPosition = new THREE.Vector3();
+    const normViewCoord = new THREE.Vector3();
+    const normDepthBufferFromNormView = depthData.normDepthBufferFromNormView
+      ? new THREE.Matrix4().fromArray(
+          depthData.normDepthBufferFromNormView.matrix
+        )
+      : new THREE.Matrix4().identity();
+
     for (let i = 0; i < geometry.attributes.position.count; ++i) {
       const u = geometry.attributes.uv.array[2 * i];
       const v = geometry.attributes.uv.array[2 * i + 1];
 
+      let sampleU = u;
+      let sampleV = v;
+
+      if (depthData.normDepthBufferFromNormView) {
+        normViewCoord.set(u, 1.0 - v, 0);
+        normViewCoord.applyMatrix4(normDepthBufferFromNormView);
+        sampleU = normViewCoord.x;
+        sampleV = normViewCoord.y;
+      } else {
+        sampleV = 1.0 - v;
+      }
+
       // Grabs the nearest for now.
-      const depthX = Math.round(clamp(u * (width - 1), 0, width - 1));
-      const depthY = Math.round(clamp((1.0 - v) * (height - 1), 0, height - 1));
+      const depthX = Math.round(clamp(sampleU * (width - 1), 0, width - 1));
+      const depthY = Math.round(clamp(sampleV * (height - 1), 0, height - 1));
       const rawDepth = depthArray[depthY * width + depthX];
       let depth = depthData.rawValueToMeters * rawDepth;
 

@@ -79,7 +79,12 @@ const externalPackages = [
   'rapier3d',
 ];
 
-const xrblocksPackages = ['xrblocks', 'uiblocks', /xrblocks\/addons\//];
+const xrblocksPackages = [
+  'xrblocks',
+  'uiblocks',
+  'netblocks',
+  /xrblocks\/addons\//,
+];
 
 export default [
   {
@@ -132,7 +137,12 @@ export default [
   {
     input: Object.fromEntries(
       globSync('src/addons/**/*.{js,ts}', {
-        ignore: ['src/addons/**/cli/**', 'src/addons/**/*.d.ts'],
+        ignore: [
+          'src/addons/**/cli/**',
+          'src/addons/**/server/**',
+          'src/addons/**/*.d.ts',
+          'src/addons/**/*.test.{js,ts}',
+        ],
       }).map((file) => [
         // This removes `src/` as well as the file extension from
         // each file, so e.g. src/nested/foo.js becomes nested/foo

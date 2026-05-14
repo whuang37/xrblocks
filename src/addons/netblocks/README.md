@@ -65,6 +65,53 @@ also gets two stick-figure hands.
 
 ---
 
+## Porting an existing xrblocks sample to multiplayer
+
+Adding netblocks to an existing scene is small. The pattern is:
+
+1. Construct a `NetCore` as a child of your root `xb.Script`.
+2. `await net.joinRoom(...)` in `init()`.
+3. Call `net.update(t, frame)` from your `update()`.
+
+That's enough to get remote head/hand avatars rendered into your scene. From
+there you wrap any `Object3D` you want shared in a `NetObject` and add it to
+`net.session.netObjects`, and use `net.session.events` for chat / cursor
+pings / button presses.
+
+Concretely, taking the standard xb starter:
+
+```diff
+ import * as xb from 'xrblocks';
++import {NetCore, WebRTCTransport} from 'xrblocks/addons/netblocks/src/index.js';
+
+ class App extends xb.Script {
+   cube = new THREE.Mesh(/* ... */);
++  net = new NetCore(this);
++  sharedCube = new NetObject({id: 'cube', object: this.cube});
+
+   async init() {
+     this.add(this.cube);
++    await this.net.joinRoom('demo', {
++      transport: new WebRTCTransport(),
++      displayName: 'Alice',
++    });
++    this.net.session?.netObjects.add(this.sharedCube);
+   }
+
+-  update(t, frame) {}
++  update(t, frame) {
++    this.net.update(t, frame);
++  }
+ }
+```
+
+That's it — open the page in two tabs and dragging the cube in one tab moves
+it in the other. Add `events.on('chat', cb)` for typed RPC, or
+`net.session?.voice.enable()` for spatial voice. See `samples/integration/`
+for a fully wired example.
+
+---
+
 ## Concepts
 
 ### NetCore

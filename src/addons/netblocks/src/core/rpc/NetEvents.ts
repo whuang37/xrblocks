@@ -67,3 +67,46 @@ export class NetEvents {
     }
   }
 }
+
+/**
+ * Strongly-typed view over a NetEvents instance. Each topic in `TEventMap`
+ * declares its payload shape; `on` / `emit` / `emitTo` then infer the
+ * payload type from the topic name.
+ *
+ * The runtime is the same NetEvents — this is purely a TypeScript wrapper:
+ *
+ * ```ts
+ * type Events = {
+ *   chat: {text: string};
+ *   ping: number;
+ * };
+ * const e = typedEvents<Events>(session.events);
+ * e.on('chat', (p) => p.text);   // p is {text: string}
+ * e.emit('ping', 42);            // payload must be number
+ * ```
+ */
+export interface TypedNetEvents<TEventMap extends Record<string, unknown>> {
+  on<K extends keyof TEventMap & string>(
+    topic: K,
+    handler: (payload: TEventMap[K], fromPeerId: string) => void
+  ): () => void;
+  off<K extends keyof TEventMap & string>(
+    topic: K,
+    handler: (payload: TEventMap[K], fromPeerId: string) => void
+  ): void;
+  emit<K extends keyof TEventMap & string>(
+    topic: K,
+    payload: TEventMap[K]
+  ): void;
+  emitTo<K extends keyof TEventMap & string>(
+    targetPeerId: string,
+    topic: K,
+    payload: TEventMap[K]
+  ): void;
+}
+
+export function typedEvents<TEventMap extends Record<string, unknown>>(
+  events: NetEvents
+): TypedNetEvents<TEventMap> {
+  return events as unknown as TypedNetEvents<TEventMap>;
+}

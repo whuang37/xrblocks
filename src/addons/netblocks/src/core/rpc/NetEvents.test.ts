@@ -2,7 +2,7 @@ import {describe, expect, it, vi} from 'vitest';
 
 import {NetMessage, RpcMessage} from '../codec/MessageCodec';
 
-import {NetEvents} from './NetEvents';
+import {NetEvents, typedEvents} from './NetEvents';
 
 function makeEvents() {
   const sent: NetMessage[] = [];
@@ -109,5 +109,35 @@ describe('NetEvents', () => {
     expect(survivor).toHaveBeenCalledWith('x', 'peer-A');
     expect(errorSpy).toHaveBeenCalled();
     errorSpy.mockRestore();
+  });
+});
+
+describe('typedEvents', () => {
+  it('routes typed calls through the underlying NetEvents instance', () => {
+    type EventMap = {
+      chat: {text: string};
+      ping: number;
+    };
+    const {events, sent} = makeEvents();
+    const typed = typedEvents<EventMap>(events);
+
+    const chatHandler = vi.fn();
+    typed.on('chat', chatHandler);
+
+    typed.emit('ping', 7);
+    typed.emitTo('peer-B', 'chat', {text: 'hi'});
+
+    expect(sent).toEqual([
+      {type: 'rpc', topic: 'ping', payload: 7},
+      {type: 'rpc', topic: 'chat', payload: {text: 'hi'}, to: 'peer-B'},
+    ]);
+
+    events._dispatch({
+      type: 'rpc',
+      topic: 'chat',
+      payload: {text: 'yo'},
+      from: 'peer-A',
+    } as RpcMessage);
+    expect(chatHandler).toHaveBeenCalledWith({text: 'yo'}, 'peer-A');
   });
 });

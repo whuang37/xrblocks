@@ -108,7 +108,17 @@ export class WebXRSessionManager extends THREE.EventDispatcher<WebXRSessionManag
       .finally(() => {
         this.waitingForXRSession = false;
       })
-      .then(this.onSessionStartedInternal.bind(this));
+      .then(this.onSessionStartedInternal.bind(this))
+      .catch((err) => {
+        console.error(
+          'Error requesting session',
+          err,
+          'mode:',
+          this.mode,
+          'sesionOptions:',
+          this.sessionOptions
+        );
+      });
   }
 
   /**

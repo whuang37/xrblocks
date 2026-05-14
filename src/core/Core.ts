@@ -275,10 +275,8 @@ export class Core {
       webXRRequiredFeatures.push('depth-sensing');
       webXRRequiredFeatures.push('local-floor');
       this.webXRSettings.depthSensing = {
-        usagePreference: [],
-        dataFormatPreference: [
-          this.options.depth.useFloat32 ? 'float32' : 'luminance-alpha',
-        ],
+        usagePreference: options.depth.usagePreference,
+        dataFormatPreference: options.depth.dataFormatPreference,
         depthTypeRequest: options.depth.depthTypeRequest,
         matchDepthView: options.depth.matchDepthView,
       };

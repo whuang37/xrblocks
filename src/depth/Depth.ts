@@ -262,27 +262,33 @@ export class Depth {
     );
   }
 
-  updateCPUDepthData(depthData: XRCPUDepthInformation, viewId = 0) {
+  updateCPUDepthData(
+    depthData: XRCPUDepthInformation,
+    viewId: number,
+    depthDataFormat: XRDepthDataFormat
+  ) {
     this.cpuDepthData[viewId] = depthData;
     this.updateDepthMatrices(depthData, viewId);
 
     // Updates Depth Array.
-    this.depthArray[viewId] = this.options.useFloat32
-      ? new Float32Array(depthData.data)
-      : new Uint16Array(depthData.data);
+    this.depthArray[viewId] =
+      depthDataFormat === 'float32'
+        ? new Float32Array(depthData.data)
+        : new Uint16Array(depthData.data);
     this.width = depthData.width;
     this.height = depthData.height;
 
     // Updates Depth Texture.
     if (this.options.depthTexture.enabled && this.depthTextures) {
-      this.depthTextures.updateData(depthData, viewId);
+      this.depthTextures.updateData(depthData, viewId, depthDataFormat);
     }
 
     if (this.options.depthMesh.enabled && this.depthMesh && viewId == 0) {
       if (this.shouldUpdateDepthMesh()) {
         this.depthMesh.updateDepth(
           depthData,
-          this.depthProjectionInverseMatrices[0]
+          this.depthProjectionInverseMatrices[0],
+          depthDataFormat
         );
       }
       this.depthMesh.updatePose(
@@ -292,7 +298,11 @@ export class Depth {
     }
   }
 
-  updateGPUDepthData(depthData: XRWebGLDepthInformation, viewId = 0) {
+  updateGPUDepthData(
+    depthData: XRWebGLDepthInformation,
+    viewId: number,
+    depthDataFormat: XRDepthDataFormat
+  ) {
     this.gpuDepthData[viewId] = depthData;
     this.updateDepthMatrices(depthData, viewId);
 
@@ -305,15 +315,16 @@ export class Depth {
         : null;
     if (cpuDepth) {
       if (this.depthArray[viewId] == null) {
-        this.depthArray[viewId] = this.options.useFloat32
-          ? new Float32Array(cpuDepth.data)
-          : new Uint16Array(cpuDepth.data);
+        this.depthArray[viewId] =
+          depthDataFormat === 'float32'
+            ? new Float32Array(cpuDepth.data)
+            : new Uint16Array(cpuDepth.data);
         this.width = cpuDepth.width;
         this.height = cpuDepth.height;
       } else {
         // Copies the data from an ArrayBuffer to the existing TypedArray.
         this.depthArray[viewId].set(
-          this.options.useFloat32
+          depthDataFormat === 'float32'
             ? new Float32Array(cpuDepth.data)
             : new Uint16Array(cpuDepth.data)
         );
@@ -330,12 +341,14 @@ export class Depth {
         if (cpuDepth) {
           this.depthMesh.updateDepth(
             cpuDepth,
-            this.depthProjectionInverseMatrices[0]
+            this.depthProjectionInverseMatrices[0],
+            depthDataFormat
           );
         } else {
           this.depthMesh.updateGPUDepth(
             depthData,
-            this.depthProjectionInverseMatrices[0]
+            this.depthProjectionInverseMatrices[0],
+            depthDataFormat
           );
         }
       }
@@ -409,13 +422,21 @@ export class Depth {
             if (!depthData) {
               return;
             }
-            this.updateGPUDepthData(depthData, viewId);
+            this.updateGPUDepthData(
+              depthData,
+              viewId,
+              session.depthDataFormat ?? 'luminance-alpha'
+            );
           } else {
             const depthData = frame.getDepthInformation(view);
             if (!depthData) {
               return;
             }
-            this.updateCPUDepthData(depthData, viewId);
+            this.updateCPUDepthData(
+              depthData,
+              viewId,
+              session.depthDataFormat ?? 'luminance-alpha'
+            );
           }
         }
       } else {

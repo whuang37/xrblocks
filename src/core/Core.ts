@@ -235,6 +235,7 @@ export class Core {
     }
 
     this.options = options;
+    this.scriptsManager.catchExceptions = options.catchScriptExceptions;
 
     // Sets up controllers.
     if (options.controllers.enabled) {
@@ -244,14 +245,14 @@ export class Core {
         options: options,
         renderer: this.renderer,
       });
-      this.input.bindSelectStart(this.scriptsManager.callSelectStartBound);
-      this.input.bindSelectEnd(this.scriptsManager.callSelectEndBound);
-      this.input.bindSelect(this.scriptsManager.callSelectBound);
-      this.input.bindSqueezeStart(this.scriptsManager.callSqueezeStartBound);
-      this.input.bindSqueezeEnd(this.scriptsManager.callSqueezeEndBound);
-      this.input.bindSqueeze(this.scriptsManager.callSqueezeBound);
-      this.input.bindKeyDown(this.scriptsManager.callKeyDownBound);
-      this.input.bindKeyUp(this.scriptsManager.callKeyUpBound);
+      this.input.bindSelectStart(this.scriptsManager.callSelectStart);
+      this.input.bindSelectEnd(this.scriptsManager.callSelectEnd);
+      this.input.bindSelect(this.scriptsManager.callSelect);
+      this.input.bindSqueezeStart(this.scriptsManager.callSqueezeStart);
+      this.input.bindSqueezeEnd(this.scriptsManager.callSqueezeEnd);
+      this.input.bindSqueeze(this.scriptsManager.callSqueeze);
+      this.input.bindKeyDown(this.scriptsManager.callKeyDown);
+      this.input.bindKeyUp(this.scriptsManager.callKeyUp);
     }
 
     // Sets up device camera.
@@ -444,25 +445,19 @@ export class Core {
     this.scriptsManager.syncScriptsWithScene(this.scene);
 
     // Updates reticles and UIs.
-    for (const script of this.scriptsManager.scripts) {
-      script.ux.reset();
-    }
+    this.scriptsManager.resetUX();
     this.input.update();
 
     // Updates scripts with user interactions.
     for (const controller of this.input.controllers) {
       if (controller.userData.selected) {
-        for (const script of this.scriptsManager.scripts) {
-          script.onSelecting({target: controller});
-        }
+        this.scriptsManager.callSelecting(controller);
       }
     }
 
     for (const controller of this.input.controllers) {
       if (controller.userData.squeezing) {
-        for (const script of this.scriptsManager.scripts) {
-          script.onSqueezing({target: controller});
-        }
+        this.scriptsManager.callSqueezing(controller);
       }
     }
 
@@ -470,9 +465,7 @@ export class Core {
     this.waitFrame.onFrame();
 
     // Updates renderings.
-    for (const script of this.scriptsManager.scripts) {
-      script.update(time, frame);
-    }
+    this.scriptsManager.update(time, frame);
 
     this.renderSimulatorAndScene();
     this.screenshotSynthesizer.onAfterRender(
@@ -491,9 +484,7 @@ export class Core {
    */
   private physicsStep() {
     this.physics!.physicsStep();
-    for (const script of this.scriptsManager.scripts) {
-      script.physicsStep();
-    }
+    this.scriptsManager.physicsStep();
   }
 
   /**

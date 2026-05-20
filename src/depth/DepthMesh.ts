@@ -216,16 +216,16 @@ export class DepthMesh extends MeshScript {
 
   updateGPUDepth(
     depthData: Readonly<XRWebGLDepthInformation>,
-    projectionMatrixInverse: Readonly<THREE.Matrix4>,
-    depthDataFormat: XRDepthDataFormat
+    projectionMatrixInverse: Readonly<THREE.Matrix4>
   ) {
     this.updateDepth(
       this.convertGPUToGPU(depthData),
       projectionMatrixInverse,
-      depthDataFormat
+      'float32'
     );
   }
 
+  // Converts unsigned short GPU depth from Quest 3 to float32 CPU depth.
   convertGPUToGPU(depthData: Readonly<XRWebGLDepthInformation>) {
     if (!this.depthTarget) {
       this.depthTarget = new THREE.WebGLRenderTarget(

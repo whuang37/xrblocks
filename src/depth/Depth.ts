@@ -298,14 +298,9 @@ export class Depth {
     }
   }
 
-  updateGPUDepthData(
-    depthData: XRWebGLDepthInformation,
-    viewId: number,
-    depthDataFormat: XRDepthDataFormat
-  ) {
+  updateGPUDepthData(depthData: XRWebGLDepthInformation, viewId: number) {
     this.gpuDepthData[viewId] = depthData;
     this.updateDepthMatrices(depthData, viewId);
-
     // For now, assume that we need cpu depth only if depth mesh is enabled.
     // In the future, add a separate option.
     const needCpuDepth = this.options.depthMesh.enabled;
@@ -314,21 +309,13 @@ export class Depth {
         ? this.depthMesh.convertGPUToGPU(depthData)
         : null;
     if (cpuDepth) {
-      if (this.depthArray[viewId] == null) {
-        this.depthArray[viewId] =
-          depthDataFormat === 'float32'
-            ? new Float32Array(cpuDepth.data)
-            : new Uint16Array(cpuDepth.data);
-        this.width = cpuDepth.width;
-        this.height = cpuDepth.height;
+      if (this.depthArray[viewId] instanceof Float32Array) {
+        this.depthArray[viewId].set(new Float32Array(cpuDepth.data));
       } else {
-        // Copies the data from an ArrayBuffer to the existing TypedArray.
-        this.depthArray[viewId].set(
-          depthDataFormat === 'float32'
-            ? new Float32Array(cpuDepth.data)
-            : new Uint16Array(cpuDepth.data)
-        );
+        this.depthArray[viewId] = new Float32Array(cpuDepth.data);
       }
+      this.width = cpuDepth.width;
+      this.height = cpuDepth.height;
     }
 
     // Updates Depth Texture.
@@ -342,13 +329,12 @@ export class Depth {
           this.depthMesh.updateDepth(
             cpuDepth,
             this.depthProjectionInverseMatrices[0],
-            depthDataFormat
+            'float32'
           );
         } else {
           this.depthMesh.updateGPUDepth(
             depthData,
-            this.depthProjectionInverseMatrices[0],
-            depthDataFormat
+            this.depthProjectionInverseMatrices[0]
           );
         }
       }
@@ -422,11 +408,7 @@ export class Depth {
             if (!depthData) {
               return;
             }
-            this.updateGPUDepthData(
-              depthData,
-              viewId,
-              session.depthDataFormat ?? 'luminance-alpha'
-            );
+            this.updateGPUDepthData(depthData, viewId);
           } else {
             const depthData = frame.getDepthInformation(view);
             if (!depthData) {

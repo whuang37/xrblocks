@@ -7,6 +7,7 @@ import {clamp} from '../utils/utils';
 import {DepthMesh} from './DepthMesh';
 import {DepthOptions} from './DepthOptions';
 import {DepthTextures} from './DepthTextures';
+import {GPUDepthConverter} from './GPUDepthConverter';
 import {OcclusionPass} from './occlusion/OcclusionPass';
 
 const DEFAULT_DEPTH_WIDTH = 160;
@@ -22,12 +23,14 @@ export class Depth {
   // The main camera.
   private camera!: THREE.Camera;
   private renderer!: THREE.WebGLRenderer;
+  private gpuDepthConverter?: GPUDepthConverter;
 
   enabled = false;
   view: XRView[] = [];
   cpuDepthData: XRCPUDepthInformation[] = [];
   gpuDepthData: XRWebGLDepthInformation[] = [];
   depthArray: DepthArray[] = [];
+  depthDataFormat?: XRDepthDataFormat;
   depthMesh?: DepthMesh;
   private depthTextures?: DepthTextures;
   options = new DepthOptions();
@@ -89,6 +92,7 @@ export class Depth {
     this.options = options;
     this.renderer = renderer;
     this.enabled = options.enabled;
+    this.gpuDepthConverter = new GPUDepthConverter(renderer);
 
     if (this.options.depthTexture.enabled) {
       this.depthTextures = new DepthTextures(options);
@@ -268,6 +272,7 @@ export class Depth {
     depthDataFormat: XRDepthDataFormat
   ) {
     this.cpuDepthData[viewId] = depthData;
+    this.depthDataFormat = depthDataFormat;
     this.updateDepthMatrices(depthData, viewId);
 
     // Updates Depth Array.
@@ -305,10 +310,12 @@ export class Depth {
     // In the future, add a separate option.
     const needCpuDepth = this.options.depthMesh.enabled;
     const cpuDepth =
-      needCpuDepth && this.depthMesh
-        ? this.depthMesh.convertGPUToGPU(depthData)
+      needCpuDepth && this.gpuDepthConverter
+        ? this.gpuDepthConverter.convertGPUToCPU(depthData)
         : null;
     if (cpuDepth) {
+      this.cpuDepthData[viewId] = cpuDepth;
+      this.depthDataFormat = 'float32';
       if (this.depthArray[viewId] instanceof Float32Array) {
         this.depthArray[viewId].set(new Float32Array(cpuDepth.data));
       } else {
@@ -330,11 +337,6 @@ export class Depth {
             cpuDepth,
             this.depthProjectionInverseMatrices[0],
             'float32'
-          );
-        } else {
-          this.depthMesh.updateGPUDepth(
-            depthData,
-            this.depthProjectionInverseMatrices[0]
           );
         }
       }
@@ -480,5 +482,21 @@ export class Depth {
   pauseDepth(client: object) {
     this.depthClientsInitialized = true;
     this.depthClients.delete(client);
+  }
+
+  /**
+   * Manually updates the depth mesh geometry using the cached depth.
+   */
+  updateFullResolutionDepthMesh() {
+    if (
+      this.depthMesh &&
+      this.cpuDepthData.length > 0 &&
+      this.depthDataFormat
+    ) {
+      this.depthMesh.updateFullResolutionGeometry(
+        this.cpuDepthData[0],
+        this.depthDataFormat
+      );
+    }
   }
 }

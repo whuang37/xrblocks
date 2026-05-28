@@ -32,7 +32,8 @@ import {durationToMs} from '../utils/TemporalPolyfill';
  * @param planes - The PlaneDetector instance providing detected real-world planes.
  * @param meshes - The MeshDetector instance providing environmental mesh obstacles.
  * @param waitFrame - The WaitFrame component to yield execution between frames.
- * @param timeout - Optional timeout duration as a Temporal.Duration or Temporal.DurationLike object (defaults to 500ms).
+ * @param timeout - Timeout duration as a Temporal.Duration or Temporal.DurationLike object (defaults to 500ms).
+ * @param gridSteps - Number of steps along each axis for grid sampling candidate positions (defaults to 10).
  * @returns A promise resolving to true if successfully placed, false otherwise.
  */
 export async function placeOnHorizontalSurface(
@@ -43,7 +44,8 @@ export async function placeOnHorizontalSurface(
   meshes: MeshDetector | undefined,
   waitFrame: WaitFrame,
   timer: THREE.Timer,
-  timeout: Temporal.Duration | Temporal.DurationLike = {milliseconds: 500}
+  timeout: Temporal.Duration | Temporal.DurationLike,
+  gridSteps: number
 ): Promise<boolean> {
   const timeoutSeconds = durationToMs(timeout) / 1000;
   const startElapsed = timer.getElapsed();
@@ -151,7 +153,6 @@ export async function placeOnHorizontalSurface(
       }
 
       // Grid sampling within restricted bounding box
-      const gridSteps = 15;
       const localPoints: THREE.Vector2[] = [];
 
       // Try user's local projection point first if it is inside the polygon

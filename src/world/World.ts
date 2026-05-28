@@ -225,11 +225,13 @@ export class World extends Script {
    *
    * @param objectToPlace - The Three.js Object3D to place.
    * @param timeout - Optional timeout duration as a Temporal.Duration or Temporal.DurationLike object (defaults to 500ms).
+   * @param gridSteps - Optional number of steps along each axis for grid sampling candidate positions (defaults to 5).
    * @returns A promise resolving to true if successfully placed, false otherwise.
    */
   async placeOnHorizontalSurface(
     objectToPlace: THREE.Object3D,
-    timeout: Temporal.Duration | Temporal.DurationLike = {milliseconds: 500}
+    timeout: Temporal.Duration | Temporal.DurationLike = {milliseconds: 500},
+    gridSteps: number = 9
   ): Promise<boolean> {
     // Wait for World script initialization to complete first
     await this.initializedPromise;
@@ -249,7 +251,8 @@ export class World extends Script {
       this.meshes,
       this.waitFrame,
       this.timer,
-      timeout
+      timeout,
+      gridSteps
     );
   }
 

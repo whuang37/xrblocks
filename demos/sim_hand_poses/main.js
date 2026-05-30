@@ -16,6 +16,36 @@ const ROTATION_JOINT_NAMES = xb.HAND_JOINT_NAMES.filter(
   (jointName) => !jointName.endsWith('-tip')
 );
 
+const LOCAL_AUTHORING_PROMPT = `
+Return only JSON for a hand pose.
+Rotations are applied onto a flat neutral hand pose.
+Rotations are applied through forward kinematics.
+Format: {"joint-name":[x,y,z]} where x/y/z are euler angle radians.
+x: flexion/extension. Negative curls toward palm, positive extends away.
+y: abduction/adduction. Negative spreads toward thumb, positive away.
+z: twist. Negative twists away from thumb, positive toward thumb.
+Include every non-tip WebXR joint listed below. Use [0,0,0] for neutral joints:
+${ROTATION_JOINT_NAMES.join(', ')}
+`;
+
+const LOCAL_ROTATION_SCHEMA = {
+  type: 'OBJECT',
+  required: ROTATION_JOINT_NAMES,
+  properties: Object.fromEntries(
+    ROTATION_JOINT_NAMES.map((jointName) => [
+      jointName,
+      {
+        type: 'ARRAY',
+        minItems: 3,
+        maxItems: 3,
+        items: {
+          type: 'NUMBER',
+        },
+      },
+    ])
+  ),
+};
+
 function clampDegrees(value) {
   return Math.min(MAX_DEGREES, Math.max(MIN_DEGREES, value));
 }
@@ -110,11 +140,56 @@ async function copyText(text) {
   textArea.remove();
 }
 
+function parseAiResponse(response) {
+  if (!response?.text) {
+    throw new Error('AI returned an empty response.');
+  }
+  return JSON.parse(response.text);
+}
+
 function formatJointName(jointName) {
   return jointName
     .split('-')
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
+}
+
+function createPromptBubble(onGenerate) {
+  const bubble = document.createElement('form');
+  bubble.className = 'manual-sim-hand-prompt-bubble';
+  bubble.innerHTML = `
+    <input
+      class="manual-sim-hand-prompt"
+      type="text"
+      value="Point: index finger extended forward, thumb slightly raised, other fingers curled"
+      aria-label="Gesture generation prompt"
+    />
+    <button class="manual-sim-hand-generate" type="submit">Generate</button>
+    <span class="manual-sim-hand-status">Ready</span>
+  `;
+  document.body.append(bubble);
+
+  const promptInput = bubble.querySelector('.manual-sim-hand-prompt');
+  const generateButton = bubble.querySelector('.manual-sim-hand-generate');
+  const status = bubble.querySelector('.manual-sim-hand-status');
+
+  bubble.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const prompt = promptInput.value.trim();
+    if (!prompt) return;
+    generateButton.disabled = true;
+    status.textContent = 'Generating...';
+    try {
+      await onGenerate(prompt);
+      status.textContent = 'Applied';
+    } catch (error) {
+      console.error(error);
+      status.textContent =
+        error instanceof Error ? error.message : 'Generation failed';
+    } finally {
+      generateButton.disabled = false;
+    }
+  });
 }
 
 function createSlider(jointName, axisConfig, onRotationChange) {
@@ -427,6 +502,20 @@ class GestureHUD extends xb.Script {
 async function start() {
   const handRotations = createZeroRotationJson();
   let updateJsonViews = () => {};
+  const syncControlsToRotations = () => {
+    for (const input of document.querySelectorAll(
+      '.manual-sim-hand-slider input[type="range"]'
+    )) {
+      const jointName = input.dataset.joint;
+      const axis = input.dataset.axis;
+      const axisIndex = axis === 'x' ? 0 : axis === 'y' ? 1 : 2;
+      const degrees = Math.round(
+        (handRotations[jointName]?.[axisIndex] ?? 0) / DEG_TO_RAD
+      );
+      input.value = String(degrees);
+      input.nextElementSibling.value = String(degrees);
+    }
+  };
   const applyHandRotations = () => {
     const hands = xb.core?.simulator?.hands;
     if (hands) {
@@ -469,7 +558,8 @@ async function start() {
   options.enableReticles();
   options.enableHands();
   options.enableGestures();
-  options.setAppTitle('Manual Simulator Hand');
+  options.enableAI();
+  options.setAppTitle('Simulator Hand Poses');
   options.gestures.provider = 'heuristics';
   options.gestures.setGestureEnabled('point', true);
   options.gestures.setGestureEnabled('spread', true);
@@ -479,10 +569,32 @@ async function start() {
   options.hands.visualizeMeshes = true;
   options.simulator.defaultMode = xb.SimulatorMode.POSE;
 
+  createPromptBubble(async (description) => {
+    xb.core.options.ai.gemini.config = {
+      responseMimeType: 'application/json',
+      responseSchema: LOCAL_ROTATION_SCHEMA,
+      systemInstruction: [{text: LOCAL_AUTHORING_PROMPT}],
+    };
+    const response = await xb.core.ai.query({
+      prompt: JSON.stringify({description}),
+    });
+    const generatedRotations = xb.parseSimulatorHandPoseRotations(
+      parseAiResponse(response)
+    );
+    for (const jointName of ROTATION_JOINT_NAMES) {
+      const generatedRotation = generatedRotations[jointName] ?? [0, 0, 0];
+      handRotations[jointName][0] = generatedRotation[0];
+      handRotations[jointName][1] = generatedRotation[1];
+      handRotations[jointName][2] = generatedRotation[2];
+    }
+    syncControlsToRotations();
+    applyHandRotations();
+  });
+
   xb.add(new ManualSimHandScene());
   xb.add(new GestureHUD());
   await xb.init(options);
-  applyHandRotations();
+  updateJsonViews();
 }
 
 document.addEventListener('DOMContentLoaded', start);

@@ -40,12 +40,12 @@ export class SimulatorHands {
   rightHand?: THREE.Group;
   leftHandBones: THREE.Object3D[] = [];
   rightHandBones: THREE.Object3D[] = [];
-  leftHandPose? = SimulatorHandPose.NEUTRAL;
-  rightHandPose? = SimulatorHandPose.NEUTRAL;
+  leftHandPose? = SimulatorHandPose.RELAXED;
+  rightHandPose? = SimulatorHandPose.RELAXED;
   leftHandTargetJoints: DeepReadonly<SimulatorHandPoseJoints> =
-    SIMULATOR_HAND_POSE_TO_JOINTS_LEFT[SimulatorHandPose.NEUTRAL];
+    SIMULATOR_HAND_POSE_TO_JOINTS_LEFT[SimulatorHandPose.RELAXED];
   rightHandTargetJoints: DeepReadonly<SimulatorHandPoseJoints> =
-    SIMULATOR_HAND_POSE_TO_JOINTS_RIGHT[SimulatorHandPose.NEUTRAL];
+    SIMULATOR_HAND_POSE_TO_JOINTS_RIGHT[SimulatorHandPose.RELAXED];
   lerpSpeed = 0.1;
   handPosePanelElement?: SimulatorHandPoseHTMLElement;
   input!: Input;

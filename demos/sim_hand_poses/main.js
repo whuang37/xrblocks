@@ -22,9 +22,14 @@ Rotations are applied onto a flat neutral hand pose.
 Rotations are applied through forward kinematics.
 Format: {"joint-name":[x,y,z]} where x/y/z are euler angle radians.
 For long fingers:
-x: flexion/extension. Negative curls toward palm, positive extends away.
-y: abduction/adduction. Negative spreads toward thumb, positive away.
-z: twist. Negative twists away from thumb, positive toward thumb.
+x: flexion/extension. Positive flexes toward palm, negative extends away.
+y: abduction/adduction. Positive spreads away from the middle-finger axis, negative adducts toward it.
+z: axial roll. Positive rolls toward thumb, negative rolls away from thumb.
+For the middle finger, y is radial/ulnar deviation: positive moves toward index/thumb, negative toward ring/pinky.
+For the thumb:
+x: positive flexes across palm, negative extends/repositions.
+y: positive abducts away from palm, negative adducts back toward palm.
+z: positive rolls into opposition/internal rotation, negative repositions/external rotation away.
 Prefer not to change the thumb metacarpal joint.
 Include every non-tip WebXR joint listed below. Use [0,0,0] for neutral joints:
 ${ROTATION_JOINT_NAMES.join(', ')}

@@ -1,8 +1,26 @@
 import * as THREE from 'three';
 
+/**
+ * SimulatorHandPoseRotations are authored as standardized biomechanical hand angles
+ *
+ * Long fingers:
+ * - x: flexion toward the palm; negative x extends away from the palm.
+ * - y: abduction away from the middle-finger axis; negative y adducts toward it.
+ * - z: axial radial roll toward the thumb; negative z rolls away from the thumb.
+ *
+ * Middle finger:
+ * - y: radial deviation toward index/thumb; negative y is ulnar deviation.
+ *
+ * Thumb:
+ * - x: flexion across the palm; negative x extends/repositions.
+ * - y: palmar abduction away from the palm; negative y adducts back.
+ * - z: opposition/internal roll into the hand; negative z repositions away.
+ */
+
 import {HAND_JOINT_NAMES} from '../../input/components/HandJointNames';
 import {Handedness, type JointName} from '../../input/Hands';
 import type {
+  SimulatorHandJointRotationArray,
   SimulatorHandPoseJoints,
   SimulatorHandPoseRotations,
 } from './HandPoseJoints';
@@ -91,9 +109,29 @@ function createRestJoints(
 const LEFT_REST_JOINTS = createRestJoints(LEFT_HAND_NEUTRAL);
 const RIGHT_REST_JOINTS = createRestJoints(RIGHT_HAND_NEUTRAL);
 
+function getRawFKRotation(
+  jointName: JointName,
+  rotation: SimulatorHandPoseRotations[JointName] = [0, 0, 0]
+): SimulatorHandJointRotationArray {
+  const [x, y, z] = rotation;
+
+  if (jointName.startsWith('thumb-')) {
+    return [-x, -y, -z];
+  }
+
+  if (
+    jointName.startsWith('index-finger-') ||
+    jointName.startsWith('middle-finger-')
+  ) {
+    return [-x, -y, z];
+  }
+
+  return [-x, y, z];
+}
+
 function getHandednessRotation(
   handedness: Handedness,
-  rotation: SimulatorHandPoseRotations[JointName] = [0, 0, 0]
+  rotation: SimulatorHandJointRotationArray
 ) {
   if (handedness !== Handedness.RIGHT) {
     return rotation;
@@ -112,7 +150,8 @@ function resolveHandPoseRotations(
 
   for (const jointName of HAND_JOINT_NAMES) {
     const restJoint = restJoints.get(jointName)!;
-    const rotation = getHandednessRotation(handedness, rotations[jointName]);
+    const rawRotation = getRawFKRotation(jointName, rotations[jointName]);
+    const rotation = getHandednessRotation(handedness, rawRotation);
     const offsetRotation = new THREE.Quaternion().setFromEuler(
       new THREE.Euler(rotation[0], rotation[1], rotation[2], 'XYZ')
     );

@@ -158,6 +158,7 @@ export class SimulatorHands {
     this.updateHandPosePanel();
   }
 
+  /** Applies semantic biomechanical rotations from SimulatorHandPoseRotations. */
   setLeftHandRotations(rotations: SimulatorHandPoseRotations) {
     if (this.leftHandPose === SimulatorHandPose.PINCHING) {
       this.input.dispatchEvent({
@@ -176,6 +177,7 @@ export class SimulatorHands {
     this.updateHandPosePanel();
   }
 
+  /** Applies semantic biomechanical rotations from SimulatorHandPoseRotations. */
   setRightHandRotations(rotations: SimulatorHandPoseRotations) {
     if (this.rightHandPose === SimulatorHandPose.PINCHING) {
       this.input.dispatchEvent({

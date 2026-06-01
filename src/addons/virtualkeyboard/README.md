@@ -3,10 +3,12 @@
 This file implements an on-screen keyboard component for xrblocks with a few small helper classes and a fixed layout.
 
 ## Exports
+
 - `Keyboard` — main keyboard component (exported).
 - `KeyboardButton` — internal button class (extends `xb.TextButton`).
 
 ## Key classes & interfaces
+
 - `SpecialKey`
   - position: 'left' | 'right' | 'center'
   - type: 'tab' | 'backspace' | 'shift_lock' | 'enter' | 'shift' | 'space'
@@ -30,6 +32,7 @@ This file implements an on-screen keyboard component for xrblocks with a few sma
   - properties: `originalKey`, `shiftKey`
 
 ## Key constants (defaults)
+
 - KEY_WIDTH = 0.068
 - KEY_HEIGHT = 0.10
 - FONT_SIZE = 0.45
@@ -42,7 +45,8 @@ This file implements an on-screen keyboard component for xrblocks with a few sma
 - TOTAL_KEYBOARD_HEIGHT = computed from number of rows, key height and ROW_SPACER
 
 ## Default layout (KEY_LAYOUT)
-- Row 1: number row with textKeys "`1234567890-+" and shiftKeys "~!@#$%^&*()_+"
+
+- Row 1: number row with textKeys "`1234567890-+" and shiftKeys "~!@#$%^&\*()\_+"
 - Row 2: `qwertyuiop` with left `tab` key and right `backspace`
 - Row 3: `asdfghjkl` with left `shift_lock` and right `enter`
 - Row 4: `zxcvbnm,.` with left and right `shift` keys
@@ -51,6 +55,7 @@ This file implements an on-screen keyboard component for xrblocks with a few sma
 Special keys may set `weight` to span multiple columns; space is centered using side padding.
 
 ## Behavior & state
+
 - Internal state:
   - `keyText: string` — current buffer
   - `isShifted: boolean` — transient shift state
@@ -73,12 +78,14 @@ Special keys may set `weight` to span multiple columns; space is centered using 
 - `refreshKeyboard()` updates visible labels for all text buttons (letters and shifted symbols).
 
 ## UI construction
+
 - Uses `xb.SpatialPanel` as a root `subspace` with background color and size.
 - Uses `xb.Grid` to build rows and columns for keys.
 - Text keys are created as `KeyboardButton` instances; special keys use `xb.IconButton`.
 - Buttons are added into panel cells; layout weights control key widths.
 
 ## Callbacks / Public API
+
 - Properties:
   - `onTextChanged: ((text: string) => void) | null` — called whenever the buffer changes
   - `onEnterPressed: ((text: string) => void) | null` — called when Enter is pressed
@@ -88,6 +95,7 @@ Special keys may set `weight` to span multiple columns; space is centered using 
   - Component lifecycle: `init()` positions the keyboard (sets `subspace.position`)
 
 ## Notes / implementation details
+
 - Each key stores `originalKey` and optional `shiftKey` used to compute displayed text when shift/caps are toggled.
 - Special keys may supply `backgroundColor` and `weight` to control appearance/size.
 - The keyboard logs state changes to console (`console.log`) for key presses and enter/backspace events.

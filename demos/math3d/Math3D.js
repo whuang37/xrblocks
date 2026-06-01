@@ -99,7 +99,7 @@ export class Math3D extends xb.Script {
     this.keyboard.position.set(0, -0.3, 0);
 
     const startFn = this.mathObjects[0].functionText;
-    
+
     this.keyboard.setText?.(startFn) || (this.keyboard.keyText = startFn);
 
     this.keyboard.onEnterPressed = (newFunctionText) => {
@@ -186,15 +186,15 @@ export class Math3D extends xb.Script {
     var parametricFunction = (u, v, target) => {
       const x = xRange * u + xMin;
       const y = yRange * v + yMin;
-      
+
       let z;
       try {
         z = zFunction(x, y);
         // Clamp the value to stay between -Z_LIMIT and Z_LIMIT
         z = xb.clamp(z, -Z_LIMIT, Z_LIMIT);
-        
+
         // Handle cases where the math results in NaN (not a number)
-        if (isNaN(z)) z = 0; 
+        if (isNaN(z)) z = 0;
       } catch (e) {
         z = 0;
       }

@@ -393,6 +393,17 @@ class ManualSimHandScene extends xb.Script {
   }
 }
 
+class DisplayedPoseSync extends xb.Script {
+  constructor(syncDisplayedPose) {
+    super();
+    this._syncDisplayedPose = syncDisplayedPose;
+  }
+
+  update() {
+    this._syncDisplayedPose();
+  }
+}
+
 class GestureHUD extends xb.Script {
   init() {
     this._active = {
@@ -575,9 +586,8 @@ async function start() {
   const syncDisplayedPose = () => {
     syncControlsToRotations();
     updateJsonViews();
-    requestAnimationFrame(syncDisplayedPose);
   };
-  syncDisplayedPose();
+  xb.add(new DisplayedPoseSync(syncDisplayedPose));
 
   createPromptBubble(async (description) => {
     xb.core.options.ai.gemini.config = {

@@ -142,6 +142,7 @@ export class TextWithEmoji extends Container<TextWithEmojiOutProperties> {
         type: 'space' | 'newline' | 'emoji' | 'word';
         text: string;
         isConsecutiveNewline?: boolean;
+        trailingSpaceWidth?: number;
       }> = [];
       for (let i = 0; i < segments.length; i++) {
         const segment = segments[i];
@@ -153,7 +154,12 @@ export class TextWithEmoji extends Container<TextWithEmojiOutProperties> {
             isConsecutiveNewline,
           });
         } else if (/^[ \t\r]+$/.test(segment)) {
-          activeSegments.push({type: 'space', text: segment});
+          const prev = activeSegments[activeSegments.length - 1];
+          if (prev && (prev.type === 'word' || prev.type === 'emoji')) {
+            prev.trailingSpaceWidth = currentFontSize * 0.26 * segment.length;
+          } else {
+            activeSegments.push({type: 'space', text: segment});
+          }
         } else if (
           /(?:\p{Emoji_Presentation}|\p{Emoji}\uFE0F)/u.test(segment)
         ) {
@@ -218,6 +224,7 @@ export class TextWithEmoji extends Container<TextWithEmojiOutProperties> {
               width: calculatedEmojiSize,
               height: calculatedEmojiSize,
               transformTranslateY: calculatedEmojiOffsetY,
+              marginRight: seg.trailingSpaceWidth,
             });
           } else {
             const txt = child as Text;
@@ -226,6 +233,7 @@ export class TextWithEmoji extends Container<TextWithEmojiOutProperties> {
               fontSize: currentFontSize,
               lineHeight: this.properties.value.lineHeight,
               color: this.properties.value.color,
+              marginRight: seg.trailingSpaceWidth,
             });
           }
         }
@@ -271,6 +279,7 @@ export class TextWithEmoji extends Container<TextWithEmojiOutProperties> {
               height: calculatedEmojiSize,
               keepAspectRatio: true,
               transformTranslateY: calculatedEmojiOffsetY,
+              marginRight: seg.trailingSpaceWidth,
             });
             this.add(img);
           } else {
@@ -280,6 +289,7 @@ export class TextWithEmoji extends Container<TextWithEmojiOutProperties> {
               lineHeight: this.properties.value.lineHeight,
               color: this.properties.value.color,
               whiteSpace: 'pre',
+              marginRight: seg.trailingSpaceWidth,
             });
             this.add(txt);
           }

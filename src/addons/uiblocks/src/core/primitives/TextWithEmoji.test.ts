@@ -11,11 +11,14 @@ describe('TextWithEmoji Primitives', () => {
     });
     parent.add(textWithEmoji);
 
-    // Should have: Text('Hello'), Container(space), Text('World')
-    expect(textWithEmoji.children).toHaveLength(3);
+    // Should have: Text('Hello'), Text('World')
+    expect(textWithEmoji.children).toHaveLength(2);
     expect(textWithEmoji.children[0]).toBeInstanceOf(Text);
-    expect(textWithEmoji.children[1]).toBeInstanceOf(Container);
-    expect(textWithEmoji.children[2]).toBeInstanceOf(Text);
+    expect(textWithEmoji.children[1]).toBeInstanceOf(Text);
+
+    const text1 = textWithEmoji.children[0] as Text;
+    expect(text1.properties.value.text).toBe('Hello');
+    expect(text1.properties.value.marginRight).toBe(16 * 0.26);
   });
 
   it('should parse and render emojis correctly', () => {
@@ -26,13 +29,18 @@ describe('TextWithEmoji Primitives', () => {
     });
     parent.add(textWithEmoji);
 
-    // Should have: Text('Hello'), Container(space), Image(emoji), Container(space), Text('World')
-    expect(textWithEmoji.children).toHaveLength(5);
+    // Should have: Text('Hello'), Image(emoji), Text('World')
+    expect(textWithEmoji.children).toHaveLength(3);
     expect(textWithEmoji.children[0]).toBeInstanceOf(Text);
-    expect(textWithEmoji.children[1]).toBeInstanceOf(Container);
-    expect(textWithEmoji.children[2]).toBeInstanceOf(Image);
-    expect(textWithEmoji.children[3]).toBeInstanceOf(Container);
-    expect(textWithEmoji.children[4]).toBeInstanceOf(Text);
+    expect(textWithEmoji.children[1]).toBeInstanceOf(Image);
+    expect(textWithEmoji.children[2]).toBeInstanceOf(Text);
+
+    const text1 = textWithEmoji.children[0] as Text;
+    const emoji = textWithEmoji.children[1] as Image;
+
+    expect(text1.properties.value.text).toBe('Hello');
+    expect(text1.properties.value.marginRight).toBe(16 * 0.26); // 1 space = fontSize * 0.26
+    expect(emoji.properties.value.marginRight).toBe(16 * 0.26); // 1 space = fontSize * 0.26
   });
 
   it('should handle single newline correctly', () => {
@@ -92,5 +100,24 @@ describe('TextWithEmoji Primitives', () => {
     const newline = textWithEmoji.children[0] as Container;
     expect(newline.properties.value.width).toBe('100%');
     expect(newline.properties.value.height).toBe(16); // matches fontSize 16
+  });
+
+  it('should preserve explicit spaces after a newline', () => {
+    const parent = new Container();
+    const textWithEmoji = new TextWithEmoji({
+      text: 'Hello\n World',
+      fontSize: 16,
+    });
+    parent.add(textWithEmoji);
+
+    // Should have: Text('Hello'), Container(newline), Container(space), Text('World')
+    expect(textWithEmoji.children).toHaveLength(4);
+    expect(textWithEmoji.children[0]).toBeInstanceOf(Text);
+    expect(textWithEmoji.children[1]).toBeInstanceOf(Container);
+    expect(textWithEmoji.children[2]).toBeInstanceOf(Container);
+    expect(textWithEmoji.children[3]).toBeInstanceOf(Text);
+
+    const space = textWithEmoji.children[2] as Container;
+    expect(space.properties.value.width).toBe(16 * 0.26);
   });
 });

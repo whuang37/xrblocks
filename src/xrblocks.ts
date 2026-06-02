@@ -21,6 +21,7 @@ export * from './core/components/XRButton';
 export * from './core/components/XREffects';
 export * from './core/Core';
 export * from './core/Options';
+export * from './core/UIKitOptions';
 export * from './core/Script';
 export * from './core/User';
 export * from './depth/Depth';

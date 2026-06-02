@@ -38,6 +38,7 @@ import {XRButton} from './components/XRButton';
 import {XREffects} from './components/XREffects';
 import {XRTransition} from './components/XRTransition';
 import {Options} from './Options';
+import {UIKitOptions} from './UIKitOptions';
 import {Script} from './Script';
 import {User} from './User';
 import {PermissionsManager} from './components/PermissionsManager';
@@ -190,6 +191,7 @@ export class Core {
     this.registry.register(options.simulator, SimulatorOptions);
     this.registry.register(options.world, WorldOptions);
     this.registry.register(options.world.meshes, MeshDetectionOptions);
+    this.registry.register(options.uikit, UIKitOptions);
     this.registry.register(options.ai, AIOptions);
     this.registry.register(options.sound, SoundOptions);
     this.registry.register(options.gestures, GestureRecognitionOptions);
@@ -226,6 +228,15 @@ export class Core {
       return null;
     };
     this.registry.register(this.renderer);
+
+    if (options.uikit.enabled) {
+      this.renderer.localClippingEnabled = true;
+      if (options.uikit.reversePainterSortStable) {
+        this.renderer.setTransparentSort(
+          options.uikit.reversePainterSortStable
+        );
+      }
+    }
 
     this.renderer.xr.setReferenceSpaceType(options.referenceSpaceType);
     // For desktop simulator:

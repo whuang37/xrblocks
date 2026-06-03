@@ -1,4 +1,3 @@
-import * as THREE from 'three';
 import * as xb from 'xrblocks';
 
 // --- Types & Interfaces ---
@@ -108,7 +107,7 @@ class KeyboardButton extends xb.TextButton {
   }
 }
 
-class Keyboard extends xb.Script {
+export class Keyboard extends xb.Script {
   private keyText: string = '';
   private isShifted: boolean = false;
   private isCapsLockOn: boolean = false;
@@ -136,26 +135,11 @@ class Keyboard extends xb.Script {
     this.subspace.add(this.mainGrid);
 
     this.createKeyboard();
-    this.applyZOrder(this.subspace, 1000);
     this.subspace.updateLayouts();
   }
 
   override init(): void {
     this.subspace.position.set(0, 1.2, -1);
-  }
-
-  private applyZOrder(entity: THREE.Object3D, order: number = 1000): void {
-    entity.renderOrder = order;
-    if ('object3D' in entity) {
-      (entity as {object3D: {renderOrder: number}}).object3D.renderOrder =
-        order;
-    }
-
-    if (entity.children) {
-      entity.children.forEach((child: THREE.Object3D) =>
-        this.applyZOrder(child, order + 1)
-      );
-    }
   }
 
   private createKeyboard(): void {
@@ -232,7 +216,7 @@ class Keyboard extends xb.Script {
       const btn = new xb.IconButton({
         text: data.iconName,
         fontSize: FONT_SIZE,
-        backgroundColor: '#00000000',
+        backgroundColor: 0x00000000,
       });
       btn.onTriggered = () => this.handleSpecialKey(data.type);
       keyPanel.add(btn);
@@ -313,5 +297,3 @@ class Keyboard extends xb.Script {
     this.onTextChanged?.(this.keyText);
   }
 }
-
-export {Keyboard};

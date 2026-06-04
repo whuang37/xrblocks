@@ -24,6 +24,8 @@ export * from './core/Options';
 export * from './core/UIKitOptions';
 export * from './core/Script';
 export * from './core/User';
+export * from './StylizedFace';
+export * from './VisemeWeights';
 export * from './depth/Depth';
 export * from './depth/DepthMesh';
 export * from './depth/DepthOptions';

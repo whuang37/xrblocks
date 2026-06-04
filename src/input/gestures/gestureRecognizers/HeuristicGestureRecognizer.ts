@@ -1,29 +1,82 @@
-import {GestureConfiguration} from '../GestureRecognitionOptions';
-import {
+import type {DeepReadonly} from '../../../utils/Types';
+import type {GestureConfiguration} from '../GestureRecognitionOptions';
+import type {
+  HeuristicGestureDetector,
   GestureRecognizer,
   GestureScoreMap,
   HandContext,
 } from '../GestureTypes';
-import {heuristicDetectors} from '../providers/HeuristicGestureDetectors';
+import {
+  computeFist,
+  computeOpenPalm,
+  computePinch,
+  computePoint,
+  computeSpread,
+  computeThumbsUp,
+} from '../providers/HeuristicGestureDetectors';
+
+type RegisteredGesture = {
+  detector: HeuristicGestureDetector;
+  config: GestureConfiguration;
+};
 
 export class HeuristicGestureRecognizer implements GestureRecognizer {
+  private gestures = new Map<string, RegisteredGesture>();
+
+  constructor(initBuiltInGestures = true) {
+    if (initBuiltInGestures) {
+      this.registerBuiltInGestures();
+    }
+  }
+
+  registerGesture(
+    name: string,
+    detector: HeuristicGestureDetector,
+    config: DeepReadonly<Partial<GestureConfiguration>> = {}
+  ) {
+    this.gestures.set(name, {
+      detector,
+      config: {
+        enabled: true,
+        ...config,
+      },
+    });
+    return this;
+  }
+
+  unregisterGesture(name: string) {
+    this.gestures.delete(name);
+    return this;
+  }
+
   getGestureConfigurations(): Record<string, GestureConfiguration> {
-    return {
-      pinch: {enabled: true, threshold: 0.025},
-      'open-palm': {enabled: true},
-      fist: {enabled: true},
-      'thumbs-up': {enabled: true},
-      point: {enabled: false},
-      spread: {enabled: false, threshold: 0.04},
-    };
+    const configs: Record<string, GestureConfiguration> = {};
+    for (const [name, gesture] of this.gestures.entries()) {
+      configs[name] = {...gesture.config};
+    }
+    return configs;
   }
 
   recognize(context: HandContext): GestureScoreMap {
     const scores: GestureScoreMap = {};
-    const configs = this.getGestureConfigurations();
-    for (const [name, detector] of Object.entries(heuristicDetectors)) {
-      scores[name] = detector(context, configs[name]);
+    for (const [name, gesture] of this.gestures.entries()) {
+      scores[name] = gesture.detector(context, gesture.config);
     }
     return scores;
+  }
+
+  private registerBuiltInGestures() {
+    this.registerGesture('pinch', computePinch, {
+      enabled: true,
+      threshold: 0.025,
+    });
+    this.registerGesture('open-palm', computeOpenPalm);
+    this.registerGesture('fist', computeFist);
+    this.registerGesture('thumbs-up', computeThumbsUp);
+    this.registerGesture('point', computePoint, {enabled: false});
+    this.registerGesture('spread', computeSpread, {
+      enabled: false,
+      threshold: 0.04,
+    });
   }
 }

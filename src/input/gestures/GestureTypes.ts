@@ -26,12 +26,12 @@ export type GestureDetectionResult = {
 
 export type GestureScoreMap = Record<string, GestureDetectionResult | undefined>;
 
-export type GestureDetector = (
+export type HeuristicGestureDetector = (
   context: HandContext,
   config: GestureConfiguration
 ) => GestureDetectionResult | undefined;
 
-export type GestureDetectorMap = Record<string, GestureDetector>;
+export type GestureDetector = HeuristicGestureDetector;
 
 export interface GestureRecognizer {
   init?(): Promise<void>;

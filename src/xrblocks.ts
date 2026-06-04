@@ -41,6 +41,7 @@ export * from './input/gestures/GestureRecognition';
 export * from './input/gestures/GestureRecognitionOptions';
 export * from './input/gestures/GestureEvents';
 export * from './input/gestures/GestureTypes';
+export * from './input/gestures/HandPoseMetrics';
 export * from './input/gestures/poseEstimators/WebXRHandPoseEstimator';
 export * from './input/gestures/poseEstimators/MediaPipeHandPoseEstimator';
 export * from './input/gestures/poseEstimators/TensorFlowHandPoseEstimator';

@@ -18,10 +18,14 @@ import {LipsyncMouth} from 'lipsync';
 class LipsyncPuppetSample extends xb.Script {
   private puppetHead?: THREE.Group;
   private mouth?: LipsyncMouth;
+  private micStream?: MediaStream;
   private domBtn?: HTMLButtonElement;
   private spatialBtn?: xb.TextButton;
   private spatialStatus?: xb.TextView;
   private started = false;
+  // Scratch vectors for the per-frame face-the-camera lookAt.
+  private readonly camWorld = new THREE.Vector3();
+  private readonly headWorld = new THREE.Vector3();
 
   override init() {
     // Stylised puppet head: a sphere face, two eye dots, no body. Uses
@@ -59,6 +63,22 @@ class LipsyncPuppetSample extends xb.Script {
     this.buildSpatialPanel();
   }
 
+  override update() {
+    // Keep the puppet facing the user. The mouth canvas and the eye
+    // spheres both live on the head's local -Z (face direction), so a
+    // static puppet would hide them the moment the user walked or
+    // turned around it. Rotating only around Y keeps the puppet
+    // upright and avoids weird forward-pitching when the user is
+    // taller or shorter than the puppet.
+    const head = this.puppetHead;
+    const cam = xb.core?.camera;
+    if (!head || !cam) return;
+    cam.getWorldPosition(this.camWorld);
+    head.getWorldPosition(this.headWorld);
+    this.camWorld.y = this.headWorld.y;
+    head.lookAt(this.camWorld);
+  }
+
   private buildDomButton() {
     const btn = document.createElement('button');
     btn.textContent = '🎙️ Start mic';
@@ -76,7 +96,7 @@ class LipsyncPuppetSample extends xb.Script {
       zIndex: '999',
     } as Partial<CSSStyleDeclaration>);
     document.body.appendChild(btn);
-    btn.addEventListener('click', () => this.startMic());
+    btn.addEventListener('click', () => this.toggleMic());
     this.domBtn = btn;
   }
 
@@ -105,10 +125,14 @@ class LipsyncPuppetSample extends xb.Script {
       backgroundColor: '#9177c7',
       fontSize: 0.18,
     });
-    this.spatialBtn.onTriggered = () => this.startMic();
+    this.spatialBtn.onTriggered = () => this.toggleMic();
     panel.position.set(-0.9, xb.user.height + 0.2, -1.0);
     panel.rotation.y = Math.PI / 8;
     this.add(panel);
+  }
+
+  private toggleMic(): Promise<void> | void {
+    return this.started ? this.stopMic() : this.startMic();
   }
 
   private async startMic() {
@@ -119,10 +143,11 @@ class LipsyncPuppetSample extends xb.Script {
         audio: {echoCancellation: true, noiseSuppression: true},
         video: false,
       });
+      this.micStream = stream;
       this.mouth = new LipsyncMouth(stream, {showEyes: false});
       this.puppetHead?.add(this.mouth);
-      if (this.domBtn) this.domBtn.textContent = '🎙️ Live';
-      this.spatialBtn?.setText('🎙️ Live');
+      if (this.domBtn) this.domBtn.textContent = '🎙️ Disable mic';
+      this.spatialBtn?.setText('🎙️ Disable mic');
       this.spatialStatus?.setText('mic: on. talk to the puppet');
     } catch (err) {
       this.started = false;
@@ -130,6 +155,22 @@ class LipsyncPuppetSample extends xb.Script {
       if (this.domBtn) this.domBtn.textContent = `mic failed: ${msg}`;
       this.spatialStatus?.setText(`mic failed: ${msg}`);
     }
+  }
+
+  private stopMic() {
+    if (!this.started) return;
+    this.started = false;
+    if (this.mouth) {
+      this.mouth.parent?.remove(this.mouth);
+      this.mouth = undefined;
+    }
+    if (this.micStream) {
+      for (const t of this.micStream.getTracks()) t.stop();
+      this.micStream = undefined;
+    }
+    if (this.domBtn) this.domBtn.textContent = '🎙️ Start mic';
+    this.spatialBtn?.setText('🎙️ Start mic');
+    this.spatialStatus?.setText('mic: off');
   }
 }
 

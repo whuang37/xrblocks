@@ -45,6 +45,18 @@ class MockAnalyserNode {
     this._freqDb.fill(-120);
     this._time.fill(128);
   }
+  /** Set the time-domain buffer so computeAudioFeatures sees ~targetRms. */
+  __setRms(targetRms: number) {
+    // sin wave amplitude a → RMS = a / sqrt(2). Solve for the byte
+    // amplitude needed: int 128 + a*128 produces amplitude a in
+    // [-1,1] space, hence RMS = a/sqrt(2). So a = targetRms * sqrt(2).
+    const a = Math.min(0.99, targetRms * Math.SQRT2);
+    for (let i = 0; i < this._time.length; i++) {
+      this._time[i] = 128 + Math.round(a * 127 * Math.sin((i / 8) * Math.PI));
+    }
+    this._freq.fill(0);
+    this._freqDb.fill(-120);
+  }
 }
 
 class MockMediaStreamSource {
@@ -173,6 +185,35 @@ describe('LipsyncMouth', () => {
     // The mouth should still be active (mapper continued from where it
     // left off; no decay happened during the brief gap).
     expect(m.mouth.visemes.jawOpen).toBeGreaterThan(peakJaw * 0.8);
+  });
+
+  it('Schmitt hysteresis: noise-floor RMS chatter around silenceThreshold still accumulates the hold timer', async () => {
+    // Default silenceThreshold is 0.01, so exit threshold is 0.0125.
+    // Mic noise that hovers between 0.008 and 0.011 must read as
+    // "still silent" once we're inside the silence window, so the
+    // hold timer can finish and the mapper eventually closes the mouth.
+    const m = new LipsyncMouth(makeStream(), {
+      audioContext: ctx as unknown as AudioContext,
+      silenceHoldMs: 100,
+    });
+    await m.init();
+    const analyser = ctx.createAnalyser.mock.results[0]
+      .value as MockAnalyserNode;
+    analyser.__setLoudVoiced();
+    for (let i = 0; i < 60; i++) m.update(i * 16);
+    const peakJaw = m.mouth.visemes.jawOpen;
+    expect(peakJaw).toBeGreaterThan(0.05);
+
+    // Now drop to noise-floor chatter: alternating RMS just below and
+    // just above the entry threshold (0.01), but always below the
+    // exit threshold (0.0125).
+    for (let i = 0; i < 30; i++) {
+      analyser.__setRms(i % 2 === 0 ? 0.008 : 0.011);
+      m.update(60 * 16 + i * 16);
+    }
+    // After ~480 ms of chatter we should be past the 100 ms hold and
+    // well into mapper decay; the mouth must have moved off its peak.
+    expect(m.mouth.visemes.jawOpen).toBeLessThan(peakJaw * 0.4);
   });
 
   it('dispose() disconnects analyser + source and removes the mouth child', async () => {

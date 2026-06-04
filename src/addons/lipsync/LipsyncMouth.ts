@@ -176,7 +176,16 @@ export class LipsyncMouth extends Script {
     // breaths, syllable boundaries) hold the previous visemes so the
     // mouth doesn't jitter. Only after `silenceHoldMs` of continuous
     // silence do we let the mapper's smoothing close the mouth.
-    if (features.rms < this.silenceThreshold) {
+    // Schmitt-trigger style: once silent, we only exit silence when
+    // RMS rises clearly above the threshold (× 1.25), so mic noise
+    // hovering near `silenceThreshold` doesn't keep resetting the
+    // hold timer and prevent the mouth from ever closing.
+    const inSilence = this.silenceSinceMs !== null;
+    const exitThreshold = this.silenceThreshold * 1.25;
+    const isSilent = inSilence
+      ? features.rms < exitThreshold
+      : features.rms < this.silenceThreshold;
+    if (isSilent) {
       if (this.silenceSinceMs === null) this.silenceSinceMs = nowMs;
       if (nowMs - this.silenceSinceMs < this.silenceHoldMs) return;
     } else {

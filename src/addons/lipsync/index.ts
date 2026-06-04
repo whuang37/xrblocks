@@ -1,19 +1,19 @@
 /**
  * Audio-driven mouth animation addon for xrblocks. The primary export,
- * `LipsyncMouth`, is a small `xb.Script` that attaches to any
- * `THREE.Object3D` (typically an avatar head pivot), pulls audio from a
- * `MediaStream`, and animates a stylised mouth in real time.
+ * `LipsyncMouth`, is a small `xb.Script` that pulls audio from a
+ * `MediaStream`, runs an FFT + formant-based viseme mapper on it every
+ * frame, and writes the viseme weights to a `setVisemes`-compatible
+ * target — typically the `face` on a netblocks `RemoteUserAvatar`, or
+ * a standalone `xb.StylizedFace` for non-multiplayer use.
  *
- * For multi-peer use (one mouth per remote netblocks peer), pass a shared
- * `AudioContext` via the `audioContext` option so browsers don't run out
- * of context slots.
+ * The face primitive itself (`StylizedFace`) and the viseme contract
+ * type (`VisemeWeights`) live in xrblocks core so neither addon has
+ * to depend on the other.
  *
  * @see {@link LipsyncMouth}
  */
 export {LipsyncMouth} from './LipsyncMouth';
-export type {LipsyncMouthOptions} from './LipsyncMouth';
-export {StylizedMouth} from './StylizedMouth';
-export type {StylizedMouthOptions, LipMetrics} from './StylizedMouth';
+export type {LipsyncMouthOptions, VisemeTarget} from './LipsyncMouth';
 export {FormantVisemeMapper} from './FormantVisemeMapper';
 export type {
   AudioFeatures,

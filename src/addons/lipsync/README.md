@@ -24,19 +24,28 @@ Single-user mic into any `Object3D` head:
 import * as xb from 'xrblocks';
 import {LipsyncMouth} from 'xrblocks/addons/lipsync';
 
-const mouth = new LipsyncMouth(myMicStream);
-headPivot.add(mouth);
+const face = new xb.StylizedFace({showEyes: false});
+headPivot.add(face);
+const driver = new LipsyncMouth(myMicStream, {target: face});
+headPivot.add(driver);
 ```
 
-That's it. Once `mouth` is in the scene graph, the xrblocks scripts manager
-calls `init()` once and `update(time)` every frame. `dispose()` runs on the
-next sync after the script is removed from the scene.
+That's it. Once `driver` is in the scene graph, the xrblocks scripts manager
+calls `init()` once and `update(time)` every frame on it (and on the face
+itself, so the eyes keep blinking). `dispose()` runs on the next sync after
+either is removed from the scene; the driver does NOT dispose the `target`
+face — the caller owns it.
 
-The mouth is a flat canvas decal anchored to the host head's local `-Z`
-(face direction). It defaults to a 10 cm radius head; pass `headRadius` if
-your avatar's head is bigger or smaller.
+`StylizedFace` is an xrblocks core primitive (`xb.StylizedFace`): a flat
+canvas decal anchored to the host head's local `-Z` (face direction). It
+defaults to a 10 cm radius head; pass `headRadius` if your avatar's head
+is bigger or smaller.
 
 ## Netblocks integration
+
+Netblocks's `RemoteUserAvatar` already attaches a `face` (a `StylizedFace`)
+to every remote peer out of the box, so you don't have to create one
+yourself. Just point `LipsyncMouth` at it:
 
 ```ts
 import * as THREE from 'three';
@@ -47,8 +56,11 @@ protected override onSession(session) {
   session.voice.onTrack((peerId, stream) => {
     const user = session.users.get(peerId);
     if (!user) return;
-    const mouth = new LipsyncMouth(stream, {audioContext: sharedCtx});
-    user.avatar.headPivot.add(mouth);
+    const driver = new LipsyncMouth(stream, {
+      target: user.avatar.face,
+      audioContext: sharedCtx,
+    });
+    user.avatar.add(driver);
   });
 }
 ```
@@ -90,16 +102,18 @@ buffers. `computeAudioFeatures` extracts RMS, voicing, F1, F2, and a few
 band energies from those. `FormantVisemeMapper` maps F1/F2 to six viseme
 weights (`jawOpen`, `aa`, `oo`, `oh`, `ee`, `consonant`) with
 frame-rate-independent smoothing (`1 - exp(-dt / tau)`) so 60, 72, 90, and
-120 Hz refresh rates all look identical. `StylizedMouth` then re-rasterises
-a 256×256 canvas (one dark mouth ellipse and two optional eye dots) and
+120 Hz refresh rates all look identical. `LipsyncMouth` writes the weights
+to its `target` (typically `xb.StylizedFace`), which re-rasterises a
+256×256 canvas (one dark mouth ellipse and two optional eye dots) and
 uploads it as a `CanvasTexture` on a small plane sitting flush with the
 head sphere.
 
 The pipeline is split into pure modules (`MfccExtractor`,
-`FormantVisemeMapper`, `computeAudioFeatures`, `StylizedMouth`) so the
-heuristic mapper can be replaced later by a small ML viseme mapper
-consuming the same `AudioFeatures` plus MFCC vector, without touching the
-addon's public surface.
+`FormantVisemeMapper`, `computeAudioFeatures`) so the heuristic mapper can
+be replaced later by a small ML viseme mapper consuming the same
+`AudioFeatures` plus MFCC vector, without touching the addon's public
+surface. The face primitive (`xb.StylizedFace`) lives in xrblocks core so
+any consumer — not just lipsync — can drive it.
 
 ## Caveats
 
@@ -123,16 +137,20 @@ same workaround `SpatialVoice` uses.
 ## Public surface
 
 The main export is `LipsyncMouth`. It's an `xb.Script` you construct with
-a `MediaStream` and add to any `Object3D` head. The constructor options
-are `audioContext`, `fftSize`, `silenceThreshold`, `silenceHoldMs`,
-`headRadius`, and `showEyes`.
+a `MediaStream` and a `target` (anything with `setVisemes(VisemeWeights)`,
+typically `xb.StylizedFace` or `user.avatar.face` on a netblocks avatar).
+Constructor options: `target` (required), `audioContext`, `fftSize`,
+`silenceThreshold`, `silenceHoldMs`. The driver never disposes the target
+— the caller owns it.
 
-`StylizedMouth`, the underlying canvas decal, is also exported and can be
-used standalone if you already have viseme weights from another source. It
-takes `headRadius`, `textureSize`, and `showEyes`.
+The face primitive `StylizedFace` lives in xrblocks core (`import {StylizedFace}
+from 'xrblocks'`); construct one yourself for standalone use, or read it
+off `RemoteUserAvatar.face` for multiplayer. It takes `headRadius`,
+`textureSize`, and `showEyes`.
 
 The lower-level pieces (`FormantVisemeMapper`, `MfccExtractor`,
-`computeAudioFeatures`) and the types (`VisemeWeights`, `LipMetrics`,
-`StylizedMouthOptions`, `FormantVisemeMapperOptions`,
-`MfccExtractorOptions`, `AudioFeatures`, `AudioFeatureInputs`) are
-exported as well, so a future ML mapper can plug into the same pipeline.
+`computeAudioFeatures`) and the types (`VisemeWeights`, `VisemeTarget`,
+`FormantVisemeMapperOptions`, `MfccExtractorOptions`, `AudioFeatures`,
+`AudioFeatureInputs`) are exported as well, so a future ML mapper can plug
+into the same pipeline. `LipMetrics` and `StylizedFaceOptions` come from
+xrblocks core alongside `StylizedFace`.

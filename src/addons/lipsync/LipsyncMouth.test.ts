@@ -1,14 +1,30 @@
 import {describe, it, expect, vi, beforeEach} from 'vitest';
-import * as THREE from 'three';
 
 // Mock xrblocks so importing `Script` doesn't trigger the Core singleton,
-// which constructs a real AudioContext (jsdom can't provide one).
+// which constructs a real AudioContext (jsdom can't provide one). We
+// only need Script (as a generic Object3D base) and the VisemeWeights
+// type — the test supplies its own VisemeTarget so StylizedFace isn't
+// referenced.
 vi.mock('xrblocks', async () => {
   const T = await import('three');
   return {Script: T.Object3D, core: {camera: undefined}};
 });
 
-import {LipsyncMouth} from './LipsyncMouth';
+import {LipsyncMouth, VisemeTarget} from './LipsyncMouth';
+import type {VisemeWeights} from './BlendshapeReducer';
+import {ZERO_VISEME} from './BlendshapeReducer';
+
+/**
+ * Stand-in for an xrblocks `StylizedFace`: captures the most recent
+ * viseme weights so tests can assert against them. Real consumers
+ * pass `user.avatar.face` or a freshly constructed `StylizedFace`.
+ */
+class FakeTarget implements VisemeTarget {
+  visemes: VisemeWeights = {...ZERO_VISEME};
+  setVisemes = vi.fn((v: VisemeWeights) => {
+    this.visemes = {...v};
+  });
+}
 
 // Minimal in-memory Web Audio mock: only what LipsyncMouth touches.
 // AnalyserNode emits fixed-shape (silent) buffers; tests stub
@@ -88,6 +104,7 @@ beforeEach(() => {
 describe('LipsyncMouth', () => {
   it('is a THREE.Object3D suitable for parenting to a head pivot', () => {
     const m = new LipsyncMouth(makeStream(), {
+      target: new FakeTarget(),
       audioContext: ctx as unknown as AudioContext,
     });
     expect(m.isObject3D).toBe(true);
@@ -95,6 +112,7 @@ describe('LipsyncMouth', () => {
 
   it('constructor + init() builds the audio graph from the injected AudioContext', async () => {
     const m = new LipsyncMouth(makeStream(), {
+      target: new FakeTarget(),
       audioContext: ctx as unknown as AudioContext,
     });
     await m.init();
@@ -102,17 +120,22 @@ describe('LipsyncMouth', () => {
     expect(ctx.createAnalyser).toHaveBeenCalled();
   });
 
-  it('mouth child is added under the LipsyncMouth and follows it', async () => {
+  it('drives the supplied target instead of owning a visual itself', async () => {
+    const target = new FakeTarget();
     const m = new LipsyncMouth(makeStream(), {
+      target,
       audioContext: ctx as unknown as AudioContext,
     });
     await m.init();
-    expect(m.children.length).toBeGreaterThan(0);
-    expect(m.children.some((c) => c instanceof THREE.Object3D)).toBe(true);
+    // No visual children — the target is the only thing rendering.
+    expect(m.children.length).toBe(0);
+    expect(m.target).toBe(target);
   });
 
-  it('update() drives the mouth visemes when audio is loud / voiced', async () => {
+  it('update() drives the target visemes when audio is loud / voiced', async () => {
+    const target = new FakeTarget();
     const m = new LipsyncMouth(makeStream(), {
+      target,
       audioContext: ctx as unknown as AudioContext,
     });
     await m.init();
@@ -121,20 +144,24 @@ describe('LipsyncMouth', () => {
       .value as MockAnalyserNode;
     analyser.__setLoudVoiced();
     for (let i = 0; i < 50; i++) m.update(i * 0.016);
-    expect(m.mouth.visemes.jawOpen).toBeGreaterThan(0.05);
+    expect(target.visemes.jawOpen).toBeGreaterThan(0.05);
   });
 
-  it('silent input → mouth stays at rest', async () => {
+  it('silent input → target stays at rest', async () => {
+    const target = new FakeTarget();
     const m = new LipsyncMouth(makeStream(), {
+      target,
       audioContext: ctx as unknown as AudioContext,
     });
     await m.init();
     for (let i = 0; i < 50; i++) m.update(i * 16);
-    expect(m.mouth.visemes.jawOpen).toBeLessThan(0.05);
+    expect(target.visemes.jawOpen).toBeLessThan(0.05);
   });
 
   it('loud then silent: brief silence holds visemes; sustained silence decays them', async () => {
+    const target = new FakeTarget();
     const m = new LipsyncMouth(makeStream(), {
+      target,
       audioContext: ctx as unknown as AudioContext,
       // Default silenceHoldMs is 150; keep default for this test.
     });
@@ -143,29 +170,33 @@ describe('LipsyncMouth', () => {
       .value as MockAnalyserNode;
     analyser.__setLoudVoiced();
     for (let i = 0; i < 60; i++) m.update(i * 16);
-    const peakJaw = m.mouth.visemes.jawOpen;
+    const peakJaw = target.visemes.jawOpen;
     expect(peakJaw).toBeGreaterThan(0.05);
 
-    // First silent frames within the 150 ms hold window: mouth held in
+    // First silent frames within the 150 ms hold window: target held in
     // place, no decay started yet. Brief gaps (~one frame) between
-    // syllables should not cause any jitter.
+    // syllables should not cause any jitter — verified by the call
+    // count not advancing during the hold.
     analyser.__setSilent();
+    const callsBeforeHold = target.setVisemes.mock.calls.length;
     m.update(60 * 16 + 16);
-    expect(m.mouth.visemes.jawOpen).toBe(peakJaw);
     m.update(60 * 16 + 80);
-    expect(m.mouth.visemes.jawOpen).toBe(peakJaw);
+    expect(target.setVisemes.mock.calls.length).toBe(callsBeforeHold);
+    expect(target.visemes.jawOpen).toBe(peakJaw);
 
     // Past the hold window: mapper smoothing starts pulling toward zero.
     for (let i = 0; i < 40; i++) m.update(60 * 16 + 200 + i * 16);
-    expect(m.mouth.visemes.jawOpen).toBeLessThan(0.02);
-    expect(m.mouth.visemes.aa).toBeLessThan(0.02);
-    expect(m.mouth.visemes.ee).toBeLessThan(0.02);
-    expect(m.mouth.visemes.oo).toBeLessThan(0.02);
-    expect(m.mouth.visemes.consonant).toBeLessThan(0.02);
+    expect(target.visemes.jawOpen).toBeLessThan(0.02);
+    expect(target.visemes.aa).toBeLessThan(0.02);
+    expect(target.visemes.ee).toBeLessThan(0.02);
+    expect(target.visemes.oo).toBeLessThan(0.02);
+    expect(target.visemes.consonant).toBeLessThan(0.02);
   });
 
-  it('voiced resumes mid-hold: silence timer resets, mouth never began decaying', async () => {
+  it('voiced resumes mid-hold: silence timer resets, target never began decaying', async () => {
+    const target = new FakeTarget();
     const m = new LipsyncMouth(makeStream(), {
+      target,
       audioContext: ctx as unknown as AudioContext,
     });
     await m.init();
@@ -173,26 +204,22 @@ describe('LipsyncMouth', () => {
       .value as MockAnalyserNode;
     analyser.__setLoudVoiced();
     for (let i = 0; i < 60; i++) m.update(i * 16);
-    const peakJaw = m.mouth.visemes.jawOpen;
+    const peakJaw = target.visemes.jawOpen;
 
     // 100 ms silent gap (within the 150 ms hold), then voiced again.
     analyser.__setSilent();
     m.update(60 * 16 + 50);
     m.update(60 * 16 + 100);
-    expect(m.mouth.visemes.jawOpen).toBe(peakJaw);
+    expect(target.visemes.jawOpen).toBe(peakJaw);
     analyser.__setLoudVoiced();
     m.update(60 * 16 + 116);
-    // The mouth should still be active (mapper continued from where it
-    // left off; no decay happened during the brief gap).
-    expect(m.mouth.visemes.jawOpen).toBeGreaterThan(peakJaw * 0.8);
+    expect(target.visemes.jawOpen).toBeGreaterThan(peakJaw * 0.8);
   });
 
   it('Schmitt hysteresis: noise-floor RMS chatter around silenceThreshold still accumulates the hold timer', async () => {
-    // Default silenceThreshold is 0.01, so exit threshold is 0.0125.
-    // Mic noise that hovers between 0.008 and 0.011 must read as
-    // "still silent" once we're inside the silence window, so the
-    // hold timer can finish and the mapper eventually closes the mouth.
+    const target = new FakeTarget();
     const m = new LipsyncMouth(makeStream(), {
+      target,
       audioContext: ctx as unknown as AudioContext,
       silenceHoldMs: 100,
     });
@@ -201,7 +228,7 @@ describe('LipsyncMouth', () => {
       .value as MockAnalyserNode;
     analyser.__setLoudVoiced();
     for (let i = 0; i < 60; i++) m.update(i * 16);
-    const peakJaw = m.mouth.visemes.jawOpen;
+    const peakJaw = target.visemes.jawOpen;
     expect(peakJaw).toBeGreaterThan(0.05);
 
     // Now drop to noise-floor chatter: alternating RMS just below and
@@ -212,12 +239,16 @@ describe('LipsyncMouth', () => {
       m.update(60 * 16 + i * 16);
     }
     // After ~480 ms of chatter we should be past the 100 ms hold and
-    // well into mapper decay; the mouth must have moved off its peak.
-    expect(m.mouth.visemes.jawOpen).toBeLessThan(peakJaw * 0.4);
+    // well into mapper decay; the target must have moved off its peak.
+    expect(target.visemes.jawOpen).toBeLessThan(peakJaw * 0.4);
   });
 
-  it('dispose() disconnects analyser + source and removes the mouth child', async () => {
+  it('dispose() disconnects analyser + source but does NOT dispose the target (caller owns it)', async () => {
+    const target = new FakeTarget();
+    const disposeSpy = vi.fn();
+    (target as unknown as {dispose: () => void}).dispose = disposeSpy;
     const m = new LipsyncMouth(makeStream(), {
+      target,
       audioContext: ctx as unknown as AudioContext,
     });
     await m.init();
@@ -228,11 +259,12 @@ describe('LipsyncMouth', () => {
     m.dispose();
     expect(source.disconnect).toHaveBeenCalled();
     expect(analyser.disconnect).toHaveBeenCalled();
-    expect(m.children.length).toBe(0);
+    expect(disposeSpy).not.toHaveBeenCalled();
   });
 
   it('dispose() does NOT close the injected AudioContext (caller owns it)', async () => {
     const m = new LipsyncMouth(makeStream(), {
+      target: new FakeTarget(),
       audioContext: ctx as unknown as AudioContext,
     });
     await m.init();
@@ -252,6 +284,7 @@ describe('LipsyncMouth', () => {
     (stream as unknown as {getTracks: () => MediaStreamTrack[]}).getTracks =
       () => [track];
     const m = new LipsyncMouth(stream, {
+      target: new FakeTarget(),
       audioContext: ctx as unknown as AudioContext,
     });
     await m.init();
@@ -259,11 +292,15 @@ describe('LipsyncMouth', () => {
     expect(track.stop).not.toHaveBeenCalled();
   });
 
-  it('two LipsyncMouths can share one AudioContext', async () => {
+  it('two LipsyncMouths can share one AudioContext and one target each', async () => {
+    const t1 = new FakeTarget();
+    const t2 = new FakeTarget();
     const m1 = new LipsyncMouth(makeStream(), {
+      target: t1,
       audioContext: ctx as unknown as AudioContext,
     });
     const m2 = new LipsyncMouth(makeStream(), {
+      target: t2,
       audioContext: ctx as unknown as AudioContext,
     });
     await m1.init();
@@ -272,7 +309,7 @@ describe('LipsyncMouth', () => {
     // Disposing one leaves the other working.
     m1.dispose();
     expect(ctx.close).not.toHaveBeenCalled();
-    expect(m2.children.length).toBeGreaterThan(0);
+    expect(m2.target).toBe(t2);
     m2.dispose();
   });
 });

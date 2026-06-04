@@ -1,17 +1,33 @@
-import {Script} from 'xrblocks';
+import {Script, VisemeWeights} from 'xrblocks';
 
 import {computeAudioFeatures} from './computeAudioFeatures';
 import {FormantVisemeMapper} from './FormantVisemeMapper';
-import {StylizedMouth} from './StylizedMouth';
+
+/**
+ * Minimal duck-typed target that {@link LipsyncMouth} drives every
+ * frame. Anything with a `setVisemes` method satisfies the contract —
+ * the canonical implementation is xrblocks core's {@link StylizedFace},
+ * which sits on every netblocks `RemoteUserAvatar` out of the box.
+ */
+export interface VisemeTarget {
+  setVisemes(visemes: VisemeWeights): void;
+}
 
 export interface LipsyncMouthOptions {
   /**
+   * The face this lipsync driver animates. Required. Caller owns the
+   * target — `LipsyncMouth.dispose()` will never dispose it. Pass the
+   * `face` field on a netblocks avatar (`user.avatar.face`), or build
+   * a standalone `StylizedFace` for a non-multiplayer puppet.
+   */
+  target: VisemeTarget;
+  /**
    * Reuse an existing `AudioContext` instead of creating a new one.
-   * Browsers cap the number of contexts per page (typically 6-8), so when
-   * driving multiple peer streams (one mouth per peer) pass the shared
-   * context from `xb.core.sound.listener.context` or
-   * `THREE.AudioContext.getContext()`. When provided, this class will not
-   * close the context on `dispose()`.
+   * Browsers cap the number of contexts per page (typically 6-8), so
+   * when driving multiple peer streams (one driver per peer) pass the
+   * shared context from `xb.core.sound.listener.context` or
+   * `THREE.AudioContext.getContext()`. When provided, this class will
+   * not close the context on `dispose()`.
    */
   audioContext?: AudioContext;
   /** AnalyserNode FFT size; must be a power of two. Defaults to 1024. */
@@ -22,58 +38,59 @@ export interface LipsyncMouthOptions {
   silenceThreshold?: number;
   /**
    * Minimum continuous silence duration (ms) before the mouth starts
-   * closing. Brief sub-threshold gaps shorter than this (plosive stops,
-   * breaths, syllable boundaries) leave the mouth held in place so it
-   * doesn't jitter. Once exceeded, the mapper's natural smoothing
-   * decays the mouth to rest. Default 150.
+   * closing. Brief sub-threshold gaps shorter than this (plosive
+   * stops, breaths, syllable boundaries) leave the mouth held in place
+   * so it doesn't jitter. Once exceeded, the mapper's natural
+   * smoothing decays the mouth to rest. Default 150.
    */
   silenceHoldMs?: number;
-  /**
-   * Approximate radius (metres) of the host head this mouth will sit on.
-   * Used to scale and position the stylised mouth mesh. Defaults to 0.1
-   * to match netblocks `RemoteUserAvatar`'s head sphere; pass 0.18 (for
-   * example) if attaching to a bigger custom head.
-   */
-  headRadius?: number;
-  /**
-   * Draw a pair of static eye dots above the mouth on the same canvas
-   * decal so a bare avatar head sphere reads as a face. Defaults to
-   * true. Set false when the host avatar already has its own eye
-   * geometry.
-   */
-  showEyes?: boolean;
 }
 
 /**
- * `LipsyncMouth` drives a stylised mouth attached to any `Object3D` from a
- * `MediaStream`. Designed to plug into any avatar that has a head pivot,
- * including netblocks `RemoteUserAvatar.headPivot` for per-peer mouth
- * animation.
+ * `LipsyncMouth` reads audio from a `MediaStream`, runs an FFT +
+ * formant-based viseme mapper on it every frame, and writes the
+ * resulting viseme weights to a {@link VisemeTarget} (typically a
+ * {@link StylizedFace}). It owns no visual of its own — the face you
+ * pass via `target` is the only thing on screen.
  *
- * Extends `xb.Script` so the xrblocks scripts manager calls `init()` once
+ * Extends `Script` so the xrblocks scripts manager calls `init()` once
  * the instance is part of the active scene and `update(time)` every
  * frame. `dispose()` is called automatically by the scripts manager on
  * the next sync after the instance is removed from the scene graph; it
- * disconnects audio nodes and releases the mouth geometry. It
+ * disconnects audio nodes and releases internal state. It
  * deliberately never stops the input `MediaStream` tracks (the caller
- * owns those) and never closes a caller-supplied `AudioContext`.
+ * owns those), never closes a caller-supplied `AudioContext`, and
+ * never disposes the target face (the avatar / host owns that too).
  *
  * Instances are one-shot: after `dispose()` runs (i.e. once the script
  * has been removed from the scene), do NOT re-add the same instance.
  * Construct a new `LipsyncMouth` for the next attachment.
  *
- * The `mouth` field is a {@link StylizedMouth}; read its `visemes` field
- * if you want to poll the current viseme weights.
+ * Standalone (e.g. puppet sample):
  *
- * @example
- *   const mouth = new LipsyncMouth(myMicStream);
- *   headPivot.add(mouth);
- *   // ... when done:
- *   headPivot.remove(mouth);  // dispose() runs on the next frame
+ * ```ts
+ * const face = new StylizedFace({showEyes: false});
+ * puppetHead.add(face);
+ * const driver = new LipsyncMouth(micStream, {target: face});
+ * puppetHead.add(driver);
+ * ```
+ *
+ * Multiplayer netblocks avatar:
+ *
+ * ```ts
+ * session.voice.onTrack((peerId, stream) => {
+ *   const user = session.users.get(peerId)!;
+ *   const driver = new LipsyncMouth(stream, {
+ *     target: user.avatar.face,
+ *     audioContext: THREE.AudioContext.getContext(),
+ *   });
+ *   user.avatar.add(driver);
+ * });
+ * ```
  */
 export class LipsyncMouth extends Script {
-  /** Stylised mouth child; read `mouth.visemes` for the latest weights. */
-  readonly mouth: StylizedMouth;
+  /** The face this driver animates. Caller-owned. */
+  readonly target: VisemeTarget;
 
   private readonly stream: MediaStream;
   private readonly fftSize: number;
@@ -86,8 +103,8 @@ export class LipsyncMouth extends Script {
   private analyser?: AnalyserNode;
   // TS lib.dom expects Uint8Array<ArrayBuffer> on the analyser methods,
   // not the looser Uint8Array<ArrayBufferLike> that the default
-  // `new Uint8Array(n)` produces. Pin the buffer type so the calls below
-  // type-check under strict rollup-typescript.
+  // `new Uint8Array(n)` produces. Pin the buffer type so the calls
+  // below type-check under strict rollup-typescript.
   private freqData?: Uint8Array<ArrayBuffer>;
   private timeData?: Uint8Array<ArrayBuffer>;
   private primer?: HTMLAudioElement;
@@ -97,19 +114,15 @@ export class LipsyncMouth extends Script {
   /** Wall-clock ms when the most recent silence run started, or null. */
   private silenceSinceMs: number | null = null;
 
-  constructor(stream: MediaStream, opts: LipsyncMouthOptions = {}) {
+  constructor(stream: MediaStream, opts: LipsyncMouthOptions) {
     super();
     this.stream = stream;
+    this.target = opts.target;
     this.fftSize = opts.fftSize ?? 1024;
     this.silenceThreshold = opts.silenceThreshold ?? 0.01;
     this.silenceHoldMs = opts.silenceHoldMs ?? 150;
     this.externalContext = !!opts.audioContext;
     this.ctx = opts.audioContext;
-    this.mouth = new StylizedMouth({
-      headRadius: opts.headRadius,
-      showEyes: opts.showEyes,
-    });
-    this.add(this.mouth);
   }
 
   override async init(): Promise<void> {
@@ -193,7 +206,7 @@ export class LipsyncMouth extends Script {
     }
 
     const visemes = this.mapper.update(features, dt);
-    this.mouth.setVisemes(visemes);
+    this.target.setVisemes(visemes);
   }
 
   override dispose(): void {
@@ -220,13 +233,12 @@ export class LipsyncMouth extends Script {
       // Only close contexts we created.
       void this.ctx.close?.().catch(() => undefined);
     }
-    this.mouth.dispose();
-    this.remove(this.mouth);
     this.source = undefined;
     this.analyser = undefined;
     this.freqData = undefined;
     this.timeData = undefined;
     this.ctx = undefined;
+    // Note: we do NOT dispose `this.target` — the caller owns it.
   }
 }
 

@@ -17,6 +17,7 @@ import {LipsyncMouth} from 'lipsync';
  */
 class LipsyncPuppetSample extends xb.Script {
   private puppetHead?: THREE.Group;
+  private face?: xb.StylizedFace;
   private mouth?: LipsyncMouth;
   private micStream?: MediaStream;
   private domBtn?: HTMLButtonElement;
@@ -147,7 +148,11 @@ class LipsyncPuppetSample extends xb.Script {
         video: false,
       });
       this.micStream = stream;
-      this.mouth = new LipsyncMouth(stream, {showEyes: false});
+      // The puppet head already has its own 3D eye spheres, so the
+      // canvas face only draws the mouth (`showEyes: false`).
+      this.face = new xb.StylizedFace({showEyes: false});
+      this.puppetHead?.add(this.face);
+      this.mouth = new LipsyncMouth(stream, {target: this.face});
       this.puppetHead?.add(this.mouth);
       if (this.domBtn) this.domBtn.textContent = '🎙️ Disable mic';
       this.spatialBtn?.setText('🎙️ Disable mic');
@@ -166,6 +171,11 @@ class LipsyncPuppetSample extends xb.Script {
     if (this.mouth) {
       this.mouth.parent?.remove(this.mouth);
       this.mouth = undefined;
+    }
+    if (this.face) {
+      this.face.parent?.remove(this.face);
+      this.face.dispose();
+      this.face = undefined;
     }
     if (this.micStream) {
       for (const t of this.micStream.getTracks()) t.stop();

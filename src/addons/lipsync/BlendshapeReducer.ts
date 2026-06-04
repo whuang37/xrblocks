@@ -79,16 +79,16 @@ export const ARKIT_BLENDSHAPE_NAMES: readonly string[] = [
   'noseSneerRight',
 ] as const;
 
-export interface VisemeWeights {
-  jawOpen: number;
-  aa: number;
-  oo: number;
-  oh: number;
-  ee: number;
-  consonant: number;
-}
+// VisemeWeights is the contract type that any face / consumer
+// understands; it lives in xrblocks core (so an addon producing
+// visemes and an addon consuming them never have to depend on each
+// other). Imported AND re-exported as `type` so the runtime import
+// never reaches the xrblocks barrel — the type fully erases at
+// compile time and `ZERO_VISEME` keeps its local literal definition.
+import type {VisemeWeights} from 'xrblocks';
+export type {VisemeWeights};
 
-export const ZERO_VISEME: Readonly<VisemeWeights> = Object.freeze({
+export const ZERO_VISEME = Object.freeze({
   jawOpen: 0,
   aa: 0,
   oo: 0,

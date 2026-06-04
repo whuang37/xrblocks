@@ -11,6 +11,7 @@ export type BuiltInGestureName =
   | 'open-palm'
   | 'fist'
   | 'thumbs-up'
+  | 'thumbs-down'
   | 'point'
   | 'spread';
 

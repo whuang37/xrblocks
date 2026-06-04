@@ -9,20 +9,14 @@ import {HAND_JOINT_NAMES} from '../components/HandJointNames';
 import type {HandContext} from './GestureTypes';
 
 export type FingerName = 'index' | 'middle' | 'ring' | 'pinky';
+export type DigitName = 'thumb' | FingerName;
 
-export type FingerMetrics = {
-  tip: THREE.Vector3;
-  metacarpal?: THREE.Vector3;
-  referenceDistance: number;
-  tipDistance: number;
-  curlRatio: number;
-};
-
-export type ThumbMetrics = {
-  tip: THREE.Vector3;
-  metacarpal?: THREE.Vector3;
-  referenceDistance: number;
-  tipDistance: number;
+export type PalmPose = {
+  center: THREE.Vector3;
+  width: number;
+  normal: THREE.Vector3;
+  right: THREE.Vector3;
+  up: THREE.Vector3;
 };
 
 export const FINGER_ORDER: FingerName[] = [
@@ -37,6 +31,43 @@ const FINGER_PREFIX: Record<FingerName, string> = {
   middle: 'middle-finger',
   ring: 'ring-finger',
   pinky: 'pinky-finger',
+};
+
+const DIGIT_JOINTS: Record<DigitName, JointName[]> = {
+  thumb: [
+    'thumb-metacarpal',
+    'thumb-phalanx-proximal',
+    'thumb-phalanx-distal',
+    'thumb-tip',
+  ],
+  index: [
+    'index-finger-metacarpal',
+    'index-finger-phalanx-proximal',
+    'index-finger-phalanx-intermediate',
+    'index-finger-phalanx-distal',
+    'index-finger-tip',
+  ],
+  middle: [
+    'middle-finger-metacarpal',
+    'middle-finger-phalanx-proximal',
+    'middle-finger-phalanx-intermediate',
+    'middle-finger-phalanx-distal',
+    'middle-finger-tip',
+  ],
+  ring: [
+    'ring-finger-metacarpal',
+    'ring-finger-phalanx-proximal',
+    'ring-finger-phalanx-intermediate',
+    'ring-finger-phalanx-distal',
+    'ring-finger-tip',
+  ],
+  pinky: [
+    'pinky-finger-metacarpal',
+    'pinky-finger-phalanx-proximal',
+    'pinky-finger-phalanx-intermediate',
+    'pinky-finger-phalanx-distal',
+    'pinky-finger-tip',
+  ],
 };
 
 const EPSILON = 1e-6;
@@ -54,70 +85,14 @@ export function getFingerJoint(
   return getJoint(context, `${prefix}-${suffix}` as JointName);
 }
 
-export function getFingerMetrics(context: HandContext) {
-  return FINGER_ORDER.map((finger) =>
-    getFingerMetric(context, finger)
-  ).filter(Boolean) as FingerMetrics[];
-}
-
-export function getFingerMetric(
-  context: HandContext,
-  finger: FingerName
-): FingerMetrics | null {
-  const tip = getFingerJoint(context, finger, 'tip');
-  const proximal = getFingerJoint(context, finger, 'phalanx-proximal');
-  const metacarpal = getFingerJoint(context, finger, 'metacarpal');
-  const wrist = getJoint(context, 'wrist');
-  if (!tip || !wrist) return null;
-
-  const reference = proximal ?? metacarpal;
-  if (!reference) return null;
-
-  const referenceDistance = reference.distanceTo(wrist);
-  const tipDistance = tip.distanceTo(wrist);
-  const curlRatio =
-    referenceDistance > EPSILON ? tipDistance / referenceDistance : 0;
-
-  return {
-    tip,
-    metacarpal,
-    referenceDistance,
-    tipDistance,
-    curlRatio,
-  };
-}
-
-export function getThumbMetrics(context: HandContext): ThumbMetrics | undefined {
-  const tip = getJoint(context, 'thumb-tip');
-  const wrist = getJoint(context, 'wrist');
-  if (!tip || !wrist) return undefined;
-
-  const metacarpal =
-    getJoint(context, 'thumb-metacarpal') ??
-    getJoint(context, 'thumb-phalanx-proximal');
-  if (!metacarpal) return undefined;
-
-  const referenceDistance = metacarpal.distanceTo(wrist);
-  const tipDistance = tip.distanceTo(wrist);
-
-  return {
-    tip,
-    metacarpal,
-    referenceDistance,
-    tipDistance,
-  };
-}
-
 export function estimateHandScale(context: HandContext) {
   const wrist = getJoint(context, 'wrist');
   const middleTip = getJoint(context, 'middle-finger-tip');
-  const middleBase = getJoint(context, 'middle-finger-metacarpal');
   const palmWidth = getPalmWidth(context);
 
   const measurements: number[] = [];
   if (wrist && middleTip) measurements.push(middleTip.distanceTo(wrist));
   if (palmWidth) measurements.push(palmWidth);
-  if (wrist && middleBase) measurements.push(middleBase.distanceTo(wrist) * 2);
 
   if (!measurements.length) return 0.08;
   return average(measurements);
@@ -166,32 +141,127 @@ export function getPalmUp(context: HandContext) {
   return up.normalize();
 }
 
-export function getAdjacentFingerDistances(context: HandContext) {
-  const tips = FINGER_ORDER.map((finger) =>
-    getFingerJoint(context, finger, 'tip')
-  );
-  if (tips.some((tip) => !tip)) {
-    return {average: Infinity};
+export function getPalmPose(context: HandContext): PalmPose | null {
+  const wrist = getJoint(context, 'wrist');
+  const indexBase = getFingerJoint(context, 'index', 'metacarpal');
+  const pinkyBase = getFingerJoint(context, 'pinky', 'metacarpal');
+  const width = getPalmWidth(context);
+  const normal = getPalmNormal(context);
+  const right = getPalmRight(context);
+  const up = getPalmUp(context);
+
+  if (!wrist || !indexBase || !pinkyBase || !width || !normal || !right || !up) {
+    return null;
   }
-  const distances = [
-    tips[0]!.distanceTo(tips[1]!),
-    tips[1]!.distanceTo(tips[2]!),
-    tips[2]!.distanceTo(tips[3]!),
-  ];
-  return {average: average(distances)};
+
+  const center = new THREE.Vector3()
+    .add(wrist)
+    .add(indexBase)
+    .add(pinkyBase)
+    .multiplyScalar(1 / 3);
+
+  return {center, width, normal, right, up};
 }
 
-export function getFingerAlignmentScore(
+export function getFingerBendAngles(context: HandContext, finger: FingerName) {
+  return getDigitBendAngles(context, finger);
+}
+
+export function getFingerStraightness(
   context: HandContext,
-  metrics: FingerMetrics,
-  palmUp: THREE.Vector3
+  finger: FingerName
 ) {
-  const base = metrics.metacarpal ?? getJoint(context, 'wrist');
-  if (!base) return 0;
-  const direction = new THREE.Vector3().subVectors(metrics.tip, base);
-  if (direction.lengthSq() === 0) return 0;
-  direction.normalize();
-  return clamp01((direction.dot(palmUp) - 0.35) / 0.5);
+  return getDigitStraightness(context, finger);
+}
+
+export function getFingerCurl(context: HandContext, finger: FingerName) {
+  return 1 - getFingerStraightness(context, finger);
+}
+
+export function getFingerDirection(context: HandContext, finger: FingerName) {
+  return getDigitDirection(context, finger);
+}
+
+export function getFingerPalmAlignment(
+  context: HandContext,
+  finger: FingerName
+) {
+  const direction = getFingerDirection(context, finger);
+  const palmUp = getPalmUp(context);
+  if (!direction || !palmUp) return 0;
+  return clamp01((direction.dot(palmUp) - 0.2) / 0.8);
+}
+
+export function getFingerSpread(
+  context: HandContext,
+  fingerA: FingerName,
+  fingerB: FingerName
+) {
+  const directionA = getFingerDirection(context, fingerA);
+  const directionB = getFingerDirection(context, fingerB);
+  if (!directionA || !directionB) return 0;
+  return clamp01((1 - directionA.dot(directionB)) / 0.45);
+}
+
+export function getAdjacentFingerSpreads(context: HandContext) {
+  return {
+    indexMiddle: getFingerSpread(context, 'index', 'middle'),
+    middleRing: getFingerSpread(context, 'middle', 'ring'),
+    ringPinky: getFingerSpread(context, 'ring', 'pinky'),
+  };
+}
+
+export function getThumbBendAngles(context: HandContext) {
+  return getDigitBendAngles(context, 'thumb');
+}
+
+export function getThumbStraightness(context: HandContext) {
+  return getDigitStraightness(context, 'thumb');
+}
+
+export function getThumbCurl(context: HandContext) {
+  return 1 - getThumbStraightness(context);
+}
+
+export function getThumbDirection(context: HandContext) {
+  return getDigitDirection(context, 'thumb');
+}
+
+export function getThumbOpposition(
+  context: HandContext,
+  finger: FingerName = 'index'
+) {
+  const distance = getFingertipDistance(context, 'thumb', finger);
+  const scale = getPalmWidth(context) ?? estimateHandScale(context);
+  if (distance === null || scale < EPSILON) return 0;
+  return clamp01(1 - distance / (scale * 0.7));
+}
+
+export function getThumbVerticalDirection(context: HandContext) {
+  const direction = getThumbDirection(context);
+  if (!direction) return 0;
+  return direction.y;
+}
+
+export function getFingertipDistance(
+  context: HandContext,
+  digitA: DigitName,
+  digitB: DigitName
+) {
+  const tipA = getDigitTip(context, digitA);
+  const tipB = getDigitTip(context, digitB);
+  if (!tipA || !tipB) return null;
+  return tipA.distanceTo(tipB);
+}
+
+export function getFingertipPalmDistance(
+  context: HandContext,
+  digit: DigitName
+) {
+  const tip = getDigitTip(context, digit);
+  const palmPose = getPalmPose(context);
+  if (!tip || !palmPose) return null;
+  return tip.distanceTo(palmPose.center);
 }
 
 export function getBoneVectors(context: HandContext, global = false) {
@@ -222,4 +292,59 @@ export function average(values: number[]) {
 
 export function clamp01(value: number) {
   return THREE.MathUtils.clamp(value, 0, 1);
+}
+
+function getDigitBendAngles(context: HandContext, digit: DigitName) {
+  const segments = getDigitSegmentDirections(context, digit);
+  if (!segments || segments.length < 2) return [];
+
+  const angles: number[] = [];
+  for (let i = 0; i < segments.length - 1; i++) {
+    angles.push(segments[i].dot(segments[i + 1]));
+  }
+  return angles;
+}
+
+function getDigitStraightness(context: HandContext, digit: DigitName) {
+  const bendAngles = getDigitBendAngles(context, digit);
+  if (!bendAngles.length) return 0;
+  return average(bendAngles.map(normalizeStraightness));
+}
+
+function getDigitDirection(context: HandContext, digit: DigitName) {
+  const base = getDigitBase(context, digit);
+  const tip = getDigitTip(context, digit);
+  if (!base || !tip) return null;
+
+  const direction = new THREE.Vector3().subVectors(tip, base);
+  if (direction.lengthSq() === 0) return null;
+  return direction.normalize();
+}
+
+function getDigitBase(context: HandContext, digit: DigitName) {
+  return getJoint(context, DIGIT_JOINTS[digit][0]);
+}
+
+function getDigitTip(context: HandContext, digit: DigitName) {
+  return getJoint(context, DIGIT_JOINTS[digit][DIGIT_JOINTS[digit].length - 1]);
+}
+
+function getDigitSegmentDirections(context: HandContext, digit: DigitName) {
+  const joints = DIGIT_JOINTS[digit]
+    .map((jointName) => getJoint(context, jointName))
+    .filter(Boolean) as THREE.Vector3[];
+
+  if (joints.length !== DIGIT_JOINTS[digit].length) return null;
+
+  const segments: THREE.Vector3[] = [];
+  for (let i = 0; i < joints.length - 1; i++) {
+    const segment = new THREE.Vector3().subVectors(joints[i + 1], joints[i]);
+    if (segment.lengthSq() === 0) return null;
+    segments.push(segment.normalize());
+  }
+  return segments;
+}
+
+function normalizeStraightness(bendCosine: number) {
+  return clamp01((bendCosine - 0.55) / 0.4);
 }

@@ -7,13 +7,14 @@ import type {
   HandContext,
 } from '../GestureTypes';
 import {
-  computeFist,
-  computeOpenPalm,
-  computePinch,
-  computePoint,
-  computeSpread,
-  computeThumbsUp,
-} from '../providers/HeuristicGestureDetectors';
+  detectFist,
+  detectOpenPalm,
+  detectPinch,
+  detectPoint,
+  detectSpread,
+  detectThumbsDown,
+  detectThumbsUp,
+} from './BuiltInHeuristicGestures';
 
 type RegisteredGesture = {
   detector: HeuristicGestureDetector;
@@ -66,15 +67,16 @@ export class HeuristicGestureRecognizer implements GestureRecognizer {
   }
 
   private registerBuiltInGestures() {
-    this.registerGesture('pinch', computePinch, {
+    this.registerGesture('pinch', detectPinch, {
       enabled: true,
       threshold: 0.025,
     });
-    this.registerGesture('open-palm', computeOpenPalm);
-    this.registerGesture('fist', computeFist);
-    this.registerGesture('thumbs-up', computeThumbsUp);
-    this.registerGesture('point', computePoint, {enabled: false});
-    this.registerGesture('spread', computeSpread, {
+    this.registerGesture('open-palm', detectOpenPalm);
+    this.registerGesture('fist', detectFist);
+    this.registerGesture('thumbs-up', detectThumbsUp);
+    this.registerGesture('thumbs-down', detectThumbsDown);
+    this.registerGesture('point', detectPoint, {enabled: false});
+    this.registerGesture('spread', detectSpread, {
       enabled: false,
       threshold: 0.04,
     });

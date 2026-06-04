@@ -178,3 +178,53 @@ describe('NetSession late-join state-reset regression', () => {
     expect(owned.position.toArray()).toEqual([1, 2, 3]);
   });
 });
+
+describe('NetSession close ordering', () => {
+  // Regression: close() previously sent the session `bye` BEFORE
+  // calling voice.disable(). voice.disable() then broadcasts
+  // `netblocks/voice-state=false` and per-peer voice `bye` signals.
+  // On the remote, the session bye would remove the user first, and
+  // the trailing voice messages would land in `_onMessage` where any
+  // message from an unknown peer creates a fresh `NetUser` — leaving
+  // a ghost avatar behind for the peer that just left.
+  it('emits the session bye AFTER voice disable so remotes never resurrect a ghost user', async () => {
+    const transport = new FakeTransport();
+    const session = new NetSession(transport, new THREE.Group());
+    await session.open('room');
+    // Force voice into the enabled state without going through
+    // navigator.mediaDevices (jsdom doesn't have it). disable() still
+    // runs its full broadcast path because `wasEnabled` is true.
+    (session.voice as unknown as {_enabled: boolean})._enabled = true;
+    // Plant a peer connection so voice.disable() emits a voice bye too.
+    (
+      session.voice as unknown as {
+        _peers: Map<
+          string,
+          {pc: {close: () => void; getSenders: () => unknown[]}; isOfferer: boolean}
+        >;
+      }
+    )._peers.set('peer-x', {
+      pc: {close: () => {}, getSenders: () => []},
+      isOfferer: false,
+    });
+    transport.sent.length = 0;
+
+    session.close();
+
+    const decoded = decodeSent(transport.sent);
+    const byeIdx = decoded.findIndex(
+      (d) => d.msg.type === 'bye' && d.to === undefined
+    );
+    const voiceByeIdx = decoded.findIndex(
+      (d) =>
+        d.msg.type === 'voice' &&
+        (d.msg as {signal: {kind: string}}).signal.kind === 'bye'
+    );
+    expect(byeIdx).toBeGreaterThanOrEqual(0);
+    expect(voiceByeIdx).toBeGreaterThanOrEqual(0);
+    // Voice bye must precede the session bye so the remote sees voice
+    // cleanup against the still-known sender, not against an
+    // already-removed user.
+    expect(voiceByeIdx).toBeLessThan(byeIdx);
+  });
+});

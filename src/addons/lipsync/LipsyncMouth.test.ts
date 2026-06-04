@@ -2,12 +2,22 @@ import {describe, it, expect, vi, beforeEach} from 'vitest';
 
 // Mock xrblocks so importing `Script` doesn't trigger the Core singleton,
 // which constructs a real AudioContext (jsdom can't provide one). We
-// only need Script (as a generic Object3D base) and the VisemeWeights
-// type — the test supplies its own VisemeTarget so StylizedFace isn't
-// referenced.
+// only need Script (as a generic Object3D base), the VisemeWeights type,
+// and ZERO_VISEME (used by dispose to reset the target).
 vi.mock('xrblocks', async () => {
   const T = await import('three');
-  return {Script: T.Object3D, core: {camera: undefined}};
+  return {
+    Script: T.Object3D,
+    core: {camera: undefined},
+    ZERO_VISEME: {
+      jawOpen: 0,
+      aa: 0,
+      oo: 0,
+      oh: 0,
+      ee: 0,
+      consonant: 0,
+    },
+  };
 });
 
 import {LipsyncMouth, VisemeTarget} from './LipsyncMouth';
@@ -241,6 +251,23 @@ describe('LipsyncMouth', () => {
     // After ~480 ms of chatter we should be past the 100 ms hold and
     // well into mapper decay; the target must have moved off its peak.
     expect(target.visemes.jawOpen).toBeLessThan(peakJaw * 0.4);
+  });
+
+  it('dispose() resets the target to ZERO_VISEME so a face never freezes mid-vowel', async () => {
+    const target = new FakeTarget();
+    const m = new LipsyncMouth(makeStream(), {
+      target,
+      audioContext: ctx as unknown as AudioContext,
+    });
+    await m.init();
+    const analyser = ctx.createAnalyser.mock.results[0]
+      .value as MockAnalyserNode;
+    analyser.__setLoudVoiced();
+    for (let i = 0; i < 60; i++) m.update(i * 16);
+    // Sanity: the target was actively driven open before dispose.
+    expect(target.visemes.jawOpen).toBeGreaterThan(0.05);
+    m.dispose();
+    expect(target.visemes).toEqual(ZERO_VISEME);
   });
 
   it('dispose() disconnects analyser + source but does NOT dispose the target (caller owns it)', async () => {

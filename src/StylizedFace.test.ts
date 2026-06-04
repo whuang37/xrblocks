@@ -195,4 +195,15 @@ describe('StylizedFace', () => {
     expect(matDisposed).toBe(true);
     expect(texDisposed).toBe(true);
   });
+
+  it('dispose() is idempotent (xrblocks ScriptsManager + a host can both call it)', () => {
+    const m = new StylizedFace();
+    const tex = m.texture;
+    let texDisposes = 0;
+    tex.addEventListener('dispose', () => texDisposes++);
+    m.dispose();
+    m.dispose();
+    m.dispose();
+    expect(texDisposes).toBe(1);
+  });
 });

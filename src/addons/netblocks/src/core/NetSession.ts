@@ -263,8 +263,14 @@ export class NetSession extends EventTarget {
   close(): void {
     if (!this._isOpen) return;
     this._isOpen = false;
-    this._sendNet({type: 'bye'});
+    // Voice first so the per-peer voice `bye` and the
+    // `netblocks/voice-state=false` broadcast arrive at remote peers
+    // BEFORE the session-level `bye`. Otherwise the session bye
+    // removes the local user on each remote, and the later voice
+    // messages — routed through `_onMessage` — would create a
+    // brand-new ghost `NetUser` for the (now-departed) sender.
     this.voice.disable();
+    this._sendNet({type: 'bye'});
     this.transport.close();
     // Detach our transport listeners so the transport (which may outlive
     // the session — e.g., a sample that re-opens with a fresh session)

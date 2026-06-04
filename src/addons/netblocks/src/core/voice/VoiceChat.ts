@@ -50,6 +50,12 @@ export class VoiceChat {
   private _peers = new Map<string, VoicePeer>();
   private _enabled = false;
   private _localId = '';
+  // Incremented on every disable(). enable() captures the current
+  // value at the start of its async getUserMedia await; if the value
+  // has advanced by the time the await resolves, a disable arrived
+  // mid-request and the mic stream we just acquired is stale — stop
+  // it and bail without flipping `_enabled` true.
+  private _generation = 0;
 
   constructor(send: VoiceSendFn, opts: VoiceChatOptions = {}) {
     this._send = send;
@@ -103,9 +109,19 @@ export class VoiceChat {
     ) {
       throw new Error('VoiceChat: getUserMedia is not available.');
     }
-    this._localStream = await navigator.mediaDevices.getUserMedia({
+    // Snapshot the generation BEFORE the await. If disable() runs
+    // while getUserMedia is pending, it bumps _generation. We then
+    // throw away the freshly-acquired stream so we never leak a live
+    // mic and never flip `_enabled` true behind the disabler's back.
+    const gen = this._generation;
+    const stream = await navigator.mediaDevices.getUserMedia({
       audio: this._opts.audioConstraints,
     });
+    if (gen !== this._generation) {
+      for (const t of stream.getTracks()) t.stop();
+      return;
+    }
+    this._localStream = stream;
     this._enabled = true;
     this._opts.onLocalStateChange(true);
     // Back-fill local tracks onto any peer connections that were created
@@ -142,6 +158,10 @@ export class VoiceChat {
     // inbound MediaStream + ICE).
     const wasEnabled = this._enabled;
     this._enabled = false;
+    // Cancel any in-flight enable(): if its getUserMedia is still
+    // pending, this bumped generation makes it discard the resulting
+    // stream instead of flipping `_enabled` true after we left.
+    this._generation++;
     // Tell each peer to drop their PC to us. Without this, the remote
     // keeps an orphaned PC alive (RTCPeerConnection.close() does not
     // signal anything to the remote) and on a subsequent enable() our

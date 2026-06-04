@@ -1,4 +1,4 @@
-import {Script, VisemeWeights} from 'xrblocks';
+import {Script, VisemeWeights, ZERO_VISEME} from 'xrblocks';
 
 import {computeAudioFeatures} from './computeAudioFeatures';
 import {FormantVisemeMapper} from './FormantVisemeMapper';
@@ -238,10 +238,15 @@ export class LipsyncMouth extends Script {
     this.freqData = undefined;
     this.timeData = undefined;
     this.ctx = undefined;
-    // Note: we do NOT dispose `this.target` — the caller owns it.
+    // Reset the target to its rest pose. Without this, a peer who
+    // disabled their mic mid-vowel would leave their avatar's mouth
+    // frozen open until something else drove the face. We never
+    // dispose the target itself — the caller owns its lifetime.
+    try {
+      this.target.setVisemes(ZERO_VISEME);
+    } catch {
+      // ignore — target may already be disposed by the host (e.g.
+      // the avatar was removed in the same frame).
+    }
   }
 }
-
-// Re-export for convenience so consumers can subscribe to viseme weights
-// without importing from the reducer file directly.
-export type {VisemeWeights} from './BlendshapeReducer';

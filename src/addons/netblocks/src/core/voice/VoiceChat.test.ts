@@ -174,4 +174,44 @@ describe('VoiceChat onLocalStateChange', () => {
     vc.disable();
     expect(onLocalStateChange).not.toHaveBeenCalled();
   });
+
+  it('disable() during a pending enable() cancels it: stream stopped, no false state flip', async () => {
+    // Simulate the rapid-toggle race: user hits the mic button, then
+    // hits it again before getUserMedia resolves. The pending enable
+    // must NOT flip `_enabled` true after the disable arrived.
+    const onLocalStateChange = vi.fn();
+    let resolveGum!: (s: MediaStream) => void;
+    const pending = new Promise<MediaStream>((r) => (resolveGum = r));
+    const trackStop = vi.fn();
+    const stream = {
+      getTracks: () => [{stop: trackStop} as unknown as MediaStreamTrack],
+    } as unknown as MediaStream;
+    const origNav = globalThis.navigator;
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: {
+        mediaDevices: {
+          getUserMedia: vi.fn().mockReturnValue(pending),
+        },
+      },
+    });
+    try {
+      const vc = new VoiceChat(() => {}, {onLocalStateChange});
+      const enableP = vc.enable(new Set());
+      // disable arrives while getUserMedia is still pending
+      vc.disable();
+      // Now resolve the pending getUserMedia with the stream.
+      resolveGum(stream);
+      await enableP;
+      // The stale stream must have been stopped, not flipped on.
+      expect(trackStop).toHaveBeenCalled();
+      expect(vc.isEnabled()).toBe(false);
+      expect(onLocalStateChange).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(globalThis, 'navigator', {
+        configurable: true,
+        value: origNav,
+      });
+    }
+  });
 });

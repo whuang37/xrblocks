@@ -81,6 +81,12 @@ export class StylizedFace extends Script {
   private blinkStartAt = -Infinity;
   // Total duration of one blink (eyelid down + back up).
   private static readonly BLINK_MS = 140;
+  // Guards dispose() against being called more than once. xrblocks'
+  // ScriptsManager calls dispose on every Script removed from the
+  // scene graph; if a host (e.g. RemoteUserAvatar.dispose) also
+  // disposes manually, the double-call could double-free GPU
+  // resources or fire `dispose` events twice on listeners.
+  private _disposed = false;
 
   constructor(opts: StylizedFaceOptions = {}) {
     super();
@@ -137,8 +143,10 @@ export class StylizedFace extends Script {
     this.drawIfDirty();
   }
 
-  /** Free the texture, geometry, and material. */
+  /** Free the texture, geometry, and material. Idempotent. */
   override dispose(): void {
+    if (this._disposed) return;
+    this._disposed = true;
     this.texture.dispose();
     this.mesh.geometry.dispose();
     this.mesh.material.dispose();

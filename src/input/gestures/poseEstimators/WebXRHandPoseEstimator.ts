@@ -3,7 +3,12 @@ import * as THREE from 'three';
 import {Handedness, JointName} from '../../Hands';
 import {HAND_JOINT_NAMES} from '../../components/HandJointNames';
 import {User} from '../../../core/User';
-import {HandContext, HandLabel, JointPositions, PoseEstimator} from '../GestureTypes';
+import {
+  HandContext,
+  HandLabel,
+  JointPositions,
+  PoseEstimator,
+} from '../GestureTypes';
 
 const HAND_INDEX_TO_LABEL: Record<number, HandLabel> = {
   [Handedness.LEFT]: 'left',

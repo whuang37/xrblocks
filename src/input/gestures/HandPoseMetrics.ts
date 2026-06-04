@@ -19,12 +19,7 @@ export type PalmPose = {
   up: THREE.Vector3;
 };
 
-export const FINGER_ORDER: FingerName[] = [
-  'index',
-  'middle',
-  'ring',
-  'pinky',
-];
+export const FINGER_ORDER: FingerName[] = ['index', 'middle', 'ring', 'pinky'];
 
 const FINGER_PREFIX: Record<FingerName, string> = {
   index: 'index-finger',
@@ -150,7 +145,15 @@ export function getPalmPose(context: HandContext): PalmPose | null {
   const right = getPalmRight(context);
   const up = getPalmUp(context);
 
-  if (!wrist || !indexBase || !pinkyBase || !width || !normal || !right || !up) {
+  if (
+    !wrist ||
+    !indexBase ||
+    !pinkyBase ||
+    !width ||
+    !normal ||
+    !right ||
+    !up
+  ) {
     return null;
   }
 

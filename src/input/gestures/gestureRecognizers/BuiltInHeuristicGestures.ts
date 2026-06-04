@@ -102,9 +102,7 @@ export function detectFist(context: HandContext, config: GestureConfiguration) {
   ).filter((distance): distance is number => distance !== null);
   const palmDistanceAverage = average(palmDistances);
   const palmDistanceScore =
-    scale > EPSILON
-      ? clamp01(1 - palmDistanceAverage / (scale * 1.35))
-      : 0;
+    scale > EPSILON ? clamp01(1 - palmDistanceAverage / (scale * 1.35)) : 0;
   const thumbWrap = Math.max(
     getThumbOpposition(context, 'index'),
     getThumbOpposition(context, 'middle')
@@ -117,7 +115,9 @@ export function detectFist(context: HandContext, config: GestureConfiguration) {
   const baseConfidence = clamp01(
     closed * 0.7 + palmDistanceScore * 0.2 + thumbWrap * 0.1
   );
-  const confidence = clamp01(baseConfidence * (1 - verticalThumbPenalty * 0.85));
+  const confidence = clamp01(
+    baseConfidence * (1 - verticalThumbPenalty * 0.85)
+  );
 
   return {
     confidence,
@@ -215,7 +215,10 @@ export function detectThumbsDown(
   };
 }
 
-export function detectPoint(context: HandContext, config: GestureConfiguration) {
+export function detectPoint(
+  context: HandContext,
+  config: GestureConfiguration
+) {
   const indexStraightness = getFingerStraightness(context, 'index');
   const indexAlignment = getFingerPalmAlignment(context, 'index');
   const indexExtension = getFingerExtensionScore(context, 'index');
@@ -267,7 +270,10 @@ function getFingerExtensionScore(
   return clamp01((distance - scale * 0.45) / (scale * 0.85));
 }
 
-export function detectSpread(context: HandContext, config: GestureConfiguration) {
+export function detectSpread(
+  context: HandContext,
+  config: GestureConfiguration
+) {
   const straightnessScores = FINGER_ORDER.map((finger) =>
     getFingerStraightness(context, finger)
   );

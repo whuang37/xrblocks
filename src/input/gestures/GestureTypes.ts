@@ -24,14 +24,15 @@ export type GestureDetectionResult = {
   data?: Record<string, unknown>;
 };
 
-export type GestureScoreMap = Record<string, GestureDetectionResult | undefined>;
+export type GestureScoreMap = Record<
+  string,
+  GestureDetectionResult | undefined
+>;
 
 export type HeuristicGestureDetector = (
   context: HandContext,
   config: GestureConfiguration
 ) => GestureDetectionResult | undefined;
-
-export type GestureDetector = HeuristicGestureDetector;
 
 export interface GestureRecognizer {
   init?(): Promise<void>;

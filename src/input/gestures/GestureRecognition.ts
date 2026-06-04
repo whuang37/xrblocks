@@ -50,7 +50,10 @@ export class GestureRecognition extends Script<GestureRecognitionEventMap> {
   };
   private lastEvaluation = 0;
 
-  async init({options, user}: {
+  async init({
+    options,
+    user,
+  }: {
     options: GestureRecognitionOptions;
     user: User;
   }) {

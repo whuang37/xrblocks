@@ -9,10 +9,10 @@ export interface GestureEventDetail {
   name: string;
   /** Which hand triggered the gesture. */
   hand: GestureHandedness;
-  /** Provider specific confidence score, normalized to [0, 1]. */
+  /** Gesture recognizer confidence score, normalized to [0, 1]. */
   confidence: number;
   /**
-   * Optional payload for provider specific values (e.g. pinch distance,
+   * Optional payload for recognizer specific values (e.g. pinch distance,
    * velocity vectors).
    */
   data?: Record<string, unknown>;

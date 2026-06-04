@@ -1,5 +1,8 @@
 import {deepMerge} from '../../utils/OptionsUtils';
 import {DeepPartial, DeepReadonly} from '../../utils/Types';
+import type {GestureRecognizer, PoseEstimator} from './GestureTypes';
+import {HeuristicGestureRecognizer} from './gestureRecognizers/HeuristicGestureRecognizer';
+import {WebXRHandPoseEstimator} from './poseEstimators/WebXRHandPoseEstimator';
 
 export type GestureProvider = 'heuristics' | 'mediapipe' | 'tfjs';
 
@@ -21,8 +24,9 @@ export type GestureConfiguration = {
   threshold?: number;
 };
 
-export type GestureConfigurations = Partial<
-  Record<BuiltInGestureName, Partial<GestureConfiguration>>
+export type GestureConfigurations = Record<
+  string,
+  Partial<GestureConfiguration>
 >;
 
 export class GestureRecognitionOptions {
@@ -48,27 +52,45 @@ export class GestureRecognitionOptions {
    */
   updateIntervalMs = 33;
 
+  poseEstimator: PoseEstimator = new WebXRHandPoseEstimator();
+
+  gestureRecognizer: GestureRecognizer = new HeuristicGestureRecognizer();
+
   /**
-   * Default gesture catalogue.
+   * Gesture catalogue. Defaults are supplied by the configured gesture
+   * recognizer.
    */
-  gestures: Record<BuiltInGestureName, GestureConfiguration> = {
-    pinch: {enabled: true, threshold: 0.025},
-    'open-palm': {enabled: true},
-    fist: {enabled: true},
-    'thumbs-up': {enabled: true},
-    point: {enabled: false},
-    spread: {enabled: false, threshold: 0.04},
-  };
+  gestures: Record<string, GestureConfiguration> = {};
 
   constructor(options?: DeepReadonly<DeepPartial<GestureRecognitionOptions>>) {
-    deepMerge(this, options);
-    if (options?.gestures) {
-      for (const [name, config] of Object.entries(options.gestures)) {
-        const gestureName = name as BuiltInGestureName;
-        this.gestures[gestureName] = deepMerge(
-          {...this.gestures[gestureName]},
-          config
-        ) as GestureConfiguration;
+    const customPoseEstimator = options?.poseEstimator as
+      | PoseEstimator
+      | undefined;
+    const customGestureRecognizer = options?.gestureRecognizer as
+      | GestureRecognizer
+      | undefined;
+    const gestureOverrides = options?.gestures;
+
+    if (options) {
+      const optionsWithoutRecognizers = {...options};
+      delete optionsWithoutRecognizers.poseEstimator;
+      delete optionsWithoutRecognizers.gestureRecognizer;
+      delete optionsWithoutRecognizers.gestures;
+      deepMerge(this, optionsWithoutRecognizers);
+    }
+
+    if (customPoseEstimator) {
+      this.poseEstimator = customPoseEstimator;
+    }
+    if (customGestureRecognizer) {
+      this.gestureRecognizer = customGestureRecognizer;
+    }
+
+    this.applyGestureRecognizerConfigurations();
+
+    if (gestureOverrides) {
+      for (const [name, config] of Object.entries(gestureOverrides)) {
+        this.setGestureConfig(name, config as Partial<GestureConfiguration>);
       }
     }
   }
@@ -81,9 +103,38 @@ export class GestureRecognitionOptions {
   /**
    * Convenience helper to toggle specific gestures.
    */
-  setGestureEnabled(name: BuiltInGestureName, enabled: boolean) {
+  setGestureEnabled(name: string, enabled: boolean) {
     this.gestures[name] ??= {enabled};
     this.gestures[name].enabled = enabled;
     return this;
+  }
+
+  setPoseEstimator(poseEstimator: PoseEstimator) {
+    this.poseEstimator = poseEstimator;
+    return this;
+  }
+
+  setGestureRecognizer(gestureRecognizer: GestureRecognizer) {
+    this.gestureRecognizer = gestureRecognizer;
+    this.gestures = {};
+    this.applyGestureRecognizerConfigurations();
+    return this;
+  }
+
+  setGestureConfig(name: string, config: Partial<GestureConfiguration>) {
+    const mergedConfig = {
+      ...this.gestures[name],
+      enabled: this.gestures[name]?.enabled ?? true,
+    } as GestureConfiguration;
+    deepMerge(mergedConfig, config);
+    this.gestures[name] = mergedConfig;
+    return this;
+  }
+
+  private applyGestureRecognizerConfigurations() {
+    const configs = this.gestureRecognizer.getGestureConfigurations?.() ?? {};
+    for (const [name, config] of Object.entries(configs)) {
+      this.setGestureConfig(name, config);
+    }
   }
 }

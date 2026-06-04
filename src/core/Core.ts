@@ -9,6 +9,7 @@ import {DepthOptions} from '../depth/DepthOptions';
 import {Hands} from '../input/Hands';
 import {GestureRecognition} from '../input/gestures/GestureRecognition';
 import {GestureRecognitionOptions} from '../input/gestures/GestureRecognitionOptions.js';
+import type {PoseEstimator} from '../input/gestures/GestureTypes';
 import {StrokeRecognitionOptions} from '../input/strokes/StrokeRecognitionOptions';
 import {Input} from '../input/Input';
 import {Lighting} from '../lighting/Lighting';
@@ -120,6 +121,7 @@ export class Core {
   xrButton?: XRButton;
   effects?: XREffects;
   ai = new AI();
+  poseEstimation?: PoseEstimator;
   gestureRecognition?: GestureRecognition;
   transition?: XRTransition;
   currentFrame?: XRFrame;
@@ -307,8 +309,10 @@ export class Core {
       webXRRequiredFeatures.push('hand-tracking');
       this.user.hands = new Hands(this.input.hands);
       if (options.gestures.enabled) {
+        this.poseEstimation = options.gestures.poseEstimator;
         this.gestureRecognition = new GestureRecognition();
         this.xrSystemsGroup.add(this.gestureRecognition);
+        this.registry.register(this.poseEstimation);
         this.registry.register(this.gestureRecognition);
       }
     }

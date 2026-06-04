@@ -1,15 +1,12 @@
-import type {BuiltInGestureName} from './GestureRecognitionOptions';
-
 export type GestureEventType = 'gesturestart' | 'gestureupdate' | 'gestureend';
 
 export type GestureHandedness = 'left' | 'right';
 
 export interface GestureEventDetail {
   /**
-   * The canonical gesture identifier. Built-in gestures map to
-   * `BuiltInGestureName` while custom providers may surface arbitrary strings.
+   * The canonical gesture identifier from the configured gesture recognizer.
    */
-  name: BuiltInGestureName | string;
+  name: string;
   /** Which hand triggered the gesture. */
   hand: GestureHandedness;
   /** Provider specific confidence score, normalized to [0, 1]. */

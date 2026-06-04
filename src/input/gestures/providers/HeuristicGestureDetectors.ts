@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 
+import type {JointName} from '../../Hands';
 import {GestureConfiguration} from '../GestureRecognitionOptions';
 import {GestureDetectorMap, HandContext} from '../GestureTypes';
 
@@ -451,7 +452,7 @@ function getAdjacentFingerDistances(context: HandContext) {
 }
 
 function getJoint(context: HandContext, jointName: string) {
-  return context.joints.get(jointName);
+  return context.joints.get(jointName as JointName);
 }
 
 function getFingerJoint(

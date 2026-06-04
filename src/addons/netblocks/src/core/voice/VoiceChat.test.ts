@@ -52,7 +52,10 @@ describe('VoiceChat re-negotiation signalling', () => {
     const inner = vc as unknown as {
       _peers: Map<
         string,
-        {pc: {close: () => void; getSenders: () => unknown[]}; isOfferer: boolean}
+        {
+          pc: {close: () => void; getSenders: () => unknown[]};
+          isOfferer: boolean;
+        }
       >;
     };
     inner._peers.set(peerId, {

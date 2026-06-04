@@ -70,9 +70,7 @@ class NetblocksLipsyncSample extends NetSample {
     });
     session.voice.onTrackRemoved((peerId) => this.detachDriver(peerId));
     session.addEventListener('user-leave', (e) => {
-      this.detachDriver(
-        (e as CustomEvent<UserEventDetail>).detail.user.peerId
-      );
+      this.detachDriver((e as CustomEvent<UserEventDetail>).detail.user.peerId);
     });
 
     // Track local voice state from the authoritative NetSession event

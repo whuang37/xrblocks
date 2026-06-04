@@ -200,7 +200,10 @@ describe('NetSession close ordering', () => {
       session.voice as unknown as {
         _peers: Map<
           string,
-          {pc: {close: () => void; getSenders: () => unknown[]}; isOfferer: boolean}
+          {
+            pc: {close: () => void; getSenders: () => unknown[]};
+            isOfferer: boolean;
+          }
         >;
       }
     )._peers.set('peer-x', {
@@ -243,10 +246,7 @@ describe('NetSession close ordering', () => {
       added.push({type, listener});
       return origAdd(type, listener);
     }) as typeof window.addEventListener;
-    window.removeEventListener = ((
-      type: string,
-      listener: EventListener
-    ) => {
+    window.removeEventListener = ((type: string, listener: EventListener) => {
       removed.push({type, listener});
       return origRemove(type, listener);
     }) as typeof window.removeEventListener;

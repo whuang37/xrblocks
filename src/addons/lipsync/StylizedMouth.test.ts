@@ -55,6 +55,21 @@ describe('StylizedMouth', () => {
     expect(m.texture.version).toBeGreaterThan(v0);
   });
 
+  it('skips redraw + texture upload when visemes are essentially unchanged', () => {
+    // Setting the same visemes back-to-back should hit the dirty-flag
+    // short-circuit; the canvas texture version should not advance.
+    const m = new StylizedMouth({showEyes: false});
+    const v = {...ZERO_VISEME, jawOpen: 0.5};
+    m.setVisemes(v);
+    const versionAfterFirst = m.texture.version;
+    m.setVisemes(v);
+    m.setVisemes({...v, jawOpen: 0.5005});
+    expect(m.texture.version).toBe(versionAfterFirst);
+    // A bigger change crosses the epsilon and forces a redraw.
+    m.setVisemes({...v, jawOpen: 0.6});
+    expect(m.texture.version).toBeGreaterThan(versionAfterFirst);
+  });
+
   it('eyes default on: ellipse() called 3 times per redraw (mouth + 2 eyes)', () => {
     // Spy on the 2D context's ellipse method to confirm drawing the
     // expected number of shapes per setVisemes call.

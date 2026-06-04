@@ -58,6 +58,14 @@ export class StylizedMouth extends THREE.Object3D {
   /** Computed lip metrics from the most recent setVisemes call. */
   metrics: LipMetrics = {width: 1, openHeight: 0};
 
+  // Cached state from the last actual redraw, used to short-circuit
+  // setVisemes when neither the lip shape nor the blink frame would
+  // produce a visually different texture. Avoids 256x256 canvas
+  // redraws and CanvasTexture re-uploads while the mouth is at rest.
+  private lastDrawnWidth = NaN;
+  private lastDrawnOpenHeight = NaN;
+  private lastDrawnBlinkScale = NaN;
+
   // Schedule for the next blink (wall-clock ms via performance.now). The
   // initial value is set in the constructor so the very first blink
   // happens a few seconds after the avatar appears, not instantly.
@@ -105,12 +113,27 @@ export class StylizedMouth extends THREE.Object3D {
 
   /**
    * Drive the mouth drawing from a viseme weight set. Cheap enough to
-   * call every frame.
+   * call every frame; redraws and re-uploads the canvas texture only
+   * when the lip shape or blink frame would actually change pixels.
    */
   setVisemes(v: VisemeWeights): void {
     this.visemes = v;
     this.metrics = computeMetrics(v);
-    this.drawMouth();
+    const blinkScale = this.showEyes
+      ? this.currentBlinkScale(performance.now())
+      : 1;
+    const EPS = 0.005;
+    if (
+      Math.abs(this.metrics.width - this.lastDrawnWidth) < EPS &&
+      Math.abs(this.metrics.openHeight - this.lastDrawnOpenHeight) < EPS &&
+      Math.abs(blinkScale - this.lastDrawnBlinkScale) < EPS
+    ) {
+      return;
+    }
+    this.lastDrawnWidth = this.metrics.width;
+    this.lastDrawnOpenHeight = this.metrics.openHeight;
+    this.lastDrawnBlinkScale = blinkScale;
+    this.drawMouth(blinkScale);
     this.texture.needsUpdate = true;
   }
 
@@ -121,7 +144,7 @@ export class StylizedMouth extends THREE.Object3D {
     this.mesh.material.dispose();
   }
 
-  private drawMouth(): void {
+  private drawMouth(blinkScale: number): void {
     const ctx = this.ctx;
     if (!ctx) return;
     const w = this.canvas.width;
@@ -151,7 +174,6 @@ export class StylizedMouth extends THREE.Object3D {
       const eyeY = h * 0.36;
       const eyeOffset = w * 0.16;
       const eyeR = w * 0.07;
-      const blinkScale = this.currentBlinkScale(performance.now());
       for (const ex of [cx - eyeOffset, cx + eyeOffset]) {
         ctx.beginPath();
         ctx.ellipse(ex, eyeY, eyeR, eyeR * blinkScale, 0, 0, Math.PI * 2);

@@ -46,19 +46,27 @@ export interface LipsyncMouthOptions {
  *
  * Extends `xb.Script` so the xrblocks scripts manager calls `init()` once
  * the instance is part of the active scene and `update(time)` every
- * frame. `dispose()` is called automatically when removed from the scene
- * graph; it disconnects audio nodes and releases the mouth geometry. It
+ * frame. `dispose()` is called automatically by the scripts manager on
+ * the next sync after the instance is removed from the scene graph; it
+ * disconnects audio nodes and releases the mouth geometry. It
  * deliberately never stops the input `MediaStream` tracks (the caller
  * owns those) and never closes a caller-supplied `AudioContext`.
+ *
+ * Instances are one-shot: after `dispose()` runs (i.e. once the script
+ * has been removed from the scene), do NOT re-add the same instance.
+ * Construct a new `LipsyncMouth` for the next attachment.
+ *
+ * The `mouth` field is a {@link StylizedMouth}; read its `visemes` field
+ * if you want to poll the current viseme weights.
  *
  * @example
  *   const mouth = new LipsyncMouth(myMicStream);
  *   headPivot.add(mouth);
  *   // ... when done:
- *   headPivot.remove(mouth);  // triggers dispose()
+ *   headPivot.remove(mouth);  // dispose() runs on the next frame
  */
 export class LipsyncMouth extends Script {
-  /** Latest viseme weights applied to the mouth (read-only convenience). */
+  /** Stylised mouth child; read `mouth.visemes` for the latest weights. */
   readonly mouth: StylizedMouth;
 
   private readonly stream: MediaStream;

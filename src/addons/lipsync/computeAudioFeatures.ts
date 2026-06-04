@@ -3,16 +3,21 @@ import type {AudioFeatures} from './FormantVisemeMapper';
 export interface AudioFeatureInputs {
   /** `analyser.getByteFrequencyData()` output. */
   freqData: Uint8Array;
-  /** `analyser.getFloatFrequencyData()` output (dB), same length as `freqData`. */
-  freqDataFloat: Float32Array;
+  /**
+   * `analyser.getFloatFrequencyData()` output (dB), same length as
+   * `freqData`. Reserved for downstream consumers (e.g. ML mappers
+   * computing MFCC); the heuristic path doesn't read it.
+   */
+  freqDataFloat?: Float32Array;
   /** `analyser.getByteTimeDomainData()` output, length == `analyser.fftSize`. */
   timeData: Uint8Array;
   /**
-   * 13-element MFCC vector already computed from `freqDataFloat`. Caller
-   * owns the buffer; passed through unchanged in the returned features so
-   * downstream consumers (e.g. ModelMapper) see the same numbers.
+   * Optional 13-element MFCC vector. Passed through unchanged in the
+   * returned features so downstream consumers (e.g. a future
+   * ModelMapper) see the same numbers; the formant-based mapper
+   * doesn't consume it.
    */
-  mfcc: Float32Array;
+  mfcc?: Float32Array;
 }
 
 /**
@@ -24,7 +29,7 @@ export interface AudioFeatureInputs {
 export function computeAudioFeatures(
   inputs: AudioFeatureInputs,
   sampleRate: number
-): AudioFeatures & {mfcc: Float32Array} {
+): AudioFeatures & {mfcc?: Float32Array} {
   const {freqData, timeData, mfcc} = inputs;
 
   // RMS from time domain. timeData is unsigned 8-bit: 128 == silence.

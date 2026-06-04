@@ -1,12 +1,13 @@
 import {describe, it, expect} from 'vitest';
 
+import type {AudioFeatureInputs} from './computeAudioFeatures';
 import {computeAudioFeatures} from './computeAudioFeatures';
 
 const SAMPLE_RATE = 48000;
 const NUM_BINS = 512;
 const FFT_SIZE = NUM_BINS * 2;
 
-function silentInputs() {
+function silentInputs(): AudioFeatureInputs {
   return {
     freqData: new Uint8Array(NUM_BINS),
     freqDataFloat: new Float32Array(NUM_BINS).fill(-120),
@@ -76,8 +77,16 @@ describe('computeAudioFeatures', () => {
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
     ]);
     const f = computeAudioFeatures(inputs, SAMPLE_RATE);
-    expect(Array.from(f.mfcc)).toEqual([
+    expect(f.mfcc).toBeDefined();
+    expect(Array.from(f.mfcc!)).toEqual([
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
     ]);
+  });
+
+  it('omits the mfcc field when none is supplied', () => {
+    const inputs = silentInputs();
+    inputs.mfcc = undefined;
+    const f = computeAudioFeatures(inputs, SAMPLE_RATE);
+    expect(f.mfcc).toBeUndefined();
   });
 });

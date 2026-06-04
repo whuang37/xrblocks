@@ -3,7 +3,6 @@ import {Script} from 'xrblocks';
 import {ZERO_VISEME} from './BlendshapeReducer';
 import {computeAudioFeatures} from './computeAudioFeatures';
 import {FormantVisemeMapper} from './FormantVisemeMapper';
-import {MfccExtractor} from './MfccExtractor';
 import {StylizedMouth} from './StylizedMouth';
 
 export interface LipsyncMouthOptions {
@@ -75,9 +74,7 @@ export class LipsyncMouth extends Script {
   // `new Uint8Array(n)` produces. Pin the buffer type so the calls below
   // type-check under strict rollup-typescript.
   private freqData?: Uint8Array<ArrayBuffer>;
-  private freqDataFloat?: Float32Array<ArrayBuffer>;
   private timeData?: Uint8Array<ArrayBuffer>;
-  private mfccExtractor?: MfccExtractor;
   private primer?: HTMLAudioElement;
 
   private readonly mapper = new FormantVisemeMapper();
@@ -116,14 +113,7 @@ export class LipsyncMouth extends Script {
     this.freqData = new Uint8Array(
       new ArrayBuffer(this.analyser.frequencyBinCount)
     );
-    this.freqDataFloat = new Float32Array(
-      new ArrayBuffer(this.analyser.frequencyBinCount * 4)
-    );
     this.timeData = new Uint8Array(new ArrayBuffer(this.analyser.fftSize));
-    this.mfccExtractor = new MfccExtractor({
-      sampleRate: this.ctx.sampleRate,
-      fftSize: this.fftSize,
-    });
 
     // Chromium WebRTC quirk: a MediaStreamAudioSourceNode built from a
     // remote stream stays silent unless the stream is also being pumped
@@ -143,14 +133,7 @@ export class LipsyncMouth extends Script {
   }
 
   override update(time?: number): void {
-    if (
-      !this.analyser ||
-      !this.freqData ||
-      !this.freqDataFloat ||
-      !this.timeData
-    )
-      return;
-    if (!this.mfccExtractor) return;
+    if (!this.analyser || !this.freqData || !this.timeData) return;
     // xrblocks passes `time` in milliseconds (matches the rest of the
     // codebase — see e.g. netblocks samples). Convert to seconds so the
     // mapper's `1 - exp(-dt / tau)` smoothing stays frame-rate
@@ -162,16 +145,9 @@ export class LipsyncMouth extends Script {
     this.lastTime = nowMs;
 
     this.analyser.getByteFrequencyData(this.freqData);
-    this.analyser.getFloatFrequencyData(this.freqDataFloat);
     this.analyser.getByteTimeDomainData(this.timeData);
-    const mfcc = this.mfccExtractor.extract(this.freqDataFloat);
     const features = computeAudioFeatures(
-      {
-        freqData: this.freqData,
-        freqDataFloat: this.freqDataFloat,
-        timeData: this.timeData,
-        mfcc,
-      },
+      {freqData: this.freqData, timeData: this.timeData},
       this.ctx!.sampleRate
     );
 
@@ -220,9 +196,7 @@ export class LipsyncMouth extends Script {
     this.source = undefined;
     this.analyser = undefined;
     this.freqData = undefined;
-    this.freqDataFloat = undefined;
     this.timeData = undefined;
-    this.mfccExtractor = undefined;
     this.ctx = undefined;
   }
 }

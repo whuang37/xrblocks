@@ -107,6 +107,7 @@ XR Blocks is a **singleton engine driven by a script lifecycle**:
 4. Re-export public types from `src/xrblocks.ts`.
 5. Add colocated `*.test.ts`, a `samples/`/`templates/` example, and — for a distinct
    capability — a `skills/xb-*` entry (see [`skills/README.md`](skills/README.md)).
+6. Update `CONTEXT.md`, `README.md`, `AGENTS.md` and `src/SKILL.md` with the changes.
 
 ## AI & API-Key Security
 

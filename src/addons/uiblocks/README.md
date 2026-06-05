@@ -85,8 +85,8 @@ To build your own application outside of the `samples/` workspace, configure the
           "@pmndrs/msdfonts": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.56/dist/index.min.js",
           "@preact/signals-core": "https://cdn.jsdelivr.net/npm/@preact/signals-core@1.12.1/dist/signals-core.mjs",
           "yoga-layout/load": "https://cdn.jsdelivr.net/npm/yoga-layout@3.2.1/dist/src/load.js",
-          "uiblocks": "https://cdn.jsdelivr.net/npm/xrblocks@0.9.0/build/addons/uiblocks/src/index.js",
-          "xrblocks": "https://cdn.jsdelivr.net/npm/xrblocks@0.9.0/build/xrblocks.js"
+          "uiblocks": "https://cdn.jsdelivr.net/gh/google/xrblocks@build/addons/uiblocks/src/index.js",
+          "xrblocks": "https://cdn.jsdelivr.net/gh/google/xrblocks@build/xrblocks.js"
         }
       }
     </script>

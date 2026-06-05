@@ -69,6 +69,7 @@ const sidebars: SidebarsConfig = {
         'samples/Custom-Gestures',
         'samples/RockPaperScissors',
         'samples/Netblocks',
+        'samples/Lipsync',
       ],
     },
     {

@@ -87,10 +87,10 @@ def _annotate_group_boundary(ax, tasks: list[str]) -> None:
     eng_count = sum(1 for t in tasks if t in ENG_TASKS)
     if 0 < eng_count < len(tasks):
         ax.axvline(eng_count - 0.5, color="#888", linewidth=1, alpha=0.6, linestyle="--")
-        ax.text(eng_count / 2 - 0.5, 1.07, "engineer-spec",
+        ax.text(eng_count / 2 - 0.5, 1.13, "engineer-spec",
                 ha="center", fontsize=10, fontweight="bold",
                 transform=ax.get_xaxis_transform())
-        ax.text(eng_count + (len(tasks) - eng_count) / 2 - 0.5, 1.07,
+        ax.text(eng_count + (len(tasks) - eng_count) / 2 - 0.5, 1.13,
                 "canvas-faithful",
                 ha="center", fontsize=10, fontweight="bold",
                 transform=ax.get_xaxis_transform())
@@ -125,8 +125,8 @@ def plot_composite_multi_model(tasks: list[str], by_model: dict) -> pathlib.Path
     ax.set_ylim(0, 1.05)
     ax.set_ylabel("composite score (0-1)")
     ax.set_title("composite score per task, with vs without skill, across models",
-                 pad=24)
-    ax.legend(fontsize=8, ncol=2, loc="lower right")
+                 pad=40)
+    ax.legend(fontsize=8, ncol=2, loc="upper left", bbox_to_anchor=(1.005, 1.0))
     ax.grid(axis="y", alpha=0.3)
     _annotate_group_boundary(ax, tasks)
     fig.tight_layout()
@@ -169,8 +169,8 @@ def plot_judge_multi_model(tasks: list[str], by_model: dict) -> pathlib.Path | N
     ax.set_ylim(0, 5.5)
     ax.set_ylabel("judge `idiomatic_xrblocks` (1-5, judged by gemini-2.5-pro)")
     ax.set_title("llm judge: idiomatic xrblocks usage, with vs without skill, across models",
-                 pad=24)
-    ax.legend(fontsize=8, ncol=2, loc="lower right")
+                 pad=40)
+    ax.legend(fontsize=8, ncol=2, loc="upper left", bbox_to_anchor=(1.005, 1.0))
     ax.grid(axis="y", alpha=0.3)
     _annotate_group_boundary(ax, tasks)
     fig.tight_layout()
@@ -283,7 +283,7 @@ def plot_api_match_breakdown(by_model: dict) -> pathlib.Path | None:
     ax.set_ylim(0, 1.15)
     ax.set_ylabel("mean api_match (fraction of expected APIs called)")
     ax.set_title("api_match: did the agent call the APIs the skill defines?",
-                 pad=12)
+                 pad=20)
     ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0))
     ax.grid(axis="y", alpha=0.3)
     for i, r in enumerate(rows):
@@ -350,7 +350,7 @@ def plot_prompt_style_breakdown(by_model: dict) -> pathlib.Path | None:
     )
     ax.set_ylim(0, 1.15)
     ax.set_ylabel("mean composite score")
-    ax.set_title("skill effect by model and prompt style", pad=12)
+    ax.set_title("skill effect by model and prompt style", pad=20)
     ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0))
     ax.grid(axis="y", alpha=0.3)
     for i, r in enumerate(rows):

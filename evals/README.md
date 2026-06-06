@@ -45,11 +45,11 @@ Results land under `evals/results/`:
 For finer-grained signal:
 
 - `judge.py` — `gemini-2.5-pro` rates the output against the full
-`SKILL.md` as ground truth. Returns `accomplishes_task` and `idiomatic_xrblocks` on 1-5 scales, plus `would_merge` yes/no with a prose rationale.
+  `SKILL.md` as ground truth. Returns `accomplishes_task` and `idiomatic_xrblocks` on 1-5 scales, plus `would_merge` yes/no with a prose rationale.
 - `smoke.py` — Playwright + headless Chromium loads the generated
-workspace and captures uncaught errors / failed requests. Catches hallucinated import URLs that parse-only checking misses.
+  workspace and captures uncaught errors / failed requests. Catches hallucinated import URLs that parse-only checking misses.
 - `ablate.py` — drops one skill section at a time, scores each variant.
-Useful for finding which parts of a `SKILL.md` carry the weight.
+  Useful for finding which parts of a `SKILL.md` carry the weight.
 
 ## Adding a task
 
@@ -100,17 +100,17 @@ evals/
 ## What this is not
 
 - Not a runtime correctness check. `parse_ok` and `smoke.py` only
-catch some failure modes; a "passing" output may still be wrong.
+  catch some failure modes; a "passing" output may still be wrong.
 - Not a model comparison. We only run `gemini-2.5-pro`. Adding flash
-or other models is a one-line change in `run_gem_api.py`.
+  or other models is a one-line change in `run_gem_api.py`.
 - Not stable across runs. Even with `temperature=0.2`, gemini varies.
-For real signal repeat each cell 3-5 times and report the median.
+  For real signal repeat each cell 3-5 times and report the median.
 
 ## What it IS for
 
 - Validating that a `SKILL.md` actually moves the needle on the kinds
-of apps users want to build.
+  of apps users want to build.
 - Catching regressions when a skill is edited: re-run the relevant
-tasks, diff the scores.
+  tasks, diff the scores.
 - Surfacing real bugs in skill examples (e.g. the `xb-netblocks`
-import-path 404 caught by `smoke.py` and fixed in google/xrblocks#349).
+  import-path 404 caught by `smoke.py` and fixed in google/xrblocks#349).

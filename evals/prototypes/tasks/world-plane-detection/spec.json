@@ -8,7 +8,5 @@
     "xb.world",
     "placeOnHorizontalSurface"
   ],
-  "forbidden_patterns": [
-    "navigator\\.xr\\.requestHitTestSource"
-  ]
+  "forbidden_patterns": ["navigator\\.xr\\.requestHitTestSource"]
 }

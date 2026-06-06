@@ -49,11 +49,13 @@ for task in $TASK_LIST; do
       continue
     }
     if [ "$WITH_JUDGE" = 1 ]; then
-      workspace="/tmp/xrblocks-gem-${task}-${mode}"
-      mkdir -p "$EVALS/results/judge"
+      model_slug="${GEMINI_MODEL:-gemini-2.5-pro}"
+      workspace="/tmp/xrblocks-gem-${model_slug}-${task}-${mode}"
+      judge_dir="$EVALS/results/${model_slug}/judge"
+      mkdir -p "$judge_dir"
       python3 "$EVALS/prototypes/judge.py" "$task" "$workspace" \
-        > "$EVALS/results/judge/${task}-${mode}.json"
-      composite_judge=$(python3 -c "import json; r=json.load(open('$EVALS/results/judge/${task}-${mode}.json')); print(f\"judge: accomplishes={r.get('accomplishes_task','?')} idiomatic={r.get('idiomatic_xrblocks','?')} merge={r.get('would_merge','?')}\")")
+        > "$judge_dir/${task}-${mode}.json"
+      composite_judge=$(python3 -c "import json; r=json.load(open('$judge_dir/${task}-${mode}.json')); print(f\"judge: accomplishes={r.get('accomplishes_task','?')} idiomatic={r.get('idiomatic_xrblocks','?')} halluc={r.get('hallucination_severity','?')}\")")
       echo "  $composite_judge"
     fi
   done

@@ -38,18 +38,26 @@ JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "gemini-2.5-pro")
 JUDGE_PROMPT = """You are a senior xrblocks reviewer. Rate the candidate \
 implementation against the task. The skill content below is the ground \
 truth for the xrblocks API. If the code uses identifiers, packages, or \
-patterns that do NOT appear in the skill content (e.g. hallucinated \
-elements like `xr-scene` or fake packages), score `idiomatic_xrblocks` \
-low.
+patterns that do NOT appear in the skill content (e.g. invented elements \
+like `xr-scene` or fake packages), score `idiomatic_xrblocks` low and set \
+`hallucination_severity` to `major`.
 
 Respond with ONLY a JSON object, no prose, no fences. Schema:
 
 {{
   "accomplishes_task": 1-5,
   "idiomatic_xrblocks": 1-5,
-  "would_merge": "yes" | "no",
+  "hallucination_severity": "none" | "minor" | "major",
   "rationale": "<one sentence>"
 }}
+
+Definitions:
+- `accomplishes_task`: does the code do what the task asked, regardless of api correctness?
+- `idiomatic_xrblocks`: does it use APIs that actually exist in the skill content?
+- `hallucination_severity`:
+  - "none"  = every imported package, class, method, and event in the code appears in the skill or is a standard library (THREE, web platform, etc).
+  - "minor" = one or two questionable identifiers, easy to repair, real intent visible.
+  - "major" = invented packages, fake JSX-like elements, or whole APIs the agent made up. The code would not run as-is even with all dependencies installed.
 
 # Task
 {task}

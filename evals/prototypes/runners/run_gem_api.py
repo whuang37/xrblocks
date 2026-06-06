@@ -76,8 +76,11 @@ def run_task(task_id: str, mode: str) -> dict:
     template_rel = spec["template"]
     edit_file = spec["edit_file"]
 
-    # Workspace: clean copy of the template.
-    workspace = pathlib.Path(f"/tmp/xrblocks-gem-{task_id}-{mode}")
+    # Workspace: clean copy of the template. Namespaced by model so two
+    # sweeps can co-exist without overwriting each other's files (which the
+    # judge needs to re-read).
+    model_slug = MODEL.replace("/", "-")
+    workspace = pathlib.Path(f"/tmp/xrblocks-gem-{model_slug}-{task_id}-{mode}")
     if workspace.exists():
         subprocess.run(["rm", "-rf", str(workspace)], check=False)
     subprocess.run(["cp", "-r", str(REPO_ROOT / template_rel), str(workspace)], check=True)
@@ -134,7 +137,7 @@ def run_task(task_id: str, mode: str) -> dict:
 
     # Score using the existing scorer.
     scorer = EVALS / "prototypes" / "score_proto.py"
-    result_dir = EVALS / "results" / f"gem-api-{mode}"
+    result_dir = EVALS / "results" / model_slug / mode
     result_dir.mkdir(parents=True, exist_ok=True)
     result_path = result_dir / f"{task_id}.json"
 

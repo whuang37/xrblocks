@@ -64,7 +64,10 @@ Wrap any `Object3D` in a `NetObject` and register it; owners broadcast, non-owne
 Ownership is cooperative — claim on grab, release on drop.
 
 ```ts
-import {NetObject, WebRTCTransport} from 'xrblocks/addons/netblocks/src/index.js';
+import {
+  NetObject,
+  WebRTCTransport,
+} from 'xrblocks/addons/netblocks/src/index.js';
 
 const sharedCube = new NetObject({id: 'cube', object: this.cube});
 const net = enableNet();

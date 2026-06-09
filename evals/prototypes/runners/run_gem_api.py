@@ -69,12 +69,32 @@ def extract_js(response_text: str) -> str:
     return response_text
 
 
+def _safe_join(base: pathlib.Path, rel: str, label: str) -> pathlib.Path:
+    """Resolve ``rel`` against ``base`` and reject any traversal outside it.
+
+    Specs ship in the repo, but they're still data files the runner should
+    treat defensively: a stray ``../../etc/passwd`` in ``template`` would
+    otherwise let the runner copy or write outside ``REPO_ROOT``.
+    """
+    candidate = (base / rel).resolve()
+    base_resolved = base.resolve()
+    try:
+        candidate.relative_to(base_resolved)
+    except ValueError as e:
+        raise ValueError(f"{label} {rel!r} escapes {base_resolved}") from e
+    return candidate
+
+
 def run_task(task_id: str, mode: str) -> dict:
-    task_dir = TASKS / task_id
+    if "/" in task_id or task_id.startswith(".."):
+        raise ValueError(f"invalid task_id: {task_id!r}")
+    task_dir = _safe_join(TASKS, task_id, "task_id")
     spec = json.loads((task_dir / "spec.json").read_text())
     skill_name = spec["skill"]
     template_rel = spec["template"]
     edit_file = spec["edit_file"]
+
+    template_dir = _safe_join(REPO_ROOT, template_rel, "spec.template")
 
     # Workspace: clean copy of the template. Namespaced by model so two
     # sweeps can co-exist without overwriting each other's files (which the
@@ -83,7 +103,7 @@ def run_task(task_id: str, mode: str) -> dict:
     workspace = pathlib.Path(f"/tmp/xrblocks-gem-{model_slug}-{task_id}-{mode}")
     if workspace.exists():
         subprocess.run(["rm", "-rf", str(workspace)], check=False)
-    subprocess.run(["cp", "-r", str(REPO_ROOT / template_rel), str(workspace)], check=True)
+    subprocess.run(["cp", "-r", str(template_dir), str(workspace)], check=True)
 
     # Build prompt.
     task_body = (task_dir / "prompt.md").read_text()
@@ -116,8 +136,10 @@ def run_task(task_id: str, mode: str) -> dict:
     raw = resp.text or ""
     code = extract_js(raw)
 
-    # Write the agent's output into the workspace.
-    target = workspace / edit_file
+    # Write the agent's output into the workspace. Guard against an
+    # edit_file that points outside the workspace via traversal.
+    target = _safe_join(workspace, edit_file, "spec.edit_file")
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(code)
 
     # Log raw + code + usage.

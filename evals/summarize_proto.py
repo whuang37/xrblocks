@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """Summarize the latest prototyping run: side-by-side with-skill vs
-without-skill across every task, plus optional judge column.
+without-skill across every task, plus optional judge column. Walks the
+per-model directories under ``evals/results/`` and emits one table per
+model.
 
-Reads from evals/results/gem-api-{with,without}-skill/ and (if present)
-evals/results/judge/. Writes evals/results/_summary.md.
+Layout:
+  evals/results/<model>/with-skill/<task>.json
+  evals/results/<model>/without-skill/<task>.json
+  evals/results/<model>/judge/<task>-<mode>.json  (optional)
+
+Writes evals/results/_summary.md.
 
 Usage:
   python evals/summarize_proto.py
@@ -30,24 +36,28 @@ def load_dir(d: pathlib.Path) -> dict:
     return out
 
 
-def main() -> int:
-    w = load_dir(RESULTS / "gem-api-with-skill")
-    wo = load_dir(RESULTS / "gem-api-without-skill")
-    judges = load_dir(RESULTS / "judge")
+def discover_models() -> list[pathlib.Path]:
+    """Return the per-model result dirs, sorted by name."""
+    if not RESULTS.exists():
+        return []
+    return sorted(
+        p
+        for p in RESULTS.iterdir()
+        if p.is_dir() and (p / "with-skill").exists()
+    )
+
+
+def render_model(model_dir: pathlib.Path) -> tuple[list[str], int]:
+    w = load_dir(model_dir / "with-skill")
+    wo = load_dir(model_dir / "without-skill")
+    judges = load_dir(model_dir / "judge")
 
     tasks = sorted(set(w) | set(wo))
     if not tasks:
-        print("no results found", file=sys.stderr)
-        return 1
+        return [], 0
 
-    lines = ["# Eval Summary", "", f"tasks: {len(tasks)}", ""]
-    headers = [
-        "task",
-        "skill",
-        "composite w/",
-        "composite w/o",
-        "Δ",
-    ]
+    lines = [f"## {model_dir.name}", "", f"tasks: {len(tasks)}", ""]
+    headers = ["task", "skill", "composite w/", "composite w/o", "Δ"]
     if judges:
         headers += ["judge w/", "judge w/o"]
     lines.append("| " + " | ".join(headers) + " |")
@@ -75,7 +85,8 @@ def main() -> int:
             def fmt(j: dict) -> str:
                 if not j or "accomplishes_task" not in j:
                     return "—"
-                return f"{j['accomplishes_task']}/{j['idiomatic_xrblocks']}/{j.get('would_merge', '?')}"
+                halluc = j.get("hallucination_severity", "?")
+                return f"{j['accomplishes_task']}/{j['idiomatic_xrblocks']}/{halluc}"
 
             row += [fmt(jw), fmt(jwo)]
         lines.append("| " + " | ".join(row) + " |")
@@ -94,6 +105,31 @@ def main() -> int:
         if judges:
             avg_row += ["", ""]
         lines.append("| " + " | ".join(avg_row) + " |")
+
+    lines.append("")
+    return lines, len(tasks)
+
+
+def main() -> int:
+    models = discover_models()
+    if not models:
+        print(
+            "no results found under evals/results/<model>/with-skill/",
+            file=sys.stderr,
+        )
+        return 1
+
+    lines = ["# Eval Summary", ""]
+    total = 0
+    for m in models:
+        section, n = render_model(m)
+        if n:
+            lines.extend(section)
+            total += n
+
+    if total == 0:
+        print("no results found", file=sys.stderr)
+        return 1
 
     out_md = "\n".join(lines)
     (RESULTS / "_summary.md").write_text(out_md + "\n")

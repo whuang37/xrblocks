@@ -83,6 +83,7 @@ export class AIAudioPlayer {
   }
 
   _scheduleBuffers() {
+    if (!this._ctx) return;
     while (
       this._queue.length > 0 &&
       this._nextStartTime <= this._ctx.currentTime + SCHEDULE_AHEAD_TIME

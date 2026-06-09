@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import * as xb from 'xrblocks';
 
 import {GeminiVRMLipScript} from './GeminiVRMLipScript.js';
+import {PerfHUD} from './PerfHUD.js';
 
 // ---------------------------------------------------------------------------
 // Asset URLs — same VRM model + idle animation as demos/vrm-avatar.
@@ -47,6 +48,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       spawnDistance: 0.8,
     })
   );
+
+  // Debug perf overlay (FPS / draw calls / triangles): open with ?debug
+  if (new URLSearchParams(location.search).has('debug')) {
+    xb.add(new PerfHUD());
+  }
 
   const options = new xb.Options();
   options.enableAI();

@@ -222,6 +222,7 @@
       <div class="row">
         <label for="detectorSelect">detector</label>
         <select id="detectorSelect">
+          <option value="both">both (best recall)</option>
           <option value="mediapipe">mediapipe (on-device, COCO)</option>
           <option value="gemini">gemini (cloud, open-vocab)</option>
         </select>
@@ -261,8 +262,16 @@
       //   ?mask=slimsam               (transformers.js SAM, tighter, default)
       //   ?mask=segmenter             (MediaPipe InteractiveSegmenter, looser)
       const _qp = new URLSearchParams(window.location.search);
-      const DETECT_BACKEND =
-        _qp.get('backend') === 'gemini' ? 'gemini' : 'mediapipe';
+      const _backendParam = _qp.get('backend');
+      // Default to 'both' for the best out-of-the-box demo: runs MediaPipe
+      // (deterministic COCO) and Gemini (open-vocab) and unions the results,
+      // giving the most labels per single press. Falls back to mediapipe via
+      // the selector dropdown if the user has no API key.
+      const DETECT_BACKEND = ['gemini', 'mediapipe', 'both'].includes(
+        _backendParam
+      )
+        ? _backendParam
+        : 'both';
       const MASK_BACKEND =
         _qp.get('mask') === 'segmenter' ? 'segmenter' : 'slimsam';
 
@@ -473,9 +482,19 @@
       // accept pixels with value < 128.
       const _raycaster = new THREE.Raycaster();
       const _ndc = new THREE.Vector2();
-      function sampleDepthInMask(mask, box2d, stride = 6) {
+      function sampleDepthInMask(
+        mask,
+        box2d,
+        stride = 6,
+        maxDistance = 12,
+        cameraOverride = null
+      ) {
         const points = [];
-        const camera = xb.core.camera;
+        // Prefer the snapshot-time camera passed in over `xb.core.camera`.
+        // Reading `xb.core.camera` here would race the live render loop —
+        // any tiny camera move during the 5–30 s Detect window translates
+        // directly into a horizontal/vertical offset on every fitted box.
+        const camera = cameraOverride || xb.core.camera;
         const mesh = xb.core.depth?.depthMesh;
         if (!camera || !mesh) return points;
         const mw = mask.width;
@@ -492,11 +511,14 @@
             fg++;
             const u = (px + 0.5) / mw;
             const v = (py + 0.5) / mh;
-            // Image UVs are top-down; NDC y is up.
             _ndc.set(u * 2 - 1, (1 - v) * 2 - 1);
             _raycaster.setFromCamera(_ndc, camera);
             const hits = _raycaster.intersectObject(mesh, false);
-            if (hits.length > 0) {
+            // Cap depth distance: ray can shoot through a window or open
+            // doorway to far background (trees outside the simulator room
+            // sit ~20 m out, well beyond any plausible indoor object). Drop
+            // hits past `maxDistance` so they don't blow up the OBB extents.
+            if (hits.length > 0 && hits[0].distance <= maxDistance) {
               points.push(hits[0].point.clone());
             }
           }
@@ -519,8 +541,24 @@
         mask,
         box2d,
         stride = 6,
-        frames = 3
+        frames = 3,
+        cameraOverride = null
       ) {
+        // With a frozen camera, multi-frame averaging would hurt: the depth
+        // mesh keeps tracking the live camera, so successive frames sample
+        // different mesh states with the same rays. Take a single snapshot
+        // if we have a frozen camera, otherwise fall back to the multi-frame
+        // average that gave us some jitter reduction before.
+        if (cameraOverride) {
+          const {points, foregroundPixels} = sampleDepthInMask(
+            mask,
+            box2d,
+            stride,
+            12,
+            cameraOverride
+          );
+          return {points, foregroundPixels};
+        }
         const all = [];
         let totalFg = 0;
         for (let i = 0; i < frames; i++) {
@@ -534,6 +572,212 @@
           totalFg = Math.max(totalFg, foregroundPixels);
         }
         return {points: all, foregroundPixels: totalFg};
+      }
+
+      // Floor-plane estimate from the live depth mesh. Walks a stride sample
+      // of the mesh's vertex positions, lifts to world space, and takes the
+      // 5th percentile of Y. Robust to a few stray vertices near 0 because
+      // we use a percentile, and cheap because we stride sample. Cached once
+      // per Detect press so per-object snapping is O(1).
+      function estimateFloorY() {
+        const mesh = xb.core.depth?.depthMesh;
+        if (!mesh || !mesh.geometry) return null;
+        const pos = mesh.geometry.attributes.position;
+        if (!pos || !pos.count) return null;
+        mesh.updateMatrixWorld();
+        const ys = [];
+        const p = new THREE.Vector3();
+        const stride = Math.max(1, Math.floor(pos.count / 4000));
+        for (let i = 0; i < pos.count; i += stride) {
+          p.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
+          if (Number.isFinite(p.y)) ys.push(p.y);
+        }
+        if (ys.length < 10) return null;
+        ys.sort((a, b) => a - b);
+        return ys[Math.floor(ys.length * 0.05)];
+      }
+
+      // If the OBB bottom dips below the estimated floor by more than `slack`,
+      // pin the bottom edge to the floor and keep the top fixed. For floor-
+      // sitting furniture this stops the box clipping through the ground
+      // (which is the most jarring visual artifact when orbiting the demo).
+      // Spatial fusion of OBBs across Detect presses, so each new viewpoint
+      // refines existing boxes instead of stacking duplicate boxes for the
+      // same physical object. Match an incoming OBB to an existing one when:
+      //   - same category bucket (small cup never merges with a couch), and
+      //   - centroid distance is within `merge_radius` (sum of half-sizes,
+      //     i.e. the new center sits inside an expanded version of the old).
+      // On match: blend the centroid using a running average weighted by
+      // sample count, union the extents to enclose both observations, and
+      // increment the sample counter so further presses converge.
+      function fuseIntoBoxes(newObb, label, cat) {
+        const half = (s) => Math.max(s.x, s.y, s.z) * 0.5 + 0.15; // 15 cm grace
+        for (const g of boxes.children) {
+          const u = g.userData || {};
+          if (u.cat !== cat) continue;
+          const dx = u.center.x - newObb.center.x;
+          const dy = u.center.y - newObb.center.y;
+          const dz = u.center.z - newObb.center.z;
+          const dist = Math.hypot(dx, dy, dz);
+          const radius = half(u.size) + half(newObb.size);
+          if (dist > radius) continue;
+          // Match: rebuild this group's box from the merged OBB.
+          const n = (u.samples || 1) + 1;
+          const blendedCenter = new THREE.Vector3(
+            (u.center.x * (n - 1) + newObb.center.x) / n,
+            (u.center.y * (n - 1) + newObb.center.y) / n,
+            (u.center.z * (n - 1) + newObb.center.z) / n
+          );
+          // Union extents in the existing box's local frame. Project the new
+          // OBB's 8 corners into the existing yaw, then expand each axis to
+          // enclose them.
+          const cs = Math.cos(u.angle);
+          const sn = Math.sin(u.angle);
+          let umin = -u.size.x / 2,
+            umax = u.size.x / 2;
+          let vmin = -u.size.z / 2,
+            vmax = u.size.z / 2;
+          let ymin = u.center.y - u.size.y / 2;
+          let ymax = u.center.y + u.size.y / 2;
+          for (const sx of [-1, 1]) {
+            for (const sy of [-1, 1]) {
+              for (const sz of [-1, 1]) {
+                // New OBB corner in world space, in new OBB's local frame.
+                const lx = (sx * newObb.size.x) / 2;
+                const lz = (sz * newObb.size.z) / 2;
+                const wx =
+                  newObb.center.x +
+                  lx * Math.cos(newObb.angle) +
+                  lz * Math.sin(newObb.angle);
+                const wz =
+                  newObb.center.z -
+                  lx * Math.sin(newObb.angle) +
+                  lz * Math.cos(newObb.angle);
+                const wy = newObb.center.y + (sy * newObb.size.y) / 2;
+                // Project into existing-OBB local axes.
+                const du =
+                  (wx - blendedCenter.x) * cs - (wz - blendedCenter.z) * sn;
+                const dv =
+                  (wx - blendedCenter.x) * sn + (wz - blendedCenter.z) * cs;
+                if (du < umin) umin = du;
+                if (du > umax) umax = du;
+                if (dv < vmin) vmin = dv;
+                if (dv > vmax) vmax = dv;
+                if (wy < ymin) ymin = wy;
+                if (wy > ymax) ymax = wy;
+              }
+            }
+          }
+          const sizeU = Math.max(0.02, umax - umin);
+          const sizeV = Math.max(0.02, vmax - vmin);
+          const sizeY = Math.max(0.02, ymax - ymin);
+          const uc = (umin + umax) / 2;
+          const vc = (vmin + vmax) / 2;
+          const fusedCenter = new THREE.Vector3(
+            blendedCenter.x + uc * cs + vc * sn,
+            (ymin + ymax) / 2,
+            blendedCenter.z - uc * sn + vc * cs
+          );
+          // Replace the group's geometry / position with the fused OBB.
+          const fusedObb = {
+            center: fusedCenter,
+            size: new THREE.Vector3(sizeU, sizeY, sizeV),
+            angle: u.angle,
+          };
+          rebuildBoxGroupGeometry(g, fusedObb);
+          g.userData.center = fusedCenter;
+          g.userData.size = fusedObb.size;
+          g.userData.samples = n;
+          return true;
+        }
+        return false;
+      }
+
+      // Rebuild a box group's edge geometry in place after fusion, without
+      // re-creating sprites / event listeners. Keeps label visible across
+      // refinement presses.
+      function rebuildBoxGroupGeometry(group, obb) {
+        const newGeom = new THREE.BoxGeometry(
+          obb.size.x,
+          obb.size.y,
+          obb.size.z
+        );
+        const newEdges = new THREE.EdgesGeometry(newGeom);
+        group.traverse((o) => {
+          if (o.isLineSegments) {
+            if (o.geometry) o.geometry.dispose();
+            o.geometry = newEdges.clone();
+          }
+        });
+        newGeom.dispose();
+        newEdges.dispose();
+        group.position.copy(obb.center);
+        group.rotation.y = obb.angle;
+        // Re-place the label above the new top.
+        if (group.userData.label) {
+          group.userData.label.position.set(0, obb.size.y / 2 + 0.06, 0);
+        }
+      }
+
+      function snapBoxToFloor(obb, floorY, slack = 0.05) {
+        if (floorY == null || !obb) return obb;
+        const top = obb.center.y + obb.size.y / 2;
+        const bot = obb.center.y - obb.size.y / 2;
+        if (bot < floorY - slack) {
+          const newSizeY = Math.max(0.02, top - floorY);
+          const newCenterY = floorY + newSizeY / 2;
+          obb.size = new THREE.Vector3(obb.size.x, newSizeY, obb.size.z);
+          obb.center = new THREE.Vector3(
+            obb.center.x,
+            newCenterY,
+            obb.center.z
+          );
+        }
+        return obb;
+      }
+
+      // 2D IoU on detection2DBoundingBox-style {min:{x,y},max:{x,y}} boxes
+      // already normalized to [0,1]. Used by unionDetections to drop
+      // duplicate detections when running both backends.
+      function box2dIoU(a, b) {
+        if (!a || !b) return 0;
+        const ix1 = Math.max(a.min.x, b.min.x);
+        const iy1 = Math.max(a.min.y, b.min.y);
+        const ix2 = Math.min(a.max.x, b.max.x);
+        const iy2 = Math.min(a.max.y, b.max.y);
+        const iw = Math.max(0, ix2 - ix1);
+        const ih = Math.max(0, iy2 - iy1);
+        const inter = iw * ih;
+        const aw = a.max.x - a.min.x;
+        const ah = a.max.y - a.min.y;
+        const bw = b.max.x - b.min.x;
+        const bh = b.max.y - b.min.y;
+        const u = aw * ah + bw * bh - inter;
+        return u > 0 ? inter / u : 0;
+      }
+
+      // Union two detection lists with IoU dedupe. Keeps every item in `a`,
+      // then appends items from `b` whose 2D bbox doesn't overlap any kept
+      // box by more than `iouThresh`. This gives MediaPipe's deterministic
+      // COCO list anchoring with Gemini's open-vocab additions stacked on
+      // top — fewer duplicate boxes labelled "couch" + "sofa" + "loveseat"
+      // for the same object.
+      function unionDetections(a, b, iouThresh = 0.5) {
+        const out = a.slice();
+        for (const it of b) {
+          let dup = false;
+          for (const k of out) {
+            if (
+              box2dIoU(it.detection2DBoundingBox, k.detection2DBoundingBox) >
+              iouThresh
+            ) {
+              dup = true;
+              break;
+            }
+          }
+          if (!dup) out.push(it);
+        }
+        return out;
       }
 
       // Label categorisation. Each category gets a different fitting
@@ -551,11 +795,23 @@
       const TINY_FLAT_LABEL_RE =
         /\b(switch|outlet|socket|thermostat|plug|vent|register|knob|handle|doorknob)\b/i;
       // Architectural surfaces — Gemini sometimes returns these but they aren't
-      // "objects" we want boxes around.
+      // "objects" we want boxes around. "stud"/"board"/"panel" cover
+      // wall-cladding variants; "floorboard" guarded by SURFACE check first.
       const SURFACE_LABEL_RE =
-        /\b(wall|walls|floor|ceiling|ground|background|surface)\b/i;
+        /\b(walls?|floors?|floorboards?|ceilings?|ground|background|surface|stud|studs|panel|panels|panelling|paneling|board|boards|cladding|baseboard|baseboards|skirting|trim|moulding|molding)\b/i;
       function isSurfaceLabel(label) {
-        return !!label && SURFACE_LABEL_RE.test(label);
+        if (!label) return false;
+        // A label like "wall-mounted lamp" matches both SURFACE ("wall") and
+        // LIGHT ("lamp"); when the label is clearly a recognised object
+        // category, prefer that over the surface match so the box is built.
+        if (
+          FLAT_LABEL_RE.test(label) ||
+          LIGHT_LABEL_RE.test(label) ||
+          SMALL_LABEL_RE.test(label)
+        ) {
+          return false;
+        }
+        return SURFACE_LABEL_RE.test(label);
       }
       function isFlatLabel(label) {
         return !!label && FLAT_LABEL_RE.test(label);
@@ -912,19 +1168,27 @@
         const planePoint = new THREE.Vector3(n.x * offset, 0, n.z * offset);
         // Use mask inlier extents — these hug the actual painting/TV pixels,
         // unlike the 2D bbox which often includes neighboring geometry.
+        // Use 5%/95% percentiles per axis instead of min/max so a handful of
+        // stray mask pixels (typical SAM bleed onto adjacent wall) don't
+        // blow up sizeU / sizeY by 50%.
         const cs = Math.cos(angle),
           sn = Math.sin(angle);
-        let umin = Infinity,
-          umax = -Infinity;
-        let ymin = Infinity,
-          ymax = -Infinity;
+        const us = [];
+        const ys = [];
         for (const p of inliers) {
-          const u = (p.x - planePoint.x) * cs - (p.z - planePoint.z) * sn;
-          if (u < umin) umin = u;
-          if (u > umax) umax = u;
-          if (p.y < ymin) ymin = p.y;
-          if (p.y > ymax) ymax = p.y;
+          us.push((p.x - planePoint.x) * cs - (p.z - planePoint.z) * sn);
+          ys.push(p.y);
         }
+        const pctile = (arr, q) => {
+          const a = arr.slice().sort((x, y) => x - y);
+          return a[
+            Math.max(0, Math.min(a.length - 1, Math.floor(q * a.length)))
+          ];
+        };
+        const umin = pctile(us, 0.05);
+        const umax = pctile(us, 0.95);
+        const ymin = pctile(ys, 0.05);
+        const ymax = pctile(ys, 0.95);
         const uc = (umin + umax) / 2;
         const sizeU = Math.max(0.05, umax - umin);
         const sizeY = Math.max(0.05, ymax - ymin);
@@ -1228,6 +1492,12 @@
 
         group.position.copy(obb.center);
         group.rotation.y = obb.angle;
+        // Fusion bookkeeping so subsequent Detect presses can merge a new
+        // OBB into this one rather than stacking a duplicate.
+        group.userData.center = obb.center.clone();
+        group.userData.size = obb.size.clone();
+        group.userData.angle = obb.angle;
+        group.userData.samples = 1;
         return group;
       }
 
@@ -1264,9 +1534,39 @@
           return;
         }
         setStatus('detecting…');
+        // Freeze the camera state at detect start. All subsequent raycasts
+        // use this clone so the boxes don't drift if the user (or the sim
+        // mouse-look) moves the live camera during the multi-second detect.
+        const liveCam = xb.core.camera;
+        const frozenCam = liveCam.clone();
+        frozenCam.matrixAutoUpdate = false;
+        liveCam.updateMatrixWorld();
+        frozenCam.matrix.copy(liveCam.matrix);
+        frozenCam.matrixWorld.copy(liveCam.matrixWorld);
+        frozenCam.matrixWorldInverse.copy(liveCam.matrixWorld).invert();
+        frozenCam.projectionMatrix.copy(liveCam.projectionMatrix);
+        frozenCam.projectionMatrixInverse.copy(liveCam.projectionMatrixInverse);
+        frozenCam.position.copy(liveCam.position);
+        frozenCam.quaternion.copy(liveCam.quaternion);
         let detected = [];
         try {
-          detected = await xb.core.world.objects.runDetection();
+          if (DETECT_BACKEND === 'both') {
+            // Run both detectors and union with IoU dedupe. Two separate
+            // runDetection calls because the SDK only exposes one
+            // activeBackend at a time. Run mediapipe first so its
+            // deterministic COCO results anchor the dedupe, then add
+            // gemini's open-vocab finds that don't overlap.
+            const cfg = xb.core.world.objects.options.objects.backendConfig;
+            const prev = cfg.activeBackend;
+            cfg.activeBackend = 'mediapipe';
+            const mp = await xb.core.world.objects.runDetection();
+            cfg.activeBackend = 'gemini';
+            const gm = await xb.core.world.objects.runDetection();
+            cfg.activeBackend = prev;
+            detected = unionDetections(mp, gm);
+          } else {
+            detected = await xb.core.world.objects.runDetection();
+          }
         } catch (e) {
           console.warn('[objects_3d] detection threw', e);
           setStatus('detection failed (see console)');
@@ -1289,7 +1589,12 @@
           setStatus('nothing detected');
           return;
         }
-        clearBoxes();
+        // Multi-view fusion: keep existing boxes across Detect presses so
+        // pressing from a new camera angle refines them instead of replacing
+        // them. Single-viewpoint OBBs always disagree slightly because depth
+        // raycasts from one POV can't see the back of an object; averaging
+        // centroids and unioning extents across views converges to the
+        // truth. Clear button is the explicit reset.
         let samState = null;
         if (MASK_BACKEND === 'slimsam') {
           setStatus('loading sam (one-time)…');
@@ -1319,6 +1624,7 @@
           }
         }
         setStatus('fitting boxes…');
+        const floorY = estimateFloorY();
         let kept = 0;
         for (const obj of detected) {
           try {
@@ -1348,7 +1654,7 @@
               continue;
             }
             const {points: raw, foregroundPixels} =
-              await sampleDepthInMaskAcrossFrames(mask, box2d);
+              await sampleDepthInMaskAcrossFrames(mask, box2d, 6, 3, frozenCam);
             mask.close();
             const cat = categorize(obj.label);
             // Category-specific outlier rejection. Flats skip upfront rejection
@@ -1361,7 +1667,7 @@
               // Wall switches / outlets / small fixtures: tight ball, but
               // back off the bbox-derived size to under 0.3m for the truly
               // tiny objects this category targets.
-              const r = radiusFromBbox(box2d, xb.core.camera, obj.position, {
+              const r = radiusFromBbox(box2d, frozenCam, obj.position, {
                 pad: 1.1,
                 minR: 0.12,
                 maxR: 0.3,
@@ -1371,7 +1677,7 @@
             } else if (cat === 'light') {
               // Hanging fixtures: bbox-derived ball, then tight Y cluster to
               // drop cord/ceiling stragglers that share x/z with the shade.
-              const r = radiusFromBbox(box2d, xb.core.camera, obj.position, {
+              const r = radiusFromBbox(box2d, frozenCam, obj.position, {
                 pad: 1.2,
                 minR: 0.2,
                 maxR: 0.7,
@@ -1385,7 +1691,7 @@
               // matched to their on-screen size, instead of one fixed 1.4 m
               // bucket that grabs walls in tight rooms and crops wide
               // pieces in big ones.
-              const r = radiusFromBbox(box2d, xb.core.camera, obj.position, {
+              const r = radiusFromBbox(box2d, frozenCam, obj.position, {
                 pad: 1.3,
                 minR: 0.4,
                 maxR: 2.0,
@@ -1395,12 +1701,20 @@
             }
             const obb = fitYawOBB(points, {
               category: cat,
-              camera: xb.core.camera,
+              camera: frozenCam,
               anchor: obj.position,
               box2d,
               tinyFlat: isTinyFlatLabel(obj.label),
             });
             if (!obb) continue;
+            // Floor snap for ground-resting categories. Furniture and small
+            // objects always sit on a surface (chair on floor, mug on
+            // table). Flats are wall-mounted at arbitrary heights so they
+            // skip the snap. Lights typically hang from the ceiling — also
+            // skip.
+            if (cat === 'furniture' || cat === 'small') {
+              snapBoxToFloor(obb, floorY);
+            }
             // Reject implausible detections: too far from origin (likely
             // depth was sampled on a far background through a window/sky),
             // too few inlier points to trust, or absurd dimensions. The
@@ -1439,13 +1753,16 @@
               );
               continue;
             }
-            boxes.add(
-              buildBoxGroup(
+            const fused = fuseIntoBoxes(obb, obj.label || 'object', cat);
+            if (!fused) {
+              const g = buildBoxGroup(
                 obb,
                 obj.label || 'object',
                 CAT_COLOR[cat] || 0x4cd964
-              )
-            );
+              );
+              g.userData.cat = cat;
+              boxes.add(g);
+            }
             kept++;
           } catch (e) {
             console.warn(
@@ -1455,7 +1772,9 @@
             );
           }
         }
-        setStatus(`fit ${kept} / ${detected.length} oriented boxes`);
+        setStatus(
+          `fit ${kept} / ${detected.length} oriented boxes (press again from a new angle to refine)`
+        );
       }
 
       const options = new xb.Options();
@@ -1467,7 +1786,8 @@
       options.depth.depthTexture.enabled = false;
       options.depth.matchDepthView = false;
       options.enableObjectDetection();
-      options.world.objects.backendConfig.activeBackend = DETECT_BACKEND;
+      options.world.objects.backendConfig.activeBackend =
+        DETECT_BACKEND === 'both' ? 'mediapipe' : DETECT_BACKEND;
       options.world.objects.showDebugVisualizations = false;
       // Override the SDK default prompt: stock prompt caps at 5 objects and
       // is heavily worded toward "primary nearby" items, which produces low
@@ -1486,12 +1806,19 @@
       // detections (lamps, books, etc. that hover around 0.4). Stock 0.5 is
       // tuned for production; for a demo we'd rather over-detect.
       options.world.objects.backendConfig.mediapipe.scoreThreshold = 0.3;
+      // The SDK now exposes options.world.objects.backendConfig.gemini
+      // .generationConfig if you want to pin sampling (e.g. temperature: 0
+      // for deterministic detection). Left at default here so gemini's
+      // open-vocab range stays wide — the union backend benefits more from
+      // peak recall than from per-call repeatability.
       options.reticles.enabled = true;
       options.setAppTitle('3D Object Boxes');
 
       xb.init(options);
       xb.core.scene.add(boxes);
-      setStatus(`Press Detect. backend=${DETECT_BACKEND} mask=${MASK_BACKEND}`);
+      setStatus(
+        `Press Detect (then move around and press again to refine). backend=${DETECT_BACKEND} mask=${MASK_BACKEND}`
+      );
 
       const xrPanel = new xb.SpatialPanel({
         width: 0.3,

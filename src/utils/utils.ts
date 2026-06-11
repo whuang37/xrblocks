@@ -21,20 +21,6 @@ export function print(...args: unknown[]) {
   console.log('*', ...args);
 }
 
-const warnOnceMessages = new Set<string>();
-
-/**
- * Logs a warning to the console only once per unique message. Safe to call
- * from per-frame or repeatedly-evaluated code paths.
- * @param message - The warning message to log.
- */
-export function warnOnce(message: string) {
-  if (!warnOnceMessages.has(message)) {
-    warnOnceMessages.add(message);
-    console.warn(message);
-  }
-}
-
 // Parses URL parameters using the URLSearchParams API.
 export const urlParams = new URLSearchParams(window.location.search);
 

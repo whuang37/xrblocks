@@ -1656,11 +1656,29 @@
         }
       }
 
+      // Reentrancy guard. detect() runs for tens of seconds while monkey-
+      // patching xb.core.deviceCamera.getSnapshot; a concurrent press
+      // would capture our wrapper as its "original" and leave it
+      // installed when it restored, plus other SDK consumers calling
+      // getSnapshot during the overlap would receive the wrong cached
+      // frame. We disable the button in the UI but also gate here so
+      // programmatic callers (e.g. tests, playwright) can't trigger it.
+      let _detectInFlight = false;
+
       async function detect() {
         if (!xb.core.world?.objects) {
           setStatus('object detection not available');
           return;
         }
+        if (_detectInFlight) {
+          console.info(
+            '[objects_3d] detect already in flight, ignoring re-entry'
+          );
+          return;
+        }
+        _detectInFlight = true;
+        const detectBtn = document.getElementById('detect');
+        if (detectBtn) detectBtn.disabled = true;
         setStatus('detecting…');
         // Capture pixels first, then freeze the camera. Two reasons:
         //   1. getSnapshot reads the current video frame, which itself
@@ -1673,11 +1691,19 @@
         //      awaits and may end up reading two *different* video
         //      frames, so SAM and the detectors would see different
         //      pixels. One drawImage, one frame, two formats.
-        const snapImageData = await xb.core.deviceCamera.getSnapshot({
-          outputFormat: 'imageData',
-        });
+        let snapImageData;
+        try {
+          snapImageData = await xb.core.deviceCamera.getSnapshot({
+            outputFormat: 'imageData',
+          });
+        } catch (e) {
+          console.warn('[objects_3d] snapshot capture threw', e);
+          snapImageData = null;
+        }
         if (!snapImageData) {
           setStatus('no camera frame');
+          _detectInFlight = false;
+          if (detectBtn) detectBtn.disabled = false;
           return;
         }
         const _b64Canvas = document.createElement('canvas');
@@ -1730,6 +1756,8 @@
         const frozenDepthMesh = snapshotDepthMesh();
         if (!frozenDepthMesh) {
           setStatus('no depth mesh');
+          _detectInFlight = false;
+          if (detectBtn) detectBtn.disabled = false;
           return;
         }
         const _origGetSnapshot = xb.core.deviceCamera.getSnapshot.bind(
@@ -1744,283 +1772,313 @@
         // network (gemini) and GPU (SAM encoder) work happens concurrently
         // instead of serially, saving the smaller of the two stages on
         // the critical path. The encode is a single shot on snapImageData,
-        // which is already pinned and won't change.
+        // which is already pinned and won't change. Attach a no-op catch
+        // immediately so an early-return path doesn't leak the rejection
+        // as an UnhandledRejection warning; the real error surfaces when
+        // we await `samPrep` below (samState branch).
         let samPrep = null;
         if (MASK_BACKEND === 'slimsam') {
           samPrep = (async () => {
             await getSam();
             return samEncodeSnapshot(snapImageData);
           })();
+          samPrep.catch(() => {});
         }
-        let detected = [];
+        // Everything from here runs inside try/finally so the
+        // getSnapshot monkey-patch, the depth-mesh snapshot, the BVH
+        // bounds tree, the reentrancy flag, and the button-disabled
+        // state always come back even on detection / SAM / fitting
+        // failures. Without this, repeated failed presses leak memory
+        // and the cached-snapshot getter stays installed for other
+        // consumers.
         try {
-          if (DETECT_BACKEND === 'both') {
-            // Run both detectors and union with IoU dedupe. Two separate
-            // runDetection calls because the SDK only exposes one
-            // activeBackend at a time. Run mediapipe first so its
-            // deterministic COCO results anchor the dedupe, then add
-            // gemini's open-vocab finds that don't overlap.
-            const cfg = xb.core.world.objects.options.objects.backendConfig;
-            const prev = cfg.activeBackend;
-            cfg.activeBackend = 'mediapipe';
-            const mp = await xb.core.world.objects.runDetection();
-            cfg.activeBackend = 'gemini';
-            const gm = await xb.core.world.objects.runDetection();
-            cfg.activeBackend = prev;
-            detected = unionDetections(mp, gm);
-          } else {
-            detected = await xb.core.world.objects.runDetection();
-          }
-        } catch (e) {
-          console.warn('[objects_3d] detection threw', e);
-          setStatus('detection failed (see console)');
-          xb.core.deviceCamera.getSnapshot = _origGetSnapshot;
-          return;
-        }
-        console.log(
-          '[objects_3d] runDetection returned',
-          detected.length,
-          'objects',
-          detected.map((o) => ({
-            label: o.label,
-            box: o.detection2DBoundingBox && {
-              min: o.detection2DBoundingBox.min.toArray(),
-              max: o.detection2DBoundingBox.max.toArray(),
-            },
-            pos: o.position && o.position.toArray(),
-          }))
-        );
-        if (!detected.length) {
-          setStatus('nothing detected');
-          xb.core.deviceCamera.getSnapshot = _origGetSnapshot;
-          return;
-        }
-        // Multi-view fusion: keep existing boxes across Detect presses so
-        // pressing from a new camera angle refines them instead of replacing
-        // them. Single-viewpoint OBBs always disagree slightly because depth
-        // raycasts from one POV can't see the back of an object; averaging
-        // centroids and unioning extents across views converges to the
-        // truth. Clear button is the explicit reset.
-        let samState = null;
-        if (MASK_BACKEND === 'slimsam') {
-          setStatus('encoding snapshot…');
+          let detected = [];
           try {
-            // Await the SAM prep we started in parallel with detection.
-            // By the time gemini returns, this is usually already done.
-            samState = await samPrep;
+            if (DETECT_BACKEND === 'both') {
+              // Run both detectors and union with IoU dedupe. Two
+              // separate runDetection calls because the SDK only exposes
+              // one activeBackend at a time. Run mediapipe first so its
+              // deterministic COCO results anchor the dedupe, then add
+              // gemini's open-vocab finds that don't overlap.
+              const cfg = xb.core.world.objects.options.objects.backendConfig;
+              const prev = cfg.activeBackend;
+              try {
+                cfg.activeBackend = 'mediapipe';
+                const mp = await xb.core.world.objects.runDetection();
+                cfg.activeBackend = 'gemini';
+                const gm = await xb.core.world.objects.runDetection();
+                detected = unionDetections(mp, gm);
+              } finally {
+                cfg.activeBackend = prev;
+              }
+            } else {
+              detected = await xb.core.world.objects.runDetection();
+            }
           } catch (e) {
-            console.warn('[objects_3d] sam encoder failed', e);
-            setStatus('sam encoding failed (see console)');
-            xb.core.deviceCamera.getSnapshot = _origGetSnapshot;
+            console.warn('[objects_3d] detection threw', e);
+            setStatus('detection failed (see console)');
             return;
           }
-        }
-        // Reuse the same imageData snapshot captured before runDetection so
-        // SAM masks line up exactly with the bboxes the detectors returned.
-        const snapshot = snapImageData;
-        // Restore the original snapshot getter; everything downstream
-        // (fitting, raycasting) uses the cached pixel data and the frozen
-        // camera, so there's no need to keep the monkey-patch active.
-        xb.core.deviceCamera.getSnapshot = _origGetSnapshot;
-        setStatus('fitting boxes…');
-        const floorY = estimateFloorY();
-        // Pipeline the per-object work: mask decode (serial on GPU via
-        // samSerialize) overlaps with depth raycasts + OBB fitting for the
-        // previous object. Without pipelining we wait for mask N+1 to
-        // finish decoding before even starting raycast N+1, even though
-        // the raycast is pure CPU and doesn't need the GPU. Returns null
-        // for rejected / surface-skip / failed entries so the result list
-        // stays aligned with `detected` order, which the final fuse pass
-        // walks serially (fuseIntoBoxes mutates the shared boxes group).
-        async function processOne(obj) {
-          try {
-            if (isSurfaceLabel(obj.label)) {
-              console.log('[objects_3d] skip surface label', obj.label);
-              return null;
-            }
-            const box2d = obj.detection2DBoundingBox;
-            let mask;
+          console.log(
+            '[objects_3d] runDetection returned',
+            detected.length,
+            'objects',
+            detected.map((o) => ({
+              label: o.label,
+              box: o.detection2DBoundingBox && {
+                min: o.detection2DBoundingBox.min.toArray(),
+                max: o.detection2DBoundingBox.max.toArray(),
+              },
+              pos: o.position && o.position.toArray(),
+            }))
+          );
+          if (!detected.length) {
+            setStatus('nothing detected');
+            return;
+          }
+          // Multi-view fusion: keep existing boxes across Detect presses
+          // so pressing from a new camera angle refines them instead of
+          // replacing them. Single-viewpoint OBBs always disagree
+          // slightly because depth raycasts from one POV can't see the
+          // back of an object; averaging centroids and unioning extents
+          // across views converges to the truth. Clear button is the
+          // explicit reset.
+          let samState = null;
+          if (MASK_BACKEND === 'slimsam') {
+            setStatus('encoding snapshot…');
             try {
-              mask =
-                MASK_BACKEND === 'slimsam'
-                  ? await samMaskFromBbox(samState, box2d)
-                  : await segmenterMaskFromSnapshot(snapshot, box2d);
+              // Await the SAM prep we started in parallel with detection.
+              // By the time gemini returns, this is usually already done.
+              samState = await samPrep;
+            } catch (e) {
+              console.warn('[objects_3d] sam encoder failed', e);
+              setStatus('sam encoding failed (see console)');
+              return;
+            }
+          }
+          // Reuse the same imageData snapshot captured before
+          // runDetection so SAM masks line up exactly with the bboxes the
+          // detectors returned.
+          const snapshot = snapImageData;
+          // Restore the original snapshot getter; everything downstream
+          // (fitting, raycasting) uses the cached pixel data and the
+          // frozen camera, so there's no need to keep the monkey-patch
+          // active. The outer finally restores it too as a safety net.
+          xb.core.deviceCamera.getSnapshot = _origGetSnapshot;
+          setStatus('fitting boxes…');
+          const floorY = estimateFloorY();
+          // Pipeline the per-object work: mask decode (serial on GPU via
+          // samSerialize) overlaps with depth raycasts + OBB fitting for
+          // the previous object. Without pipelining we wait for mask N+1
+          // to finish decoding before even starting raycast N+1, even
+          // though the raycast is pure CPU and doesn't need the GPU.
+          // Returns null for rejected / surface-skip / failed entries so
+          // the result list stays aligned with `detected` order, which
+          // the final fuse pass walks serially (fuseIntoBoxes mutates
+          // the shared boxes group).
+          async function processOne(obj) {
+            try {
+              if (isSurfaceLabel(obj.label)) {
+                console.log('[objects_3d] skip surface label', obj.label);
+                return null;
+              }
+              const box2d = obj.detection2DBoundingBox;
+              let mask;
+              try {
+                mask =
+                  MASK_BACKEND === 'slimsam'
+                    ? await samMaskFromBbox(samState, box2d)
+                    : await segmenterMaskFromSnapshot(snapshot, box2d);
+              } catch (e) {
+                console.warn(
+                  '[objects_3d]',
+                  MASK_BACKEND,
+                  'mask threw for',
+                  obj.label,
+                  e
+                );
+                return null;
+              }
+              if (!mask) {
+                console.warn('[objects_3d] no mask for', obj.label);
+                return null;
+              }
+              const {points: raw, foregroundPixels} =
+                await sampleDepthInMaskAcrossFrames(
+                  mask,
+                  box2d,
+                  10,
+                  3,
+                  frozenCam,
+                  frozenDepthMesh,
+                  snapAspect
+                );
+              mask.close();
+              // Recompute the anchor ourselves through the frozen camera +
+              // frozen depth mesh so it lines up with the snapshot pixels.
+              // Falls back to the SDK anchor when the bbox-centre ray
+              // misses the mesh (e.g. the centre falls on a thin gap).
+              const anchor =
+                anchorFromBboxCenter(
+                  box2d,
+                  frozenCam,
+                  frozenDepthMesh,
+                  snapAspect
+                ) || obj.position;
+              const cat = categorize(obj.label);
+              // Category-specific outlier rejection. Flats skip upfront
+              // rejection entirely so RANSAC sees the full point set and
+              // finds the dominant plane (mask points off the wall become
+              // outliers there).
+              let points;
+              if (cat === 'flat') {
+                points = raw;
+              } else if (cat === 'small') {
+                const r = radiusFromBbox(box2d, frozenCam, anchor, {
+                  pad: 1.1,
+                  minR: 0.12,
+                  maxR: 0.3,
+                  fallback: 0.25,
+                });
+                points = rejectByAnchor(raw, anchor, r);
+              } else if (cat === 'light') {
+                const r = radiusFromBbox(box2d, frozenCam, anchor, {
+                  pad: 1.2,
+                  minR: 0.2,
+                  maxR: 0.7,
+                  fallback: 0.5,
+                });
+                points = rejectByY(rejectByAnchor(raw, anchor, r), 0.15);
+              } else {
+                const r = radiusFromBbox(box2d, frozenCam, anchor, {
+                  pad: 1.3,
+                  minR: 0.4,
+                  maxR: 2.0,
+                  fallback: 1.0,
+                });
+                const depthFiltered = rejectByAnchorDepth(
+                  raw,
+                  frozenCam,
+                  anchor,
+                  r
+                );
+                points = rejectByAnchor(depthFiltered, anchor, r);
+              }
+              const obb = fitYawOBB(points, {
+                category: cat,
+                camera: frozenCam,
+                anchor: anchor,
+                box2d,
+                tinyFlat: isTinyFlatLabel(obj.label),
+              });
+              if (!obb) {
+                console.info(
+                  '[objects_3d] no obb',
+                  obj.label,
+                  'cat',
+                  cat,
+                  'rawPts',
+                  raw.length,
+                  'keptPts',
+                  points.length
+                );
+                return null;
+              }
+              if (cat === 'furniture' || cat === 'small') {
+                snapBoxToFloor(obb, floorY);
+              }
+              const c = obb.center;
+              const farFromRoom =
+                Math.abs(c.x) > 6 || Math.abs(c.z) > 6 || c.y < -1 || c.y > 5;
+              const minPoints =
+                cat === 'small'
+                  ? 4
+                  : cat === 'light'
+                    ? 8
+                    : cat === 'flat'
+                      ? 8
+                      : 20;
+              const tinyFlat = isTinyFlatLabel(obj.label);
+              const tooFewPoints = !tinyFlat && points.length < minPoints;
+              const oversize =
+                obb.size.x > 4 || obb.size.y > 3 || obb.size.z > 4;
+              const horizMax = Math.max(obb.size.x, obb.size.z);
+              const degenerate =
+                cat !== 'flat' && horizMax > 0.5 && obb.size.y / horizMax < 0.1;
+              if (farFromRoom || tooFewPoints || oversize || degenerate) {
+                console.warn(
+                  '[objects_3d] reject',
+                  obj.label,
+                  'far',
+                  farFromRoom,
+                  'fewPts',
+                  tooFewPoints,
+                  'oversize',
+                  oversize,
+                  'degenerate',
+                  degenerate,
+                  'kept',
+                  points.length,
+                  'center',
+                  c.toArray().map((v) => +v.toFixed(2)),
+                  'size',
+                  obb.size.toArray().map((v) => +v.toFixed(2))
+                );
+                return null;
+              }
+              return {obb, label: obj.label || 'object', cat};
             } catch (e) {
               console.warn(
-                '[objects_3d]',
-                MASK_BACKEND,
-                'mask threw for',
+                '[objects_3d] per-object pipeline threw for',
                 obj.label,
-                e
+                e?.message || String(e),
+                e?.stack || ''
               );
               return null;
             }
-            if (!mask) {
-              console.warn('[objects_3d] no mask for', obj.label);
-              return null;
-            }
-            const {points: raw, foregroundPixels} =
-              await sampleDepthInMaskAcrossFrames(
-                mask,
-                box2d,
-                10,
-                3,
-                frozenCam,
-                frozenDepthMesh,
-                snapAspect
-              );
-            mask.close();
-            // Recompute the anchor ourselves through the frozen camera +
-            // frozen depth mesh so it lines up with the snapshot pixels.
-            // Falls back to the SDK anchor when the bbox-centre ray
-            // misses the mesh (e.g. the centre falls on a thin gap).
-            const anchor =
-              anchorFromBboxCenter(
-                box2d,
-                frozenCam,
-                frozenDepthMesh,
-                snapAspect
-              ) || obj.position;
-            const cat = categorize(obj.label);
-            // Category-specific outlier rejection. Flats skip upfront
-            // rejection entirely so RANSAC sees the full point set and
-            // finds the dominant plane (mask points off the wall become
-            // outliers there).
-            let points;
-            if (cat === 'flat') {
-              points = raw;
-            } else if (cat === 'small') {
-              const r = radiusFromBbox(box2d, frozenCam, anchor, {
-                pad: 1.1,
-                minR: 0.12,
-                maxR: 0.3,
-                fallback: 0.25,
-              });
-              points = rejectByAnchor(raw, anchor, r);
-            } else if (cat === 'light') {
-              const r = radiusFromBbox(box2d, frozenCam, anchor, {
-                pad: 1.2,
-                minR: 0.2,
-                maxR: 0.7,
-                fallback: 0.5,
-              });
-              points = rejectByY(rejectByAnchor(raw, anchor, r), 0.15);
-            } else {
-              const r = radiusFromBbox(box2d, frozenCam, anchor, {
-                pad: 1.3,
-                minR: 0.4,
-                maxR: 2.0,
-                fallback: 1.0,
-              });
-              const depthFiltered = rejectByAnchorDepth(
-                raw,
-                frozenCam,
-                anchor,
-                r
-              );
-              points = rejectByAnchor(depthFiltered, anchor, r);
-            }
-            const obb = fitYawOBB(points, {
-              category: cat,
-              camera: frozenCam,
-              anchor: anchor,
-              box2d,
-              tinyFlat: isTinyFlatLabel(obj.label),
-            });
-            if (!obb) {
-              console.info(
-                '[objects_3d] no obb',
-                obj.label,
-                'cat',
-                cat,
-                'rawPts',
-                raw.length,
-                'keptPts',
-                points.length
-              );
-              return null;
-            }
-            if (cat === 'furniture' || cat === 'small') {
-              snapBoxToFloor(obb, floorY);
-            }
-            const c = obb.center;
-            const farFromRoom =
-              Math.abs(c.x) > 6 || Math.abs(c.z) > 6 || c.y < -1 || c.y > 5;
-            const minPoints =
-              cat === 'small'
-                ? 4
-                : cat === 'light'
-                  ? 8
-                  : cat === 'flat'
-                    ? 8
-                    : 20;
-            const tinyFlat = isTinyFlatLabel(obj.label);
-            const tooFewPoints = !tinyFlat && points.length < minPoints;
-            const oversize = obb.size.x > 4 || obb.size.y > 3 || obb.size.z > 4;
-            const horizMax = Math.max(obb.size.x, obb.size.z);
-            const degenerate =
-              cat !== 'flat' && horizMax > 0.5 && obb.size.y / horizMax < 0.1;
-            if (farFromRoom || tooFewPoints || oversize || degenerate) {
-              console.warn(
-                '[objects_3d] reject',
-                obj.label,
-                'far',
-                farFromRoom,
-                'fewPts',
-                tooFewPoints,
-                'oversize',
-                oversize,
-                'degenerate',
-                degenerate,
-                'kept',
-                points.length,
-                'center',
-                c.toArray().map((v) => +v.toFixed(2)),
-                'size',
-                obb.size.toArray().map((v) => +v.toFixed(2))
-              );
-              return null;
-            }
-            return {obb, label: obj.label || 'object', cat};
-          } catch (e) {
-            console.warn(
-              '[objects_3d] per-object pipeline threw for',
-              obj.label,
-              e?.message || String(e),
-              e?.stack || ''
-            );
-            return null;
           }
-        }
-        const results = await Promise.all(detected.map(processOne));
-        // Serial fuse + add pass: fuseIntoBoxes iterates over
-        // boxes.children, and buildBoxGroup mutates it, so this can't
-        // race with itself or with another processOne completing.
-        let kept = 0;
-        for (const r of results) {
-          if (!r) continue;
-          const fused = fuseIntoBoxes(r.obb, r.label, r.cat);
-          if (!fused) {
-            const g = buildBoxGroup(
-              r.obb,
-              r.label,
-              CAT_COLOR[r.cat] || 0x4cd964
-            );
-            g.userData.cat = r.cat;
-            boxes.add(g);
+          const results = await Promise.all(detected.map(processOne));
+          // Serial fuse + add pass: fuseIntoBoxes iterates over
+          // boxes.children, and buildBoxGroup mutates it, so this can't
+          // race with itself or with another processOne completing.
+          let kept = 0;
+          for (const r of results) {
+            if (!r) continue;
+            const fused = fuseIntoBoxes(r.obb, r.label, r.cat);
+            if (!fused) {
+              const g = buildBoxGroup(
+                r.obb,
+                r.label,
+                CAT_COLOR[r.cat] || 0x4cd964
+              );
+              g.userData.cat = r.cat;
+              boxes.add(g);
+            }
+            kept++;
           }
-          kept++;
+          setStatus(
+            `fit ${kept} / ${detected.length} oriented boxes (press again from a new angle to refine)`
+          );
+        } finally {
+          // Centralized cleanup: every exit path from the inner try
+          // (success, "nothing detected", thrown detection, sam encoder
+          // fail) lands here. Restore the snapshot getter even if the
+          // inner happy-path already did it (idempotent), release the
+          // BVH index and geometry, free the material, and clear the
+          // reentrancy gate so the next press can run.
+          xb.core.deviceCamera.getSnapshot = _origGetSnapshot;
+          if (frozenDepthMesh.geometry) {
+            if (frozenDepthMesh.geometry.disposeBoundsTree) {
+              frozenDepthMesh.geometry.disposeBoundsTree();
+            }
+            frozenDepthMesh.geometry.dispose();
+          }
+          if (frozenDepthMesh.material?.dispose) {
+            frozenDepthMesh.material.dispose();
+          }
+          _detectInFlight = false;
+          if (detectBtn) detectBtn.disabled = false;
         }
-        setStatus(
-          `fit ${kept} / ${detected.length} oriented boxes (press again from a new angle to refine)`
-        );
-        // Release the depth-mesh snapshot's GPU buffers + BVH index.
-        // Geometry is a clone of the live mesh's geometry, material is a
-        // fresh basic material owned by the snapshot.
-        frozenDepthMesh.geometry.disposeBoundsTree();
-        frozenDepthMesh.geometry.dispose();
-        if (frozenDepthMesh.material?.dispose)
-          frozenDepthMesh.material.dispose();
       }
 
       const options = new xb.Options();

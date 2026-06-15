@@ -1,33 +1,25 @@
 import * as THREE from 'three';
-import {
-  acceleratedRaycast,
-  computeBoundsTree,
-  disposeBoundsTree,
-} from 'three-mesh-bvh';
 import {getCameraParametersSnapshot} from '../../camera/CameraUtils';
 import {XRDeviceCamera} from '../../camera/XRDeviceCamera';
 import {Script} from '../../core/Script';
 import {Depth} from '../../depth/Depth';
+import {enableAcceleratedRaycast} from '../../utils/BVHRaycast';
 import {WorldOptions} from '../WorldOptions';
 import {DetectedFace} from './DetectedFace';
 import {BaseFaceBackend, FaceBackendContext} from './FaceDetectorBackend';
 import {MediaPipeFaceBackend} from './backends/MediaPipeFaceBackend';
 
-// Wire three-mesh-bvh into THREE so any Mesh.raycast() that has a
-// computed boundsTree goes through the BVH-accelerated path. Meshes
-// without a boundsTree fall back to the stock walker, so this patch is
-// safe to apply globally and idempotent across modules.
+// Install the BVH-accelerated raycast prototype patches at module
+// load so the per-landmark raycasts inside processFaceLandmarkerResult
+// go through the accelerated path. enableAcceleratedRaycast is
+// idempotent across modules so this is safe even if another subsystem
+// already called it.
+//
 // FaceLandmarker emits 478 landmarks per face and we raycast each one
-// against the depth mesh in processFaceLandmarkerResult. The stock
-// raycaster is O(triangles) per ray and the depth mesh is a few thousand
-// triangles, so without BVH the per-detection raycast loop alone can
-// dominate the frame budget. BVH drops it to O(log triangles).
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(THREE.Mesh.prototype as any).raycast = acceleratedRaycast;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(THREE.BufferGeometry.prototype as any).computeBoundsTree = computeBoundsTree;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(THREE.BufferGeometry.prototype as any).disposeBoundsTree = disposeBoundsTree;
+// against the depth-mesh snapshot. Stock three.js is O(triangles) per
+// ray; the depth mesh runs in the thousands of triangles so without
+// BVH the per-detection raycast loop alone dominates the frame budget.
+enableAcceleratedRaycast();
 
 /**
  * A detector script that orchestrates face landmark estimation. Manages

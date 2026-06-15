@@ -495,11 +495,20 @@ export class FaceMirror extends xb.Script {
   }
 
   updateBars(face) {
+    if (!this.lastBarValues) this.lastBarValues = new Map();
     for (const name of FEATURED_BLENDSHAPES) {
       const v = face.getBlendshape(name);
       const pct = (v * 100).toFixed(0) + '%';
       const htmlFill = this.barEls.get(name);
       if (htmlFill) htmlFill.style.width = pct;
+      // Skip writing to the uikit panels when the value hasn't moved
+      // by more than 0.5%. Each setProperties triggers a layout pass
+      // via the yoga wasm bridge; on a 12-bar HUD that's ~24 layouts
+      // per detection at ~30fps. With this gate a held expression
+      // (eyes blink, brows neutral) collapses to one or two writes.
+      const prev = this.lastBarValues.get(name);
+      if (prev !== undefined && Math.abs(v - prev) < 0.005) continue;
+      this.lastBarValues.set(name, v);
       const spatial = this.spatialBars.get(name);
       if (spatial) {
         spatial.fill.setProperties({flexGrow: v});
@@ -509,6 +518,7 @@ export class FaceMirror extends xb.Script {
   }
 
   resetBars() {
+    if (this.lastBarValues) this.lastBarValues.clear();
     for (const fill of this.barEls.values()) {
       fill.style.width = '0%';
     }

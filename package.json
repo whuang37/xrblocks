@@ -82,5 +82,8 @@
     "rollup-plugin-dts": {
       "typescript": "$typescript"
     }
+  },
+  "dependencies": {
+    "three-mesh-bvh": "^0.9.10"
   }
 }

@@ -3,10 +3,25 @@ import {getCameraParametersSnapshot} from '../../camera/CameraUtils';
 import {XRDeviceCamera} from '../../camera/XRDeviceCamera';
 import {Script} from '../../core/Script';
 import {Depth} from '../../depth/Depth';
+import {enableAcceleratedRaycast, isBVHReady} from '../../utils/BVHRaycast';
 import {WorldOptions} from '../WorldOptions';
 import {DetectedFace} from './DetectedFace';
 import {BaseFaceBackend, FaceBackendContext} from './FaceDetectorBackend';
 import {MediaPipeFaceBackend} from './backends/MediaPipeFaceBackend';
+
+// Kick off the BVH-accelerated raycast prototype patches at module
+// load so the per-landmark raycasts inside processFaceLandmarkerResult
+// go through the accelerated path. Fire-and-forget: the helper loads
+// three-mesh-bvh dynamically and the SDK keeps working even if the
+// module isn't installed or in the importmap (raycasts fall back to
+// the stock walker). idempotent across modules so multiple subsystems
+// can ping it safely.
+//
+// FaceLandmarker emits 478 landmarks per face and we raycast each one
+// against the depth-mesh snapshot. Stock three.js is O(triangles) per
+// ray; the depth mesh runs in the thousands of triangles so without
+// BVH the per-detection raycast loop alone dominates the frame budget.
+enableAcceleratedRaycast();
 
 /**
  * A detector script that orchestrates face landmark estimation. Manages
@@ -128,14 +143,63 @@ export class FaceRecognizer extends Script {
     return backendPromise;
   }
 
+  // Cached depth-mesh snapshot (cloned geometry + BVH). We rebuild it
+  // only when the source depth geometry's position attribute bumps its
+  // version (three.js does this automatically whenever the depth mesh
+  // refreshes via needsUpdate = true). For a static desktop sim the
+  // BVH build therefore amortizes across all detections instead of
+  // running every detection.
+  private cachedDepthMeshSnapshot: THREE.Mesh | null = null;
+  private cachedDepthMeshSource: THREE.BufferGeometry | null = null;
+  private cachedDepthMeshVersion = -1;
+
   private getDepthMeshSnapshot() {
     const depthMesh = this.depth.depthMesh!;
     const geometry = this.depth.options.depthMesh.updateFullResolutionGeometry
       ? depthMesh.geometry
       : depthMesh.downsampledGeometry || depthMesh.geometry;
+    // Both BufferAttribute and InterleavedBufferAttribute carry a
+    // `version` field that three.js bumps on `needsUpdate = true`, but
+    // the type for the union doesn't expose it. Cast to read.
+    const positionAttr = geometry.attributes.position as unknown as {
+      version: number;
+    };
+    const version = positionAttr.version;
+    if (
+      this.cachedDepthMeshSnapshot &&
+      this.cachedDepthMeshSource === geometry &&
+      this.cachedDepthMeshVersion === version
+    ) {
+      // Source geometry hasn't been updated since last snapshot. Refresh
+      // the cached snapshot's world transform (cheap) and return it as
+      // is. The BVH built over the cloned positions is still valid
+      // because the source positions haven't changed.
+      depthMesh.getWorldPosition(this.cachedDepthMeshSnapshot.position);
+      depthMesh.getWorldQuaternion(this.cachedDepthMeshSnapshot.quaternion);
+      depthMesh.getWorldScale(this.cachedDepthMeshSnapshot.scale);
+      this.cachedDepthMeshSnapshot.updateMatrixWorld(true);
+      return this.cachedDepthMeshSnapshot;
+    }
+    // Source changed (or first call). Dispose the previous BVH so its
+    // backing buffers free, then clone + rebuild.
+    if (this.cachedDepthMeshSnapshot) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (this.cachedDepthMeshSnapshot.geometry as any).disposeBoundsTree?.();
+      this.cachedDepthMeshSnapshot.geometry.dispose();
+    }
     const clonedGeometry = geometry.clone();
     clonedGeometry.computeBoundingSphere();
     clonedGeometry.computeBoundingBox();
+    // Build a BVH over the cloned depth-mesh geometry when three-mesh-bvh
+    // is available so the per-landmark raycasts inside
+    // processFaceLandmarkerResult go through the BVH-accelerated path
+    // instead of walking every triangle 478 times. If BVH isn't ready
+    // yet (dynamic import in flight or three-mesh-bvh not installed),
+    // we skip computeBoundsTree and the stock raycaster takes over.
+    if (isBVHReady()) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (clonedGeometry as any).computeBoundsTree();
+    }
     const depthMeshSnapshot = new THREE.Mesh(
       clonedGeometry,
       new THREE.MeshBasicMaterial()
@@ -144,6 +208,9 @@ export class FaceRecognizer extends Script {
     depthMesh.getWorldQuaternion(depthMeshSnapshot.quaternion);
     depthMesh.getWorldScale(depthMeshSnapshot.scale);
     depthMeshSnapshot.updateMatrixWorld(true);
+    this.cachedDepthMeshSnapshot = depthMeshSnapshot;
+    this.cachedDepthMeshSource = geometry;
+    this.cachedDepthMeshVersion = version;
     return depthMeshSnapshot;
   }
 }

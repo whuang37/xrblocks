@@ -6,27 +6,14 @@ import {
 } from '../../../camera/CameraUtils';
 import {DetectedFace, FaceBlendshape, FaceLandmark} from '../DetectedFace';
 import {BaseFaceBackend, FaceBackendContext} from '../FaceDetectorBackend';
+import {MEDIA_PIPE_FACE_WORKER_SOURCE} from './MediaPipeFaceWorker';
 
-let FilesetResolver: typeof MEDIAPIPE.FilesetResolver | undefined;
-let FaceLandmarker: typeof MEDIAPIPE.FaceLandmarker | undefined;
-
-// --- Attempt Dynamic Import ---
-async function loadMediaPipeModule() {
-  if (FilesetResolver && FaceLandmarker) {
-    return;
-  }
-  try {
-    const mediapipeModule = await import('@mediapipe/tasks-vision');
-    FilesetResolver = mediapipeModule.FilesetResolver;
-    FaceLandmarker = mediapipeModule.FaceLandmarker;
-    console.log(
-      "'@mediapipe/tasks-vision' MediaPipe Face Module loaded successfully."
-    );
-  } catch (error) {
-    console.error('Failed to load MediaPipe Tasks Vision module:', error);
-    throw error;
-  }
-}
+// CDN module the worker dynamic-imports for MediaPipe. Workers can't see
+// the host page's importmap so we hand them an absolute URL. Pinned to a
+// version that matches the SDK's tested matrix; bump in lockstep with
+// any importmap updates in demos/face_mirror/index.html.
+const MEDIAPIPE_MODULE_URL =
+  'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs';
 
 /**
  * Convert a raw MediaPipe `FaceLandmarkerResult` into an array of
@@ -151,13 +138,38 @@ export function processFaceLandmarkerResult(
 
 /**
  * Face Landmark detector backend implementation using MediaPipe's
- * FaceLandmarker. Runs locally on the device. Emits 478 facial
- * landmarks per face plus optional 52 ARKit-style blendshape weights
- * and an optional rigid 4x4 facial transformation matrix.
+ * FaceLandmarker. Runs locally on the device, but offloads the
+ * inference to a Web Worker so heavy detection passes (~30 ms on a
+ * modern laptop, much more on mobile) don't stall the render loop.
+ *
+ * Pipeline per detect():
+ *   1. Main thread captures an `ImageData` snapshot from the device
+ *      camera (already async).
+ *   2. Convert to `ImageBitmap` once and transfer it (zero-copy) to
+ *      the worker.
+ *   3. Worker runs `landmarker.detect()` and posts back the structured-
+ *      clonable result.
+ *   4. Main thread runs `processFaceLandmarkerResult` (depth-mesh
+ *      raycasts + camera-frustum back-projection) which has to live on
+ *      the render thread because it touches the live depth mesh and
+ *      camera matrices.
+ *
+ * Emits 478 facial landmarks per face plus optional 52 ARKit-style
+ * blendshape weights and an optional rigid 4x4 facial transformation
+ * matrix.
  */
 export class MediaPipeFaceBackend extends BaseFaceBackend {
-  private faceLandmarker: MEDIAPIPE.FaceLandmarker | null = null;
+  private worker: Worker | null = null;
+  private workerUrl: string | null = null;
   private initializationPromise: Promise<void>;
+  private nextRequestId = 0;
+  private pendingRequests = new Map<
+    number,
+    {
+      resolve: (value: WorkerReply) => void;
+      reject: (error: Error) => void;
+    }
+  >();
 
   constructor(context: FaceBackendContext) {
     super(context);
@@ -190,51 +202,139 @@ export class MediaPipeFaceBackend extends BaseFaceBackend {
     cameraParametersSnapshot: CameraParametersSnapshot
   ): Promise<DetectedFace[]> {
     await this.initializationPromise;
-    if (!this.faceLandmarker) {
+    if (!this.worker) {
       return [];
     }
 
-    let result: MEDIAPIPE.FaceLandmarkerResult;
+    // Convert the snapshot to an ImageBitmap so the pixel buffer can be
+    // transferred (zero-copy) into the worker. ImageData itself is
+    // structured-cloneable but that means a full pixel copy per detect;
+    // ImageBitmap moves ownership.
+    let bitmap: ImageBitmap;
     try {
-      result = this.faceLandmarker.detect(snapshot.imageData);
+      bitmap = await createImageBitmap(snapshot.imageData);
     } catch (error: unknown) {
-      console.error('MediaPipe Face detection run failed:', error);
+      console.error('Failed to create ImageBitmap for face detection:', error);
       return [];
     }
 
-    if (!result || !result.faceLandmarks || result.faceLandmarks.length === 0) {
+    let workerResult: MEDIAPIPE.FaceLandmarkerResult;
+    try {
+      const reply = (await this.send({type: 'detect', imageBitmap: bitmap}, [
+        bitmap,
+      ])) as WorkerSuccessReply;
+      workerResult = reply.result as MEDIAPIPE.FaceLandmarkerResult;
+    } catch (error: unknown) {
+      console.error('MediaPipe Face detection (worker) failed:', error);
+      return [];
+    }
+
+    if (
+      !workerResult ||
+      !workerResult.faceLandmarks ||
+      workerResult.faceLandmarks.length === 0
+    ) {
       return [];
     }
 
     return processFaceLandmarkerResult(
-      result,
+      workerResult,
       depthMeshSnapshot,
       cameraParametersSnapshot
     );
   }
 
-  private async tryInitializeFaceLandmarker(): Promise<void> {
-    if (this.faceLandmarker) return;
+  /**
+   * Tear down the worker and revoke the Blob URL it was constructed
+   * from. Safe to call multiple times.
+   */
+  dispose() {
+    if (this.worker) {
+      this.worker.terminate();
+      this.worker = null;
+    }
+    if (this.workerUrl) {
+      URL.revokeObjectURL(this.workerUrl);
+      this.workerUrl = null;
+    }
+    // Reject any in-flight requests so callers don't hang.
+    for (const {reject} of this.pendingRequests.values()) {
+      reject(new Error('MediaPipeFaceBackend disposed'));
+    }
+    this.pendingRequests.clear();
+  }
 
-    await loadMediaPipeModule();
+  private async tryInitializeFaceLandmarker(): Promise<void> {
+    if (this.worker) return;
+    if (typeof Worker === 'undefined') {
+      throw new Error('Web Workers are not available in this environment');
+    }
+
+    // Spawn the worker from an inlined Blob URL so we don't have to
+    // teach the rollup pipeline about a separate worker entry point.
+    const blob = new Blob([MEDIA_PIPE_FACE_WORKER_SOURCE], {
+      type: 'text/javascript',
+    });
+    this.workerUrl = URL.createObjectURL(blob);
+    this.worker = new Worker(this.workerUrl);
+    this.worker.onmessage = (event: MessageEvent<WorkerReply>) => {
+      const {id} = event.data;
+      const pending = this.pendingRequests.get(id);
+      if (!pending) return;
+      this.pendingRequests.delete(id);
+      if (event.data.ok) {
+        pending.resolve(event.data);
+      } else {
+        pending.reject(new Error(event.data.error || 'worker error'));
+      }
+    };
+    this.worker.onerror = (event) => {
+      console.error('MediaPipe face worker errored:', event.message);
+    };
 
     const facesOptions = this.context.options.faces.backendConfig.mediapipe;
-    const vision = await FilesetResolver!.forVisionTasks(
-      facesOptions.wasmFilesUrl
-    );
-    this.faceLandmarker = await FaceLandmarker!.createFromOptions(vision, {
-      baseOptions: {
+    await this.send({
+      type: 'init',
+      config: {
+        mediapipeModuleUrl: MEDIAPIPE_MODULE_URL,
+        wasmFilesUrl: facesOptions.wasmFilesUrl,
         modelAssetPath: facesOptions.modelAssetPath,
-        delegate: 'GPU',
+        numFaces: facesOptions.numFaces,
+        minFaceDetectionConfidence: facesOptions.minFaceDetectionConfidence,
+        minFacePresenceConfidence: facesOptions.minFacePresenceConfidence,
+        minTrackingConfidence: facesOptions.minTrackingConfidence,
+        outputFaceBlendshapes: facesOptions.outputFaceBlendshapes,
+        outputFacialTransformationMatrixes:
+          facesOptions.outputFacialTransformationMatrixes,
       },
-      runningMode: 'IMAGE',
-      numFaces: facesOptions.numFaces,
-      minFaceDetectionConfidence: facesOptions.minFaceDetectionConfidence,
-      minFacePresenceConfidence: facesOptions.minFacePresenceConfidence,
-      minTrackingConfidence: facesOptions.minTrackingConfidence,
-      outputFaceBlendshapes: facesOptions.outputFaceBlendshapes,
-      outputFacialTransformationMatrixes:
-        facesOptions.outputFacialTransformationMatrixes,
+    });
+  }
+
+  /**
+   * Promise-wrap a single request/response round trip with the worker.
+   * The worker echoes back the request `id` so we can correlate replies
+   * even when multiple detect() calls overlap.
+   */
+  private send(
+    payload: WorkerRequest,
+    transfer: Transferable[] = []
+  ): Promise<WorkerReply> {
+    if (!this.worker) {
+      return Promise.reject(new Error('worker not spawned'));
+    }
+    const id = this.nextRequestId++;
+    const worker = this.worker;
+    return new Promise<WorkerReply>((resolve, reject) => {
+      this.pendingRequests.set(id, {resolve, reject});
+      worker.postMessage({id, ...payload}, transfer);
     });
   }
 }
+
+type WorkerRequest =
+  | {type: 'init'; config: Record<string, unknown>}
+  | {type: 'detect'; imageBitmap: ImageBitmap};
+
+type WorkerSuccessReply = {id: number; ok: true; result?: unknown};
+type WorkerErrorReply = {id: number; ok: false; error: string};
+type WorkerReply = WorkerSuccessReply | WorkerErrorReply;

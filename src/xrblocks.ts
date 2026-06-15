@@ -118,6 +118,7 @@ export * from './ui/layouts/SpatialPanel';
 export * from './ui/layouts/TextScrollerState';
 export * from './ui/layouts/VerticalPager';
 export * from './ui/UI';
+export * from './utils/BVHRaycast';
 export * from './utils/DependencyInjection';
 export * from './utils/HelperConstants';
 export * from './utils/Keycodes';

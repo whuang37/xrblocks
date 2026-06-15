@@ -176,12 +176,12 @@ export class PortalGalleryScene extends xb.Script {
       }
     }
 
-    // BVH only on the immersive sub-trees (dense, static meshes), not
-    // the gallery root which also holds portal discs, labels, the fade
-    // sphere etc. that are low-poly / dynamic.
-    for (const imm of this.immersives) {
-      if (imm) xb.applyBVH?.(imm);
-    }
+    // Build BVH bounds-trees on every mesh under this scene root so
+    // the SDK's per-frame raycast against `xb.core.scene` goes through
+    // the BVH-accelerated path instead of walking every triangle per
+    // ray. With 5 immersive scenes loaded the raycast loop dominated
+    // the main thread in perf traces before this.
+    xb.applyBVH?.(this);
   }
 
   onSelectStart(event) {

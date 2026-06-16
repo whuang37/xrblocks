@@ -280,7 +280,10 @@
       // computeBoundsTree() once per detect on the cloned depth-mesh
       // geometry (cheap because depth meshes are small) and
       // disposeBoundsTree() in the finally to release the index.
-      xb.enableAcceleratedRaycast().catch(() => {});
+      // detect() awaits this promise before building the per-press tree,
+      // so a press that lands before the import resolves waits it out
+      // rather than silently falling back to the stock raycaster.
+      const bvhReady = xb.enableAcceleratedRaycast().catch(() => false);
 
       // Cache transformers.js model downloads in the browser so repeat runs
       // don't re-fetch the SAM weights.
@@ -1807,6 +1810,13 @@
         frozenCam.userData.snapAspect = snapAspect;
         // Snapshot the depth mesh in the same tick as the camera freeze
         // so all three (pixels, camera, depth geometry) are coherent.
+        // Make sure the BVH prototype patch is installed before we build
+        // the per-press bounds tree. Kicked off at init so this is almost
+        // always already resolved; a very early press waits the dynamic
+        // import out here instead of racing it. Resolves false (not throw)
+        // if three-mesh-bvh is unreachable, in which case computeBoundsTree
+        // stays unpatched and the build below is skipped.
+        await bvhReady;
         const frozenDepthMesh = snapshotDepthMesh();
         if (!frozenDepthMesh) {
           setStatus('no depth mesh');

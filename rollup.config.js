@@ -77,6 +77,7 @@ const externalPackages = [
   'lorem-ipsum',
   'temporal-polyfill',
   'rapier3d',
+  'three-mesh-bvh',
 ];
 
 const xrblocksPackages = [

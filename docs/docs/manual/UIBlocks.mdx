@@ -1,18 +1,20 @@
 ---
 sidebar_position: 17
-title: "UI Blocks (Addon)"
+title: 'UI Blocks (Addon)'
 ---
 
 import {CodeSearchLink} from './components/CodeSearchLink.jsx';
 
 # UI Blocks (Addon)
 
-The `uiblocks` addon provides a rich spatial UI system built on top of **`@pmndrs/uikit`** (powered by the Yoga flexbox layout engine). 
+The `uiblocks` addon provides a rich spatial UI system built on top of **`@pmndrs/uikit`** (powered by the Yoga flexbox layout engine).
 
-Use `uiblocks` when you need complex layouts, nested margins, CSS-like borders, gradients, rounded corners, or drop shadows. For basic panels, use the core [Spatial UI](UI.mdx) panels. 
+Use `uiblocks` when you need complex layouts, nested margins, CSS-like borders, gradients, rounded corners, or drop shadows. For basic panels, use the core [Spatial UI](UI.mdx) panels.
 
-:::warning Best Practice
+:::warning
+
 Do not mix core UI classes (`Panel`, `SpatialPanel`) and `uiblocks` classes (`UIPanel`, `UICard`) on the same physical panel.
+
 :::
 
 ---
@@ -20,11 +22,13 @@ Do not mix core UI classes (`Panel`, `SpatialPanel`) and `uiblocks` classes (`UI
 ## Installation & Setup
 
 1. Make sure you have `@pmndrs/uikit` and its peer dependencies configured in your importmap, or install via npm:
+
    ```bash
    npm install @pmndrs/uikit
    ```
 
 2. Enable the UI kit options in your startup configuration:
+
    ```javascript
    import * as uikit from '@pmndrs/uikit';
    import * as xb from 'xrblocks';
@@ -36,6 +40,7 @@ Do not mix core UI classes (`Panel`, `SpatialPanel`) and `uiblocks` classes (`UI
    ```
 
 3. Configure inputs. To allow raycasting against flexbox items, you must override the raycaster sort function in your script:
+
    ```javascript
    import {raycastSortFunction} from 'uiblocks';
 
@@ -68,8 +73,8 @@ class MenuScript extends xb.Script {
     // 1. Create a root 3D Card pivot
     const card = this.uiCore.createCard({
       name: 'MainMenu',
-      sizeX: 1.0,                       // 1.0 meter physical width
-      sizeY: 0.6,                       // 0.6 meter physical height
+      sizeX: 1.0, // 1.0 meter physical width
+      sizeY: 0.6, // 0.6 meter physical height
       position: new THREE.Vector3(0, 1.5, -1),
       alignItems: 'center',
     });
@@ -78,9 +83,9 @@ class MenuScript extends xb.Script {
     const panel = new UIPanel({
       width: '100%',
       height: '100%',
-      fillColor: '#1a1a24',             // Hex string background
-      cornerRadius: 20,                 // Pixel corner radius
-      padding: 30,                      // Padding in pixels
+      fillColor: '#1a1a24', // Hex string background
+      cornerRadius: 20, // Pixel corner radius
+      padding: 30, // Padding in pixels
       flexDirection: 'column',
       justifyContent: 'center',
       alignItems: 'center',
@@ -132,22 +137,26 @@ You can attach behaviors to `UICard` elements to enable modern XR interactions:
 import {
   ManipulationBehavior,
   HeadLeashBehavior,
-  BillboardBehavior
+  BillboardBehavior,
 } from 'uiblocks';
 
 // 1. ManipulationBehavior: allows the user to grab and reposition the UI card
-card.addBehavior(new ManipulationBehavior({
-  draggable: true,
-  faceCamera: true,
-  manipulationMargin: 0.05
-}));
+card.addBehavior(
+  new ManipulationBehavior({
+    draggable: true,
+    faceCamera: true,
+    manipulationMargin: 0.05,
+  })
+);
 
 // 2. HeadLeashBehavior: makes the UI smoothly follow the user's head position
-card.addBehavior(new HeadLeashBehavior({
-  distance: 1.2,
-  heightOffset: -0.1,
-  lerpSpeed: 0.05
-}));
+card.addBehavior(
+  new HeadLeashBehavior({
+    distance: 1.2,
+    heightOffset: -0.1,
+    lerpSpeed: 0.05,
+  })
+);
 
 // 3. BillboardBehavior: keeps the card rotated to always face the user
 card.addBehavior(new BillboardBehavior());

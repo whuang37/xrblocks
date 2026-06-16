@@ -21,9 +21,9 @@ options.enableHands();
 
 // Optional visualization settings
 options.hands.enabled = true;
-options.hands.visualization = true;      // Render hand groups
-options.hands.visualizeJoints = true;     // Render joint spheres
-options.hands.visualizeMeshes = true;     // Render skinned hand meshes
+options.hands.visualization = true; // Render hand groups
+options.hands.visualizeJoints = true; // Render joint spheres
+options.hands.visualizeMeshes = true; // Render skinned hand meshes
 
 xb.init(options);
 ```
@@ -38,7 +38,7 @@ options.simulator.defaultMode = xb.SimulatorMode.POSE;
 
 ## Direct Interaction Hooks
 
-For scripts that react to physical hand contact (e.g., button presses, picking up virtual items), use the built-in direct touch and grab hooks. 
+For scripts that react to physical hand contact (e.g., button presses, picking up virtual items), use the built-in direct touch and grab hooks.
 
 To use these, implement them directly in your [`Script`](/api/classes/Script):
 
@@ -94,7 +94,7 @@ update(time, frame) {
 
   // Get index fingertip of hand 0 (left hand) as a THREE.Object3D
   const leftIndexTip = hands.getIndexTip(0);
-  
+
   // Get wrist of hand 1 (right hand) as a THREE.Object3D
   const rightWrist = hands.getWrist(1);
 

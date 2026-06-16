@@ -8,6 +8,7 @@ import {CodeSearchLink} from './components/CodeSearchLink.jsx';
 # World Understanding
 
 The `xb.world` subsystem exposes real-world environment understanding to your application. This includes:
+
 1. **Plane Detection**: Real-world horizontal and vertical surfaces (floors, walls, tables).
 2. **Mesh Detection**: Environmental reconstruction of complex geometry.
 3. **Object Detection**: Identifying real objects (e.g., cups, laptops, chairs) using AI models.
@@ -42,7 +43,8 @@ class PlacementScript extends xb.Script {
 
     // Attempts to place the model on a horizontal surface (e.g., table)
     // with a timeout of 30 seconds
-    xb.world.placeOnHorizontalSurface(model, {seconds: 30})
+    xb.world
+      .placeOnHorizontalSurface(model, {seconds: 30})
       .then(() => console.log('Successfully placed!'))
       .catch((err) => console.warn('Placement timed out:', err));
   }
@@ -76,9 +78,9 @@ This feature requires the environment camera feed, generative AI/vision backends
 
 ```javascript
 const options = new xb.Options();
-options.enableAI();                  // Generative AI backend
+options.enableAI(); // Generative AI backend
 options.enableCamera('environment'); // Real camera passthrough feed
-options.enableDepth();               // Depth estimation for 3D positioning
+options.enableDepth(); // Depth estimation for 3D positioning
 
 options.world.enableObjectDetection();
 options.world.objects.showDebugVisualizations = true; // Visual labels over items
@@ -109,6 +111,7 @@ class ScannerScript extends xb.Script {
 ### Backends
 
 Under the hood, object detection uses pluggable backends selected via `options.world.objects.backend`:
+
 - **`GeminiDetectorBackend`**: Queries Gemini models using visual camera frames (requires AI API keys, see the [Generative AI](AI.mdx) guide).
 - **`MediaPipeDetectorBackend`**: Runs local MediaPipe object detection model.
 

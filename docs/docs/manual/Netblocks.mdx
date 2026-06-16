@@ -1,6 +1,6 @@
 ---
 sidebar_position: 18
-title: "Netblocks (Addon)"
+title: 'Netblocks (Addon)'
 ---
 
 import {CodeSearchLink} from './components/CodeSearchLink.jsx';
@@ -19,7 +19,7 @@ To establish a multiplayer session, enable netblocks and join a room:
 import * as xb from 'xrblocks';
 import {
   enableNet,
-  BroadcastChannelTransport
+  BroadcastChannelTransport,
 } from 'xrblocks/addons/netblocks/src/index.js';
 
 class MultiplayerScript extends xb.Script {
@@ -31,7 +31,7 @@ class MultiplayerScript extends xb.Script {
     const session = await net.joinRoom('main-lounge', {
       displayName: 'PlayerOne',
       // BroadcastChannelTransport allows testing multiplayer locally across tabs
-      transport: new BroadcastChannelTransport() 
+      transport: new BroadcastChannelTransport(),
     });
 
     console.log('Successfully connected to session:', session.id);
@@ -53,7 +53,7 @@ Transports abstract network routing, allowing you to swap backends without rewri
 
 ## State Replication (`NetObject`)
 
-A `NetObject` synchronizes a target `THREE.Object3D`'s position, rotation, and scale across all active peers. 
+A `NetObject` synchronizes a target `THREE.Object3D`'s position, rotation, and scale across all active peers.
 
 ### Setting Up a Replicated Object
 
@@ -72,7 +72,7 @@ this.add(mesh);
 // 2. Create the NetObject wrapper with a unique ID
 const netObj = new NetObject({
   id: 'shared-box-1',
-  object: mesh
+  object: mesh,
 });
 
 // 3. Register to session
@@ -124,7 +124,7 @@ Enable spatial WebRTC voice channels so users hear peers panning and attenuating
 ```javascript
 const session = await net.joinRoom('lobby', {
   transport: new WebRTCTransport(),
-  voice: true // Enable voice
+  voice: true, // Enable voice
 });
 
 // Manually mute/unmute

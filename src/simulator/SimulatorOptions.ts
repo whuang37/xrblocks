@@ -86,12 +86,14 @@ export class SimulatorOptions {
   renderToRenderTexture = true;
   // Blending mode when rendering the virtual scene.
   blendingMode: 'normal' | 'screen' = 'normal';
-  // Whether to render an always-on-top glow over simulator hands.
-  handGlow = {
+  // Whether to outline simulator hand fragments that are occluded by the app
+  // layer.
+  handOcclusionOutline = {
     enabled: true,
-    color: 0xffffff,
-    opacity: 0.8,
+    color: 0x000000,
+    opacity: 0.6,
     thicknessPx: 7,
+    depthBias: 0.0005,
   };
 
   constructor(options?: DeepReadonly<DeepPartial<SimulatorOptions>>) {

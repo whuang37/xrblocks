@@ -24,69 +24,6 @@ import {SimulatorWorld} from './SimulatorWorld';
 import {SparkRendererHolder} from '../utils/SparkRendererHolder';
 import {World} from '../world/World';
 
-const HAND_GLOW_VERTEX_SHADER = /* glsl */ `
-  varying vec2 vUv;
-
-  void main() {
-    vUv = uv;
-    gl_Position = vec4(position.xy, 0.0, 1.0);
-  }
-`;
-
-const HAND_GLOW_FRAGMENT_SHADER = /* glsl */ `
-  uniform sampler2D tHandMask;
-  uniform vec2 uTexelSize;
-  uniform vec3 uColor;
-  uniform float uOpacity;
-  uniform float uThicknessPx;
-
-  varying vec2 vUv;
-
-  float maskAt(vec2 uv) {
-    return texture2D(tHandMask, uv).r;
-  }
-
-  float ringAt(float radiusPx) {
-    vec2 offset = uTexelSize * radiusPx;
-    float total = 0.0;
-
-    total += maskAt(vUv + vec2(-offset.x, 0.0));
-    total += maskAt(vUv + vec2(offset.x, 0.0));
-    total += maskAt(vUv + vec2(0.0, -offset.y));
-    total += maskAt(vUv + vec2(0.0, offset.y));
-    total += maskAt(vUv + vec2(-offset.x, -offset.y));
-    total += maskAt(vUv + vec2(offset.x, -offset.y));
-    total += maskAt(vUv + vec2(-offset.x, offset.y));
-    total += maskAt(vUv + vec2(offset.x, offset.y));
-
-    return total * 0.125;
-  }
-
-  void main() {
-    if (maskAt(vUv) > 0.5) {
-      discard;
-    }
-
-    float thickness = max(uThicknessPx, 1.0);
-    float glow = 0.0;
-    glow += ringAt(thickness * 0.20) * 0.22;
-    glow += ringAt(thickness * 0.40) * 0.20;
-    glow += ringAt(thickness * 0.65) * 0.18;
-    glow += ringAt(thickness * 0.95) * 0.15;
-    glow += ringAt(thickness * 1.30) * 0.11;
-    glow += ringAt(thickness * 1.70) * 0.08;
-    glow += ringAt(thickness * 2.15) * 0.04;
-    glow += ringAt(thickness * 2.65) * 0.02;
-
-    float alpha = smoothstep(0.02, 0.22, glow) * uOpacity;
-    if (alpha <= 0.0) {
-      discard;
-    }
-
-    gl_FragColor = vec4(uColor, alpha);
-  }
-`;
-
 export class Simulator extends Script {
   static dependencies = {
     simulatorOptions: SimulatorOptions,
@@ -127,8 +64,6 @@ export class Simulator extends Script {
   virtualSceneRenderTarget?: THREE.WebGLRenderTarget;
   virtualSceneFullScreenQuad?: FullScreenQuad;
   backgroundVideoQuad?: FullScreenQuad;
-  handGlowMaskRenderTarget?: THREE.WebGLRenderTarget;
-  handGlowFullScreenQuad?: FullScreenQuad;
   videoElement?: HTMLVideoElement;
 
   simulatorCamera?: SimulatorCamera;
@@ -142,8 +77,6 @@ export class Simulator extends Script {
     this.renderSimulatorSceneToCanvas.bind(this);
   private sparkRenderer?: SparkRenderer;
   private registry?: Registry;
-  private handGlowMaskMaterial?: THREE.MeshBasicMaterial;
-  private clearColor = new THREE.Color();
 
   constructor(
     private renderMainScene: (cameraOverride?: THREE.Camera) => void
@@ -256,31 +189,6 @@ export class Simulator extends Script {
       virtualSceneMaterial.blendEquation = THREE.AddEquation;
     }
     this.virtualSceneFullScreenQuad = new FullScreenQuad(virtualSceneMaterial);
-    this.handGlowMaskRenderTarget = new THREE.WebGLRenderTarget(
-      renderer.domElement.width,
-      renderer.domElement.height
-    );
-    this.handGlowFullScreenQuad = new FullScreenQuad(
-      new THREE.ShaderMaterial({
-        uniforms: {
-          tHandMask: {value: this.handGlowMaskRenderTarget.texture},
-          uTexelSize: {
-            value: new THREE.Vector2(
-              1 / renderer.domElement.width,
-              1 / renderer.domElement.height
-            ),
-          },
-          uColor: {value: new THREE.Color(this.options.handGlow.color)},
-          uOpacity: {value: this.options.handGlow.opacity},
-          uThicknessPx: {value: this.options.handGlow.thicknessPx},
-        },
-        vertexShader: HAND_GLOW_VERTEX_SHADER,
-        fragmentShader: HAND_GLOW_FRAGMENT_SHADER,
-        transparent: true,
-        depthTest: false,
-        depthWrite: false,
-      })
-    );
 
     this.renderer = renderer;
     this.mainCamera = camera;
@@ -352,20 +260,14 @@ export class Simulator extends Script {
     ) {
       const stencilEnabled = !!this.virtualSceneRenderTarget?.stencilBuffer;
       this.virtualSceneRenderTarget!.dispose();
-      this.handGlowMaskRenderTarget!.dispose();
       this.virtualSceneRenderTarget = new THREE.WebGLRenderTarget(
         this.renderer.domElement.width,
         this.renderer.domElement.height,
         {stencilBuffer: stencilEnabled}
       );
-      this.handGlowMaskRenderTarget = new THREE.WebGLRenderTarget(
-        this.renderer.domElement.width,
-        this.renderer.domElement.height
-      );
       (
         this.virtualSceneFullScreenQuad!.material as THREE.MeshBasicMaterial
       ).map = this.virtualSceneRenderTarget.texture;
-      this.updateHandGlowUniforms();
     }
     this.sparkRenderer =
       this.sparkRenderer || this.registry!.get(SparkRendererHolder)?.renderer;
@@ -386,109 +288,11 @@ export class Simulator extends Script {
     this.renderSimulatorSceneToCanvas(camera);
     this.onSimulatorSceneRendered();
     if (this.options.renderToRenderTexture) {
-      if (this.shouldRenderHandGlow()) {
-        this.renderHandGlowMask(camera);
-      }
       this.virtualSceneFullScreenQuad!.render(this.renderer);
-      if (this.shouldRenderHandGlow()) {
-        this.renderHandGlow();
-      }
     } else {
       // Temporary workaround since splats look faded when rendered to a render
       // texture.
       this.renderMainScene(camera);
-    }
-  }
-
-  private shouldRenderHandGlow() {
-    if (!this.options.handGlow.enabled) return false;
-    return (
-      this.hands.leftController.visible || this.hands.rightController.visible
-    );
-  }
-
-  private getHandGlowMaskMaterial() {
-    if (!this.handGlowMaskMaterial) {
-      this.handGlowMaskMaterial = new THREE.MeshBasicMaterial({
-        color: 0xffffff,
-      });
-    }
-    return this.handGlowMaskMaterial;
-  }
-
-  private renderHandGlowMask(camera: THREE.Camera) {
-    const renderTarget = this.handGlowMaskRenderTarget;
-    if (!renderTarget) return;
-
-    this.renderer.setRenderTarget(renderTarget);
-    this.renderer.getClearColor(this.clearColor);
-    const clearAlpha = this.renderer.getClearAlpha();
-    this.renderer.setClearColor(0x000000, 0);
-    this.renderer.clear();
-
-    try {
-      const material = this.getHandGlowMaskMaterial();
-      this.renderHandRootWithMaterial(
-        this.hands.leftController,
-        camera,
-        material
-      );
-      this.renderHandRootWithMaterial(
-        this.hands.rightController,
-        camera,
-        material
-      );
-    } finally {
-      this.renderer.setClearColor(this.clearColor, clearAlpha);
-      this.renderer.setRenderTarget(null);
-    }
-  }
-
-  private renderHandGlow() {
-    this.updateHandGlowUniforms();
-    this.handGlowFullScreenQuad!.render(this.renderer);
-  }
-
-  private updateHandGlowUniforms() {
-    const material = this.handGlowFullScreenQuad
-      ?.material as THREE.ShaderMaterial;
-    const renderTarget = this.handGlowMaskRenderTarget;
-    if (!material || !renderTarget) return;
-    const handGlow = this.options.handGlow;
-    material.uniforms.tHandMask.value = renderTarget.texture;
-    material.uniforms.uTexelSize.value.set(
-      1 / this.renderer.domElement.width,
-      1 / this.renderer.domElement.height
-    );
-    material.uniforms.uColor.value.set(handGlow.color);
-    material.uniforms.uOpacity.value = handGlow.opacity;
-    material.uniforms.uThicknessPx.value = handGlow.thicknessPx;
-  }
-
-  private renderHandRootWithMaterial(
-    root: THREE.Object3D,
-    camera: THREE.Camera,
-    material: THREE.Material
-  ) {
-    if (!root.visible) return;
-    const originalMaterials: Array<{
-      mesh: THREE.Mesh;
-      material: THREE.Mesh['material'];
-    }> = [];
-
-    root.traverse((child) => {
-      const mesh = child as THREE.Mesh;
-      if (!mesh.isMesh) return;
-      originalMaterials.push({mesh, material: mesh.material});
-      mesh.material = material;
-    });
-
-    try {
-      this.renderer.render(root, camera);
-    } finally {
-      for (const original of originalMaterials) {
-        original.mesh.material = original.material;
-      }
     }
   }
 

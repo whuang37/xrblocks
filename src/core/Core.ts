@@ -551,6 +551,10 @@ export class Core {
     if (this.simulatorRunning) {
       this.simulator.renderSimulatorScene();
     }
+    this.scriptsManager.callAfterRender(
+      this.renderer,
+      this.simulatorRunning ? this.simulator.getRenderCamera() : this.camera
+    );
   };
 
   /**

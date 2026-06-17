@@ -194,6 +194,25 @@ export class ScriptsManager extends THREE.EventDispatcher<ScriptsManagerEventMap
     }
   };
 
+  callAfterRender = (renderer: THREE.WebGLRenderer, camera: THREE.Camera) => {
+    const catchExceptions = this.catchExceptions;
+    for (const script of this.scripts) {
+      if (catchExceptions) {
+        try {
+          script.afterRender(renderer, camera);
+        } catch (error: unknown) {
+          this.handleException(
+            error instanceof Error ? error : new Error(String(error)),
+            script,
+            'afterRender'
+          );
+        }
+      } else {
+        script.afterRender(renderer, camera);
+      }
+    }
+  };
+
   physicsStep = () => {
     const catchExceptions = this.catchExceptions;
     for (const script of this.scripts) {

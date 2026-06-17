@@ -68,6 +68,11 @@ export function ScriptMixin<TBase extends Constructor<THREE.Object3D>>(
     update(_time?: number, _frame?: XRFrame) {}
 
     /**
+     * Runs after the final scene render for the frame.
+     */
+    afterRender(_renderer: THREE.WebGLRenderer, _camera: THREE.Camera) {}
+
+    /**
      * Enables depth-aware interactions with physics. See /demos/ballpit
      */
     initPhysics(_physics: Physics): void | Promise<void> {}

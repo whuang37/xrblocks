@@ -22,7 +22,8 @@
   },
   "files": [
     "build",
-    "skills"
+    "skills",
+    "src"
   ],
   "repository": {
     "type": "git",
@@ -38,6 +39,8 @@
   "devDependencies": {
     "@dimforge/rapier3d": "^0.19.2",
     "@dimforge/rapier3d-simd-compat": "^0.17.3",
+    "@emnapi/core": "^1.11.1",
+    "@emnapi/runtime": "^1.11.1",
     "@eslint/js": "^9.35.0",
     "@google/genai": "^2.7.0",
     "@mediapipe/tasks-audio": "^0.10.35",
@@ -62,12 +65,10 @@
     "http-server": "^14.1.1",
     "jsdom": "^27.0.1",
     "lit": "^3.3.1",
-    "lorem-ipsum": "^2.0.8",
     "openai": "^6.7.0",
     "prettier": "^3.6.2",
     "rollup": "^4.59.0",
     "rollup-plugin-dts": "^6.3.0",
-    "temporal-polyfill": "^0.3.2",
     "three-mesh-bvh": "^0.9.10",
     "troika-three-text": "^0.52.4",
     "troika-types": "^0.0.6",

@@ -244,6 +244,7 @@
       import * as THREE from 'three';
       import * as xb from 'xrblocks';
       import 'xrblocks/addons/simulator/SimulatorAddons.js';
+      import {GeminiManager} from 'xrblocks/addons/ai/GeminiManager.js';
       import {Text} from 'troika-three-text';
       import {marked} from 'marked';
       import DOMPurify from 'dompurify';
@@ -256,6 +257,9 @@
 
       const labels = new THREE.Group();
       let session = null;
+      // The Gemini Live + camera-streaming session driver (addons/ai). Created
+      // and registered before xb.init so its init() can wire up ai + camera.
+      let geminiManager = null;
       let transcriptBuffer = '';
       let xrStatusText = null;
 
@@ -596,7 +600,7 @@
             "Returns the object name, or 'nothing' if the reticle is in empty space.",
           onTriggered: async () => {
             try {
-              const target = xb.core.world.lookingAt();
+              const target = xb.core.user.getReticleTarget();
               return {
                 success: true,
                 data: {target: target?.name || target?.type || 'nothing'},
@@ -777,7 +781,7 @@
             labels.remove(c);
           }
           await xb.core.sound.enableAudio({streamToAI: true});
-          session = await xb.core.world.streamScene(
+          session = await geminiManager.streamScene(
             'You are a helpful AR companion. The user is wearing a headset ' +
               'and you receive their camera every second. Keep replies short ' +
               'and conversational. Only call placeLabel when the user ' +
@@ -854,6 +858,9 @@
       options.world.objects.showDebugVisualizations = false;
       options.reticles.enabled = true;
       options.setAppTitle('World Companion');
+
+      geminiManager = new GeminiManager();
+      xb.add(geminiManager);
 
       xb.init(options);
       xb.core.scene.add(labels);

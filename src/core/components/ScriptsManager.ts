@@ -197,9 +197,13 @@ export class ScriptsManager extends THREE.EventDispatcher<ScriptsManagerEventMap
   callAfterRender = (renderer: THREE.WebGLRenderer, camera: THREE.Camera) => {
     const catchExceptions = this.catchExceptions;
     for (const script of this.scripts) {
+      const afterRender = script.afterRender;
+      if (typeof afterRender !== 'function') {
+        continue;
+      }
       if (catchExceptions) {
         try {
-          script.afterRender(renderer, camera);
+          afterRender.call(script, renderer, camera);
         } catch (error: unknown) {
           this.handleException(
             error instanceof Error ? error : new Error(String(error)),
@@ -208,7 +212,7 @@ export class ScriptsManager extends THREE.EventDispatcher<ScriptsManagerEventMap
           );
         }
       } else {
-        script.afterRender(renderer, camera);
+        afterRender.call(script, renderer, camera);
       }
     }
   };

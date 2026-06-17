@@ -66,6 +66,7 @@ const sidebars: SidebarsConfig = {
       collapsed: false,
       items: [
         'samples/XR-Emoji',
+        'samples/Face-Mirror',
         'samples/Custom-Gestures',
         'samples/RockPaperScissors',
         'samples/Netblocks',

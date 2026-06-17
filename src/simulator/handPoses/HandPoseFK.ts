@@ -252,8 +252,6 @@ export function resolveSimulatorHandPoseRotations(
   );
 }
 
-
-
 export function resolveSimulatorRotationsFromKeypoints(
   handedness: Handedness,
   joints: DeepReadonly<SimulatorHandPoseJoints>,
@@ -266,7 +264,8 @@ export function resolveSimulatorRotationsFromKeypoints(
     positions.set(name, new THREE.Vector3(t[0], t[1], t[2]));
   });
 
-  const restJoints = handedness === Handedness.LEFT ? LEFT_REST_JOINTS : RIGHT_REST_JOINTS;
+  const restJoints =
+    handedness === Handedness.LEFT ? LEFT_REST_JOINTS : RIGHT_REST_JOINTS;
   const computedRotations: SimulatorHandPoseRotations = {};
   const finalRotations = new Map<JointName, THREE.Quaternion>();
 
@@ -276,8 +275,12 @@ export function resolveSimulatorRotationsFromKeypoints(
     indexMcpPos: THREE.Vector3,
     middleMcpPos: THREE.Vector3
   ): THREE.Quaternion {
-    const yAxis = new THREE.Vector3().subVectors(middleMcpPos, wristPos).normalize();
-    const temp = new THREE.Vector3().subVectors(indexMcpPos, wristPos).normalize();
+    const yAxis = new THREE.Vector3()
+      .subVectors(middleMcpPos, wristPos)
+      .normalize();
+    const temp = new THREE.Vector3()
+      .subVectors(indexMcpPos, wristPos)
+      .normalize();
     const zAxis = new THREE.Vector3().crossVectors(yAxis, temp).normalize();
     const xAxis = new THREE.Vector3().crossVectors(yAxis, zAxis).normalize();
 
@@ -291,20 +294,37 @@ export function resolveSimulatorRotationsFromKeypoints(
   const restIndexMcp = restJoints.get('index-finger-metacarpal')!;
   const restMiddleMcp = restJoints.get('middle-finger-metacarpal')!;
 
-  const Q_rest = getPalmBasis(restWrist.position, restIndexMcp.position, restMiddleMcp.position);
+  const Q_rest = getPalmBasis(
+    restWrist.position,
+    restIndexMcp.position,
+    restMiddleMcp.position
+  );
   const Q_actual = getPalmBasis(
     positions.get('wrist')!,
     positions.get('index-finger-metacarpal')!,
     positions.get('middle-finger-metacarpal')!
   );
 
-  const offsetRotationWristBasis = Q_actual.clone().multiply(Q_rest.clone().invert());
+  const offsetRotationWristBasis = Q_actual.clone().multiply(
+    Q_rest.clone().invert()
+  );
   const Q_wrist = offsetRotationWristBasis.clone().multiply(restWrist.rotation);
   finalRotations.set('wrist', Q_wrist);
 
-  const offsetRotationWrist = restWrist.rotation.clone().invert().multiply(offsetRotationWristBasis).multiply(restWrist.rotation);
-  const eulerWrist = new THREE.Euler().setFromQuaternion(offsetRotationWrist, 'XYZ');
-  const rawEulerWrist = getHandednessRotation(handedness, [eulerWrist.x, eulerWrist.y, eulerWrist.z]);
+  const offsetRotationWrist = restWrist.rotation
+    .clone()
+    .invert()
+    .multiply(offsetRotationWristBasis)
+    .multiply(restWrist.rotation);
+  const eulerWrist = new THREE.Euler().setFromQuaternion(
+    offsetRotationWrist,
+    'XYZ'
+  );
+  const rawEulerWrist = getHandednessRotation(handedness, [
+    eulerWrist.x,
+    eulerWrist.y,
+    eulerWrist.z,
+  ]);
   computedRotations['wrist'] = getRawFKRotation('wrist', rawEulerWrist);
 
   // Pre-build child mapping for fast lookup (non-wrist, non-tip joints)
@@ -340,16 +360,23 @@ export function resolveSimulatorRotationsFromKeypoints(
     const lenSq = v_actual.lengthSq();
     const offsetRotation = new THREE.Quaternion();
     if (lenSq > 1e-8) {
-      offsetRotation.setFromUnitVectors(v_rest.clone().normalize(), v_target.clone().normalize());
+      offsetRotation.setFromUnitVectors(
+        v_rest.clone().normalize(),
+        v_target.clone().normalize()
+      );
     }
 
     const euler = new THREE.Euler().setFromQuaternion(offsetRotation, 'XYZ');
-    const rawEuler = getHandednessRotation(handedness, [euler.x, euler.y, euler.z]);
+    const rawEuler = getHandednessRotation(handedness, [
+      euler.x,
+      euler.y,
+      euler.z,
+    ]);
     const biomechanical = getRawFKRotation(jointName, rawEuler);
 
     const resolved = applyConstraints
-      ? applySimulatorHandPoseRotationConstraints({ [jointName]: biomechanical })
-      : { [jointName]: biomechanical };
+      ? applySimulatorHandPoseRotationConstraints({[jointName]: biomechanical})
+      : {[jointName]: biomechanical};
 
     const finalBiomechanical = resolved[jointName]!;
     computedRotations[jointName] = finalBiomechanical;
@@ -365,4 +392,3 @@ export function resolveSimulatorRotationsFromKeypoints(
 
   return computedRotations;
 }
-

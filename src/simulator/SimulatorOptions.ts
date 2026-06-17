@@ -86,6 +86,13 @@ export class SimulatorOptions {
   renderToRenderTexture = true;
   // Blending mode when rendering the virtual scene.
   blendingMode: 'normal' | 'screen' = 'normal';
+  // Whether to render an always-on-top glow over simulator hands.
+  handGlow = {
+    enabled: true,
+    color: 0xffffff,
+    opacity: 0.8,
+    thicknessPx: 7,
+  };
 
   constructor(options?: DeepReadonly<DeepPartial<SimulatorOptions>>) {
     deepMerge(this, options);

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import * as xb from 'xrblocks';
 import {EmbodiedControl} from 'xrblocks/addons/embodied-control/index.js';
+import {HandGlow} from 'xrblocks/addons/hands/index.js';
 
 const options = new xb.Options();
 options.formFactor = 'desktop';
@@ -263,6 +264,7 @@ async function start() {
 
   xb.add(new SampleScene());
   xb.add(new xb.DragManager());
+  xb.add(new HandGlow());
   xb.add(embodied);
   await xb.init(options);
   await waitForSimulator();

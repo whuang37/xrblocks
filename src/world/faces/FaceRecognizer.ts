@@ -90,6 +90,10 @@ export class FaceRecognizer extends Script {
       this.deviceCamera,
       this.targetDevice
     );
+    if (!cameraParametersSnapshot) {
+      // Device camera not ready yet (warming up); skip until it is available.
+      return [];
+    }
 
     const context = this.getBackendContext();
     const activeBackend = this.options.faces.backendConfig.activeBackend;

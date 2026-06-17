@@ -32,28 +32,26 @@ describe('HandPose Inverse Kinematics (IK)', () => {
           it(`should accurately roundtrip ${pose} pose (applyConstraints: ${applyConstraints})`, () => {
             const originalRotations = SIMULATOR_HAND_POSE_ROTATIONS[pose];
 
-            // 1. Forward Kinematics to get joint positions/orientations
+            // Run FK to get joint positions.
             const joints = resolveSimulatorHandPoseRotations(
               handedness,
               originalRotations,
               applyConstraints
             );
-
-            // 2. Inverse Kinematics to get rotations back from the keypoints (mathematical fit, no clamping)
+            // Run IK to get rotations back from the keypoints.
             const computedRotations = resolveSimulatorRotationsFromKeypoints(
               handedness,
               joints,
               false
             );
 
-            // 3. Forward Kinematics again using the computed rotations (no clamping)
+            // Run FK again using the computed rotations.
             const recomputedJoints = resolveSimulatorHandPoseRotations(
               handedness,
               computedRotations,
               false
             );
 
-            // 4. Assert that the recomputed joint positions match the original positions
             for (let i = 0; i < HAND_JOINT_NAMES.length; i++) {
               const jointName = HAND_JOINT_NAMES[i];
               const originalPos = new THREE.Vector3().fromArray(joints[i].t);

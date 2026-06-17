@@ -257,7 +257,6 @@ export function resolveSimulatorRotationsFromKeypoints(
   joints: DeepReadonly<SimulatorHandPoseJoints>,
   applyConstraints = false
 ): SimulatorHandPoseRotations {
-  // Map joint positions to THREE.Vector3
   const positions = new Map<JointName, THREE.Vector3>();
   HAND_JOINT_NAMES.forEach((name, index) => {
     const t = joints[index].t;
@@ -269,7 +268,6 @@ export function resolveSimulatorRotationsFromKeypoints(
   const computedRotations: SimulatorHandPoseRotations = {};
   const finalRotations = new Map<JointName, THREE.Quaternion>();
 
-  // Helper to build palm basis
   function getPalmBasis(
     wristPos: THREE.Vector3,
     indexMcpPos: THREE.Vector3,
@@ -289,7 +287,6 @@ export function resolveSimulatorRotationsFromKeypoints(
     return new THREE.Quaternion().setFromRotationMatrix(matrix);
   }
 
-  // 1. Wrist root rotation
   const restWrist = restJoints.get('wrist')!;
   const restIndexMcp = restJoints.get('index-finger-metacarpal')!;
   const restMiddleMcp = restJoints.get('middle-finger-metacarpal')!;
@@ -327,7 +324,7 @@ export function resolveSimulatorRotationsFromKeypoints(
   ]);
   computedRotations['wrist'] = getRawFKRotation('wrist', rawEulerWrist);
 
-  // Pre-build child mapping for fast lookup (non-wrist, non-tip joints)
+  // Pre-build child mapping for fast lookup (non-wrist, non-tip joints).
   const HAND_JOINT_CHILD: Partial<Record<JointName, JointName>> = {};
   for (const [child, parent] of Object.entries(HAND_JOINT_PARENT)) {
     if (parent !== 'wrist') {
@@ -335,7 +332,7 @@ export function resolveSimulatorRotationsFromKeypoints(
     }
   }
 
-  // 2. Iterate remaining joints in hierarchical order
+  // Iterate remaining joints in hierarchical order.
   for (const jointName of HAND_JOINT_NAMES) {
     if (jointName === 'wrist' || jointName.endsWith('-tip')) {
       continue;
@@ -346,9 +343,9 @@ export function resolveSimulatorRotationsFromKeypoints(
     const restJoint = restJoints.get(jointName)!;
     const R_base = parentRotation.clone().multiply(restJoint.localRotation);
 
-    // Get the child to define the bone direction
+    // Get the child to define the bone direction.
     const childName = HAND_JOINT_CHILD[jointName];
-    if (!childName) continue; // Safety check
+    if (!childName) continue;
 
     const restChild = restJoints.get(childName)!;
     const v_rest = restChild.localOffset;
@@ -381,7 +378,7 @@ export function resolveSimulatorRotationsFromKeypoints(
     const finalBiomechanical = resolved[jointName]!;
     computedRotations[jointName] = finalBiomechanical;
 
-    // Save final orientation for children propagation
+    // Save final orientation for children propagation.
     const rawRotation = getRawFKRotation(jointName, finalBiomechanical);
     const rotation = getHandednessRotation(handedness, rawRotation);
     const finalOffsetRotation = new THREE.Quaternion().setFromEuler(

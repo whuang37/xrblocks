@@ -31,8 +31,8 @@ const ACTION_GROUPS = [
       step('Lower', {locomotion: {move: [0, -0.2, 0]}}),
       step('Turn Left', {locomotion: {rotate: [0, 20, 0]}}),
       step('Turn Right', {locomotion: {rotate: [0, -20, 0]}}),
-      step('Look Up', {locomotion: {rotate: [-12, 0, 0]}}),
-      step('Look Down', {locomotion: {rotate: [12, 0, 0]}}),
+      step('Look Up', {locomotion: {rotate: [12, 0, 0]}}),
+      step('Look Down', {locomotion: {rotate: [-12, 0, 0]}}),
     ],
   },
   {

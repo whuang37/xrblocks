@@ -27,6 +27,10 @@ const embodied = new EmbodiedControl({
 xb.add(embodied);
 await xb.init();
 
+embodied.applyControl({
+  rightHand: {visible: true},
+});
+
 await embodied.step({
   durationMs: 250,
   control: {
@@ -36,9 +40,14 @@ await embodied.step({
 });
 ```
 
-By default, `EmbodiedControl` pauses the core after initialization. The scene
-then advances only when `step()` is called. This is useful for repeatable tests
-and agent evaluation.
+`applyControl()` applies the control immediately and leaves the normal frame
+loop alone. Use it in live apps, scripts, and demos where XR Blocks should keep
+rendering normally.
+
+`step()` applies a control over a duration, advances the core frame loop, and
+returns an observation. By default, `EmbodiedControl` pauses the core after
+initialization so frames advance only when `step()` is called. This is useful
+for repeatable tests and agent evaluation.
 
 For visual demos, pass `realTime: true` so the browser paints intermediate
 frames while a step is executing:
@@ -54,8 +63,8 @@ const embodied = new EmbodiedControl({
 
 ## Action schema
 
-Each call to `step()` accepts one compound control. Locomotion and both hands
-can move during the same step.
+Both `applyControl()` and `step()` use the same compound control schema.
+Locomotion and both hands can move during the same control.
 
 ```ts
 await embodied.step({
@@ -114,7 +123,7 @@ controller selected state. This is different from passing raw pinching
 
 ## Observations
 
-`step()` resolves with an observation:
+Only `step()` resolves with an observation:
 
 ```ts
 const result = await embodied.step({control: {rightHand: {selectEnd: true}}});
@@ -145,6 +154,28 @@ active, `EmbodiedControlBusyError` is thrown.
 
 ---
 
+## Live app control
+
+For a normally running app, disable `autoPause` and call `applyControl()` from
+your script, UI, or scheduler:
+
+```ts
+const embodied = new EmbodiedControl({
+  autoPause: false,
+  includeScreenshot: false,
+});
+
+embodied.applyControl({
+  locomotion: {rotate: [0, 10, 0]},
+  rightHand: {selectStart: true},
+});
+```
+
+`applyControl()` does not call `core.stepFrame()`, does not capture a
+screenshot, and does not return an observation.
+
+---
+
 ## Sample
 
 See `samples/embodied_control/` for a sidebar-driven simulator sample. It
@@ -155,7 +186,8 @@ pinch-select steps only through `EmbodiedControl`.
 
 ## Public surface
 
-- `EmbodiedControl` — XR Blocks `Script` that exposes `step()`.
+- `EmbodiedControl` — XR Blocks `Script` that exposes `applyControl()` and
+  `step()`.
 - `EmbodiedControlExecutor` — lower-level executor used by the script and by
   tests or custom harnesses.
 - `EmbodiedControlStep` / `XRCompoundControl` / `HandControl` /

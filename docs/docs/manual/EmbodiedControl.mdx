@@ -29,6 +29,10 @@ const embodied = new EmbodiedControl({
 xb.add(embodied);
 await xb.init();
 
+embodied.applyControl({
+  rightHand: {visible: true},
+});
+
 await embodied.step({
   durationMs: 250,
   control: {
@@ -38,16 +42,22 @@ await embodied.step({
 });
 ```
 
-By default the addon pauses the core after initialization, so frames advance
-only when `step()` is called. This is useful for deterministic test and agent
-loops. For visible demos, pass `realTime: true` so steps yield between frames
-and animate smoothly.
+`applyControl()` applies the control immediately and leaves the normal frame
+loop alone. Use it in live apps, scripts, and demos where XR Blocks should keep
+rendering normally.
+
+`step()` applies a control over a duration, advances the core frame loop, and
+returns an observation. By default the addon pauses the core after
+initialization, so frames advance only when `step()` is called. This is useful
+for deterministic test and agent loops. For visible demos, pass
+`realTime: true` so steps yield between frames and animate smoothly.
 
 ---
 
 ## Compound Controls
 
-A step may combine locomotion and both hands:
+Both `applyControl()` and `step()` use the same compound control schema. A
+control may combine locomotion and both hands:
 
 ```javascript
 await embodied.step({
@@ -83,7 +93,7 @@ visual pose; they do not trigger selection.
 
 ## Observations
 
-`step()` resolves to elapsed time and an observation:
+Only `step()` resolves to elapsed time and an observation:
 
 ```javascript
 const result = await embodied.step({
@@ -96,6 +106,28 @@ console.log(result.observation.state.rightHand.selected);
 
 If `includeScreenshot` is true, the observation also includes a screenshot data
 URL captured after the final frame.
+
+---
+
+## Live App Control
+
+For a normally running app, disable `autoPause` and call `applyControl()` from
+your script, UI, or scheduler:
+
+```javascript
+const embodied = new EmbodiedControl({
+  autoPause: false,
+  includeScreenshot: false,
+});
+
+embodied.applyControl({
+  locomotion: {rotate: [0, 10, 0]},
+  rightHand: {selectStart: true},
+});
+```
+
+`applyControl()` does not call `core.stepFrame()`, does not capture a
+screenshot, and does not return an observation.
 
 ---
 

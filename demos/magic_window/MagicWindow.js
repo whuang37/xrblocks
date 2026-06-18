@@ -23,10 +23,11 @@ const BACKDROP_PRESETS = [
 
 // Window sizing in metres. The feed plane is WINDOW_HEIGHT tall and as wide as
 // the camera's aspect ratio; the dark frame keeps a uniform WINDOW_MARGIN
-// around it. Defaults to 4:3 until the first camera frame arrives.
+// around it. Defaults to 16:9 (the camera module's default resolution) so the
+// window doesn't visibly resize when the first frame arrives.
 const WINDOW_HEIGHT = 0.6;
 const WINDOW_MARGIN = 0.02;
-const DEFAULT_ASPECT = 4 / 3;
+const DEFAULT_ASPECT = 16 / 9;
 
 const VERTEX_SHADER = /* glsl */ `
   varying vec2 vUv;

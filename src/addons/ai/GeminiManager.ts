@@ -49,6 +49,14 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
   cameraWidth?: number;
   cameraHeight?: number;
 
+  // What the live session streams to the model each frame:
+  //   'screenshot' - the rendered scene (virtual content), optionally over the
+  //                  camera image (see `overlayScreenshotOnCamera`)
+  //   'camera'     - raw passthrough frames from the device camera
+  captureMode: 'screenshot' | 'camera' = 'screenshot';
+  // In 'screenshot' mode, composite the virtual content over the camera image.
+  overlayScreenshotOnCamera = true;
+
   constructor() {
     super();
   }
@@ -62,13 +70,23 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
     liveParams,
     model,
     tools,
+    captureMode,
+    overlayOnCamera,
     camera,
   }: {
     liveParams?: GoogleGenAITypes.LiveConnectConfig;
     model?: string;
     /** Tools the model may call. Overrides {@link GeminiManager.tools}. */
     tools?: xb.Tool[];
-    /** Camera-frame capture config for the live session. */
+    /**
+     * What to stream each frame: `'screenshot'` (rendered virtual content) or
+     * `'camera'` (raw passthrough frames). Defaults to
+     * {@link GeminiManager.captureMode}.
+     */
+    captureMode?: 'screenshot' | 'camera';
+    /** In screenshot mode, composite virtual content over the camera image. */
+    overlayOnCamera?: boolean;
+    /** Capture config used in `'camera'` mode. */
     camera?: {
       /** Frames per second sent to the model. Default `1`. */
       fps?: number;
@@ -86,6 +104,10 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
     }
 
     if (tools) this.tools = tools;
+    if (captureMode) this.captureMode = captureMode;
+    if (overlayOnCamera !== undefined) {
+      this.overlayScreenshotOnCamera = overlayOnCamera;
+    }
     if (camera?.quality !== undefined) this.cameraQuality = camera.quality;
     if (camera?.width !== undefined) this.cameraWidth = camera.width;
     if (camera?.height !== undefined) this.cameraHeight = camera.height;
@@ -204,13 +226,18 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
 
   async captureAndSendScreenshot() {
     try {
-      const base64Image = await this.xrDeviceCamera!.getSnapshot({
-        outputFormat: 'base64',
-        mimeType: this.cameraMimeType,
-        quality: this.cameraQuality,
-        ...(this.cameraWidth ? {width: this.cameraWidth} : {}),
-        ...(this.cameraHeight ? {height: this.cameraHeight} : {}),
-      });
+      const base64Image =
+        this.captureMode === 'camera'
+          ? await this.xrDeviceCamera!.getSnapshot({
+              outputFormat: 'base64',
+              mimeType: this.cameraMimeType,
+              quality: this.cameraQuality,
+              ...(this.cameraWidth ? {width: this.cameraWidth} : {}),
+              ...(this.cameraHeight ? {height: this.cameraHeight} : {}),
+            })
+          : await xb.core.screenshotSynthesizer.getScreenshot(
+              this.overlayScreenshotOnCamera
+            );
       if (typeof base64Image == 'string') {
         // Strip the data URL prefix if present
         const base64Data = base64Image.startsWith('data:')
@@ -219,7 +246,7 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
         this.sendVideoFrame(base64Data);
       }
     } catch (error) {
-      console.error('Failed to capture screenshot:', error);
+      console.error('Failed to capture frame:', error);
     }
   }
 

@@ -161,7 +161,10 @@ export class MagicWindow extends xb.Script {
       if (!image) {
         return;
       }
-      if (this.frameCanvas.width !== image.width) {
+      if (
+        this.frameCanvas.width !== image.width ||
+        this.frameCanvas.height !== image.height
+      ) {
         this.frameCanvas.width = image.width;
         this.frameCanvas.height = image.height;
       }

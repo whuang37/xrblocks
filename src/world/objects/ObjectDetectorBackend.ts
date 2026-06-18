@@ -206,15 +206,10 @@ export abstract class BaseDetectorBackend<T> {
         .slice(0, 19)
         .replace('T', '_')
         .replace(/:/g, '-');
-      const dataUrl = canvas.toDataURL('image/png');
-      console.log(
-        `[detection_debug ${timestamp}] paste this URL in a new tab:\n` +
-          dataUrl
-      );
-      console.log(
-        '%c ',
-        `font-size:1px;padding:${canvas.height / 4}px ${canvas.width / 4}px;background:url(${dataUrl}) no-repeat;background-size:contain;`
-      );
+      const link = document.createElement('a');
+      link.download = `detection_debug_${timestamp}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
     };
 
     if (snapshot.imageData) {

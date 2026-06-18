@@ -536,48 +536,39 @@ export class EmbodiedControlExecutor {
     handIndex = 1,
     options: {clickDurationMs?: number} = {}
   ): Promise<EmbodiedControlStepResult> {
-    return this.executeAction(async () => {
-      const {clickDurationMs = 100} = options;
-      const {input, simulator, core} = this.dependencies;
-      const controller = input.controllers[handIndex];
+    const {clickDurationMs = 200} = options;
+    const {simulator} = this.dependencies;
+    // Change the lerp speed to allow the hand to pinch and open all the way.
+    const originalLerpSpeed = simulator.hands.lerpSpeed;
+    simulator.hands.lerpSpeed = 0.3;
 
-      // Select Start
-      controller.userData.selected = true;
-      if (handIndex === 0) {
-        simulator.hands.setLeftHandPinching(true);
-      } else {
-        simulator.hands.setRightHandPinching(true);
-      }
-      input.dispatchEvent({type: 'selectstart', target: controller});
+    try {
+      const pressControl: XRCompoundControl =
+        handIndex === 0
+          ? {leftHand: {selectStart: true}}
+          : {rightHand: {selectStart: true}};
+      const pressResult = await this.step({
+        control: pressControl,
+        durationMs: clickDurationMs,
+      });
 
-      let elapsedMs = 0;
-      const tickMs = this.options.tickMs;
-      const stepCount = Math.max(1, Math.ceil(clickDurationMs / tickMs));
-      for (let i = 0; i < stepCount; i++) {
-        const remainingMs = Math.max(0, clickDurationMs - elapsedMs);
-        const currentTickMs =
-          i === stepCount - 1
-            ? remainingMs || tickMs
-            : Math.min(tickMs, remainingMs);
-        elapsedMs += currentTickMs;
-        core.stepFrame(currentTickMs);
-        if (this.options.realTime && i < stepCount - 1) {
-          await nextAnimationFrame();
-        }
-      }
+      const releaseControl: XRCompoundControl =
+        handIndex === 0
+          ? {leftHand: {selectEnd: true}}
+          : {rightHand: {selectEnd: true}};
+      const releaseResult = await this.step({
+        control: releaseControl,
+        durationMs: clickDurationMs,
+      });
 
-      // Select End
-      controller.userData.selected = false;
-      if (handIndex === 0) {
-        simulator.hands.setLeftHandPinching(false);
-      } else {
-        simulator.hands.setRightHandPinching(false);
-      }
-      input.dispatchEvent({type: 'selectend', target: controller});
-      core.stepFrame(16.67);
-
-      return elapsedMs + 16.67;
-    });
+      return {
+        id: releaseResult.id,
+        elapsedMs: pressResult.elapsedMs + releaseResult.elapsedMs,
+        observation: releaseResult.observation,
+      };
+    } finally {
+      simulator.hands.lerpSpeed = originalLerpSpeed;
+    }
   }
 
   private async createObservation(

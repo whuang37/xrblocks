@@ -1,7 +1,7 @@
 // Webcam fallback for desktop / simulator mode.
 //
 // The SDK reads frames from `xb.core.deviceCamera.getSnapshot()`, which on a
-// real Quest returns frames from the passthrough cameras. On desktop the
+// real XR device returns frames from the passthrough cameras. On desktop the
 // simulator renders the 3D scene as the "camera" feed, which is fine for
 // world-facing tasks (plane detection, object recognition of the simulated
 // living-room) but useless for face detection because the simulator never
@@ -29,7 +29,7 @@ let _origGetSnapshot = null;
 
 function shouldUseWebcamFallback() {
   // Only activate when the simulator addon is in charge (i.e. we're not in
-  // an immersive WebXR session). On a real Quest this returns false and the
+  // an immersive WebXR session). On a real XR device this returns false and the
   // SDK's normal getSnapshot path runs untouched.
   const renderer = window.xb?.core?.renderer;
   return !renderer?.xr?.isPresenting;

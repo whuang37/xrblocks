@@ -284,7 +284,9 @@ export class VRMAvatar {
 
         // Disable MToon ink outlines — each outlined material is otherwise drawn
         // a second time (and again per eye in XR). Small look change, real GPU win.
-        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        const mats = Array.isArray(obj.material)
+          ? obj.material
+          : [obj.material];
         for (const m of mats) {
           if (m && 'outlineWidthMode' in m) {
             m.outlineWidthMode = 0; // 0 = none

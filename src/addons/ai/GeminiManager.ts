@@ -500,6 +500,10 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
         const transcript = msg.serverContent?.outputTranscription?.text;
         if (transcript) options.onText?.(transcript);
 
+        // The user's own recognized speech arrives under `inputTranscription`.
+        const inputText = msg.serverContent?.inputTranscription?.text;
+        if (inputText) options.onInputText?.(inputText);
+
         const audioPart = msg.serverContent?.modelTurn?.parts?.find((p) =>
           p.inlineData?.mimeType?.startsWith('audio/')
         );
@@ -510,6 +514,8 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
         }
 
         if (msg.toolCall) handleToolCall(msg.toolCall);
+
+        if (msg.serverContent?.turnComplete) options.onTurnComplete?.();
       },
       onerror: (e: ErrorEvent) => options.onError?.(new Error(e.message)),
       onclose: () => {
@@ -586,8 +592,12 @@ export interface StreamSceneOptions {
   tools?: xb.Tool[];
   /** Called when the Live session opens. */
   onOpen?: () => void;
-  /** Called for each text chunk the model emits. */
+  /** Called for each text chunk the model emits (its spoken reply). */
   onText?: (text: string) => void;
+  /** Called for each chunk of the user's own recognized speech. */
+  onInputText?: (text: string) => void;
+  /** Called when the model finishes a turn, useful for separating turns. */
+  onTurnComplete?: () => void;
   /**
    * Called for each audio chunk (base64 PCM) the model emits. If omitted,
    * audio is auto-played via `xb.core.sound.playAIAudio`.

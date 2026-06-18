@@ -94,6 +94,22 @@
       .panel .transcript ol {
         padding-left: 1.2em;
       }
+      .panel .transcript .turn {
+        margin: 0 0 0.5em 0;
+      }
+      .panel .transcript .turn .who {
+        font-weight: 600;
+        margin-right: 4px;
+      }
+      .panel .transcript .turn.user .who {
+        color: #6cb6ff;
+      }
+      .panel .transcript .turn.model .who {
+        color: #7ee787;
+      }
+      .panel .transcript .turn.user {
+        color: #cfd8e3;
+      }
       .panel .transcript:empty::before {
         content: 'Press Start, then talk to the companion. It can see what the camera sees.';
         color: #888;
@@ -260,7 +276,7 @@
       // The Gemini Live + camera-streaming session driver (addons/ai). Created
       // and registered before xb.init so its init() can wire up ai + camera.
       let geminiManager = null;
-      let transcriptBuffer = '';
+      let turns = [];
       let xrStatusText = null;
 
       const embedCache = new Map();
@@ -314,12 +330,40 @@
         statusEl.textContent = s;
         if (xrStatusText) xrStatusText.text = s;
       }
-      function appendTranscript(t) {
-        transcriptBuffer += t;
+      function renderTranscript() {
         transcriptEl.innerHTML = DOMPurify.sanitize(
-          marked.parse(transcriptBuffer)
+          turns
+            .filter((t) => t.text.trim())
+            .map((t) => {
+              const who = t.role === 'user' ? 'You' : 'Companion';
+              const body =
+                t.role === 'user'
+                  ? t.text.replace(/[&<>]/g, (c) => {
+                      return {'&': '&amp;', '<': '&lt;', '>': '&gt;'}[c];
+                    })
+                  : marked.parseInline(t.text);
+              return (
+                `<p class="turn ${t.role}"><span class="who">${who}:</span> ` +
+                `${body}</p>`
+              );
+            })
+            .join('')
         );
         transcriptEl.scrollTop = transcriptEl.scrollHeight;
+      }
+      // Appends a streamed transcript chunk, starting a fresh bubble whenever
+      // the speaker changes or the previous turn was finalized.
+      function appendTurn(role, chunk) {
+        let last = turns[turns.length - 1];
+        if (!last || last.role !== role || last.done) {
+          last = {role, text: '', done: false};
+          turns.push(last);
+        }
+        last.text += chunk;
+        renderTranscript();
+      }
+      function finalizeTurns() {
+        turns.forEach((t) => (t.done = true));
       }
 
       function makeTools() {
@@ -768,7 +812,7 @@
         if (session) return;
         startBtn.disabled = true;
         setStatus('opening session...');
-        transcriptBuffer = '';
+        turns = [];
         transcriptEl.innerHTML = '';
         try {
           // Clear any leftover labels from prior session to avoid stacking.
@@ -795,7 +839,9 @@
               fps: 1,
               tools: makeTools(),
               onOpen: () => setStatus('listening'),
-              onText: (t) => appendTranscript(t),
+              onText: (t) => appendTurn('model', t),
+              onInputText: (t) => appendTurn('user', t),
+              onTurnComplete: () => finalizeTurns(),
               onError: (e) => {
                 setStatus('error: ' + e.message);
                 console.error(e);

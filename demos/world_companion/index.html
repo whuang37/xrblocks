@@ -315,9 +315,9 @@
 
       const embedCache = new Map();
       // Cosine threshold for the SEMANTIC_SIMILARITY embeddings. Calibrated so
-      // related furniture words (chair/stool, light/ceiling lamp, table/desk)
+      // related furniture words (chair/stool, chair/sofa, light/ceiling lamp)
       // match while unrelated ones (chair/window, lamp/sofa) don't.
-      const SIM_THRESHOLD = 0.88;
+      const SIM_THRESHOLD = 0.87;
       function cosine(a, b) {
         if (!a || !b || a.length !== b.length) return 0;
         let dot = 0,
@@ -507,12 +507,20 @@
             } catch (e) {
               console.warn('[placeLabel] detection threw', e);
             }
-            // The detector returns names with leading articles ("the chair"),
-            // which read badly as label text. Strip them.
-            const stripArticle = (s) =>
-              (s || '').replace(/^\s*(the|a|an)\s+/i, '').trim();
+            // The detector returns names with leading articles ("the chair")
+            // and trailing location phrases ("art piece on the left"), which
+            // read badly as labels and weaken the embedding match. Trim both
+            // down to the core object name.
+            const cleanLabel = (s) =>
+              (s || '')
+                .replace(/^\s*(the|a|an)\s+/i, '')
+                .replace(
+                  /\s+(on|in|at|near|by|under|over|above|below|behind|beside)\s+(the|a|an)\s+.+$/i,
+                  ''
+                )
+                .trim();
             detected.forEach((d) => {
-              if (d && d.label) d.label = stripArticle(d.label);
+              if (d && d.label) d.label = cleanLabel(d.label);
             });
 
             const embedTargets = new Set();

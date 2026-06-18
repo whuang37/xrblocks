@@ -4,6 +4,8 @@ import {
   Input,
   ScreenshotSynthesizer,
   Simulator,
+  User,
+  World,
   type SimulatorHandPoseRotations,
 } from 'xrblocks';
 
@@ -276,6 +278,277 @@ export class EmbodiedControlExecutor {
         this.options.applyHandRotationConstraints
       );
     }
+  }
+
+  private async executeAction(
+    actionFn: () => Promise<number>
+  ): Promise<EmbodiedControlStepResult> {
+    if (this.activeStep) {
+      throw new EmbodiedControlBusyError();
+    }
+    this.activeStep = true;
+    try {
+      let screenshotPromise: Promise<string> | undefined;
+      const elapsedMs = await actionFn();
+      if (this.options.includeScreenshot) {
+        screenshotPromise =
+          this.dependencies.screenshotSynthesizer.getScreenshot();
+      }
+      const observation = await this.createObservation(screenshotPromise);
+      return {
+        elapsedMs,
+        observation,
+      };
+    } finally {
+      this.activeStep = false;
+    }
+  }
+
+  private getTargetWorldPosition(
+    target: THREE.Object3D | THREE.Vector3 | [number, number, number],
+    out: THREE.Vector3
+  ) {
+    if (target instanceof THREE.Vector3) {
+      out.copy(target);
+    } else if (Array.isArray(target)) {
+      out.fromArray(target);
+    } else if (target instanceof THREE.Object3D) {
+      target.getWorldPosition(out);
+    }
+  }
+
+  async teleportTo(
+    target: THREE.Vector3 | [number, number, number] | THREE.Object3D,
+    options: {
+      distance?: number;
+      faceTarget?: boolean;
+      snapToGround?: boolean;
+    } = {}
+  ): Promise<EmbodiedControlStepResult> {
+    return this.executeAction(async () => {
+      const {distance = 1.5, faceTarget = true, snapToGround = false} = options;
+      const {camera, core} = this.dependencies;
+      const user = core.registry.get(User);
+      const world = core.registry.get(World);
+      const targetWorldPos = new THREE.Vector3();
+      this.getTargetWorldPosition(target, targetWorldPos);
+
+      if (target instanceof THREE.Object3D) {
+        const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(
+          target.quaternion
+        );
+        camera.position.copy(targetWorldPos).addScaledVector(forward, distance);
+      } else {
+        camera.position.copy(targetWorldPos);
+      }
+
+      if (snapToGround && world?.planes && user) {
+        const horizontalPlanes = world.planes.get().filter((p) => {
+          const orientation = (p.orientation || '').toLowerCase();
+          const label = (p.label || '').toLowerCase();
+          return (
+            orientation === 'horizontal' ||
+            label === 'floor' ||
+            label === 'horizontal'
+          );
+        });
+        if (horizontalPlanes.length > 0) {
+          const raycaster = new THREE.Raycaster();
+          raycaster.set(
+            new THREE.Vector3(
+              camera.position.x,
+              camera.position.y + 10,
+              camera.position.z
+            ),
+            new THREE.Vector3(0, -1, 0)
+          );
+          const hits = raycaster.intersectObjects(horizontalPlanes);
+          if (hits.length > 0) {
+            camera.position.y = hits[0].point.y + user.height;
+          }
+        }
+      }
+
+      if (faceTarget && target instanceof THREE.Object3D) {
+        camera.lookAt(targetWorldPos);
+      }
+      core.stepFrame(16.67);
+      return 16.67;
+    });
+  }
+
+  async lookAtTarget(
+    target: THREE.Object3D | THREE.Vector3 | [number, number, number],
+    options: {velocity?: number} = {}
+  ): Promise<EmbodiedControlStepResult> {
+    return this.executeAction(async () => {
+      const {velocity} = options;
+      const {camera, core} = this.dependencies;
+      const targetWorldPos = new THREE.Vector3();
+      this.getTargetWorldPosition(target, targetWorldPos);
+
+      if (velocity === undefined) {
+        camera.lookAt(targetWorldPos);
+        core.stepFrame(16.67);
+        return 16.67;
+      }
+
+      const Q_s = camera.quaternion.clone();
+      camera.lookAt(targetWorldPos);
+      const Q_t = camera.quaternion.clone();
+      camera.quaternion.copy(Q_s);
+
+      const theta = Q_s.angleTo(Q_t);
+      const durationSeconds = theta / velocity;
+      const durationMs = durationSeconds * 1000;
+
+      let elapsedMs = 0;
+      const tickMs = this.options.tickMs;
+      const stepCount = Math.max(1, Math.ceil(durationMs / tickMs));
+      for (let i = 0; i < stepCount; i++) {
+        const remainingMs = Math.max(0, durationMs - elapsedMs);
+        const currentTickMs =
+          i === stepCount - 1
+            ? remainingMs || tickMs
+            : Math.min(tickMs, remainingMs);
+        elapsedMs += currentTickMs;
+        const u = durationMs > 0 ? elapsedMs / durationMs : 1;
+        camera.quaternion.slerpQuaternions(Q_s, Q_t, u);
+        core.stepFrame(currentTickMs);
+        if (this.options.realTime && i < stepCount - 1) {
+          await nextAnimationFrame();
+        }
+      }
+      return durationMs;
+    });
+  }
+
+  async pointTo(
+    handIndex: number,
+    target: THREE.Object3D | THREE.Vector3 | [number, number, number]
+  ): Promise<EmbodiedControlStepResult> {
+    return this.executeAction(async () => {
+      const {camera, simulator, core} = this.dependencies;
+      const targetWorldPos = new THREE.Vector3();
+      this.getTargetWorldPosition(target, targetWorldPos);
+
+      const targetCamSpace = targetWorldPos
+        .clone()
+        .applyMatrix4(camera.matrixWorldInverse);
+      const controllerPos =
+        simulator.simulatorControllerState.localControllerPositions[handIndex];
+      const up = new THREE.Vector3(0, 1, 0);
+      const matrix = new THREE.Matrix4().lookAt(
+        controllerPos,
+        targetCamSpace,
+        up
+      );
+
+      simulator.simulatorControllerState.localControllerOrientations[
+        handIndex
+      ].setFromRotationMatrix(matrix);
+
+      core.stepFrame(16.67);
+      return 16.67;
+    });
+  }
+
+  async reachTo(
+    handIndex: number,
+    target: THREE.Vector3 | [number, number, number] | THREE.Object3D,
+    options: {durationMs?: number} = {}
+  ): Promise<EmbodiedControlStepResult> {
+    return this.executeAction(async () => {
+      const {durationMs} = options;
+      const {camera, simulator, core} = this.dependencies;
+      const targetWorldPos = new THREE.Vector3();
+      this.getTargetWorldPosition(target, targetWorldPos);
+
+      const targetCamSpace = targetWorldPos
+        .clone()
+        .applyMatrix4(camera.matrixWorldInverse);
+
+      if (durationMs === undefined) {
+        simulator.simulatorControllerState.localControllerPositions[
+          handIndex
+        ].copy(targetCamSpace);
+        core.stepFrame(16.67);
+        return 16.67;
+      }
+
+      const startPos =
+        simulator.simulatorControllerState.localControllerPositions[
+          handIndex
+        ].clone();
+      let elapsedMs = 0;
+      const tickMs = this.options.tickMs;
+      const stepCount = Math.max(1, Math.ceil(durationMs / tickMs));
+      for (let i = 0; i < stepCount; i++) {
+        const remainingMs = Math.max(0, durationMs - elapsedMs);
+        const currentTickMs =
+          i === stepCount - 1
+            ? remainingMs || tickMs
+            : Math.min(tickMs, remainingMs);
+        elapsedMs += currentTickMs;
+        const u = durationMs > 0 ? elapsedMs / durationMs : 1;
+        simulator.simulatorControllerState.localControllerPositions[
+          handIndex
+        ].lerpVectors(startPos, targetCamSpace, u);
+        core.stepFrame(currentTickMs);
+        if (this.options.realTime && i < stepCount - 1) {
+          await nextAnimationFrame();
+        }
+      }
+      return durationMs;
+    });
+  }
+
+  async click(
+    handIndex = 1,
+    options: {clickDurationMs?: number} = {}
+  ): Promise<EmbodiedControlStepResult> {
+    return this.executeAction(async () => {
+      const {clickDurationMs = 100} = options;
+      const {input, simulator, core} = this.dependencies;
+      const controller = input.controllers[handIndex];
+
+      // Select Start
+      controller.userData.selected = true;
+      if (handIndex === 0) {
+        simulator.hands.setLeftHandPinching(true);
+      } else {
+        simulator.hands.setRightHandPinching(true);
+      }
+      input.dispatchEvent({type: 'selectstart', target: controller});
+
+      let elapsedMs = 0;
+      const tickMs = this.options.tickMs;
+      const stepCount = Math.max(1, Math.ceil(clickDurationMs / tickMs));
+      for (let i = 0; i < stepCount; i++) {
+        const remainingMs = Math.max(0, clickDurationMs - elapsedMs);
+        const currentTickMs =
+          i === stepCount - 1
+            ? remainingMs || tickMs
+            : Math.min(tickMs, remainingMs);
+        elapsedMs += currentTickMs;
+        core.stepFrame(currentTickMs);
+        if (this.options.realTime && i < stepCount - 1) {
+          await nextAnimationFrame();
+        }
+      }
+
+      // Select End
+      controller.userData.selected = false;
+      if (handIndex === 0) {
+        simulator.hands.setLeftHandPinching(false);
+      } else {
+        simulator.hands.setRightHandPinching(false);
+      }
+      input.dispatchEvent({type: 'selectend', target: controller});
+      core.stepFrame(16.67);
+
+      return elapsedMs + 16.67;
+    });
   }
 
   private async createObservation(

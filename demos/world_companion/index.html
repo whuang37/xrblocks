@@ -920,6 +920,10 @@
       }
 
       async function stop() {
+        // Don't let a stop (e.g. the always-enabled XR button) race a start in
+        // progress; stopGeminiLive would no-op while isAIRunning is still false
+        // and the pending start would complete anyway.
+        if (starting) return;
         stopBtn.disabled = true;
         setStatus('stopping...');
         try {

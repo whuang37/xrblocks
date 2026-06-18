@@ -396,8 +396,8 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
    * Builds on the existing primitives:
    *   - `ai.startLiveSession` for the bidirectional channel
    *   - `XRDeviceCamera.getSnapshot` for vision frames
-   *   - this manager's own `playAudioChunk` for audio playback (unless an
-   *     `onAudio` callback is supplied)
+   *   - this manager's `xb.core.sound.playAIAudio` for audio playback (unless
+   *     an `onAudio` callback is supplied)
    *
    * The mic is not auto-enabled; call `xb.core.sound.enableAudio(...)` with
    * `streamToAI: true` before this if you want the model to hear the user.
@@ -501,7 +501,7 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
         const audio = audioPart?.inlineData?.data;
         if (audio) {
           if (options.onAudio) options.onAudio(audio);
-          else this.playAudioChunk(audio);
+          else xb.core.sound?.playAIAudio(audio);
         }
 
         if (msg.toolCall) handleToolCall(msg.toolCall);
@@ -585,7 +585,7 @@ export interface StreamSceneOptions {
   onText?: (text: string) => void;
   /**
    * Called for each audio chunk (base64 PCM) the model emits. If omitted,
-   * audio is auto-played via this manager's `playAudioChunk`.
+   * audio is auto-played via `xb.core.sound.playAIAudio`.
    */
   onAudio?: (base64: string) => void;
   /**

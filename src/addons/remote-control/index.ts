@@ -3,7 +3,7 @@ export type {RemoteControlOptions} from './RemoteControl';
 export {
   REMOTE_CONTROL_PROTOCOL_VERSION,
   createHandshake,
-  isStepMessage,
+  isCommandMessage,
   parseRemoteControlMessage,
 } from './RemoteControlProtocol';
 export type {
@@ -12,10 +12,10 @@ export type {
   RemoteControlHandshakeMessage,
   RemoteControlOutgoingMessage,
   RemoteControlStepCompletedMessage,
-  RemoteControlStepMessage,
+  RemoteControlMessage,
 } from './RemoteControlProtocol';
 export {WebSocketRemoteControlTransport} from './WebSocketRemoteControlTransport';
 export type {
-  RemoteControlStepHandler,
+  RemoteControlCommandHandler,
   WebSocketRemoteControlTransportOptions,
 } from './WebSocketRemoteControlTransport';

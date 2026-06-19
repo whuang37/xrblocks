@@ -2,10 +2,10 @@ import type {EmbodiedControlStepResult} from '../embodied-control';
 
 import {
   createHandshake,
-  isStepMessage,
+  isCommandMessage,
   parseRemoteControlMessage,
   type RemoteControlOutgoingMessage,
-  type RemoteControlStepMessage,
+  type RemoteControlMessage,
 } from './RemoteControlProtocol';
 
 export type WebSocketRemoteControlTransportOptions = {
@@ -14,8 +14,8 @@ export type WebSocketRemoteControlTransportOptions = {
   reconnectDelayMs?: number;
 };
 
-export type RemoteControlStepHandler = (
-  step: RemoteControlStepMessage
+export type RemoteControlCommandHandler = (
+  command: RemoteControlMessage
 ) => Promise<EmbodiedControlStepResult>;
 
 export class WebSocketRemoteControlTransport {
@@ -28,7 +28,7 @@ export class WebSocketRemoteControlTransport {
 
   constructor(
     options: WebSocketRemoteControlTransportOptions,
-    private handleStep: RemoteControlStepHandler
+    private handleCommand: RemoteControlCommandHandler
   ) {
     this.url = options.url ?? 'ws://127.0.0.1:8765';
     this.reconnect = options.reconnect ?? false;
@@ -71,16 +71,16 @@ export class WebSocketRemoteControlTransport {
       return;
     }
 
-    if (!isStepMessage(message)) {
+    if (!isCommandMessage(message)) {
       this.sendError(
         (message as {id?: string} | undefined)?.id,
-        new Error('Invalid STEP payload')
+        new Error('Invalid message payload')
       );
       return;
     }
 
     try {
-      const result = await this.handleStep(message);
+      const result = await this.handleCommand(message);
       this.send({
         type: 'STEP_COMPLETED',
         ...result,

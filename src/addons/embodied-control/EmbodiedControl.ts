@@ -65,4 +65,56 @@ export class EmbodiedControl extends Script {
   get busy() {
     return this.executor?.busy ?? false;
   }
+
+  teleportTo(
+    target: THREE.Vector3 | [number, number, number] | THREE.Object3D,
+    options?: {distance?: number; faceTarget?: boolean; snapToGround?: boolean}
+  ): Promise<EmbodiedControlStepResult> {
+    if (!this.executor) {
+      throw new Error('EmbodiedControl is not initialized.');
+    }
+    return this.executor.teleportTo(target, options);
+  }
+
+  lookAtTarget(
+    target: THREE.Object3D | THREE.Vector3 | [number, number, number],
+    options?: {velocity?: number}
+  ): Promise<EmbodiedControlStepResult> {
+    if (!this.executor) {
+      throw new Error('EmbodiedControl is not initialized.');
+    }
+    return this.executor.lookAtTarget(target, options);
+  }
+
+  pointTo(
+    handIndex: number,
+    target: THREE.Object3D | THREE.Vector3 | [number, number, number],
+    options?: {velocity?: number}
+  ): Promise<EmbodiedControlStepResult> {
+    if (!this.executor) {
+      throw new Error('EmbodiedControl is not initialized.');
+    }
+    return this.executor.pointTo(handIndex, target, options);
+  }
+
+  reachTo(
+    handIndex: number,
+    target: THREE.Vector3 | [number, number, number] | THREE.Object3D,
+    options?: {velocity?: number}
+  ): Promise<EmbodiedControlStepResult> {
+    if (!this.executor) {
+      throw new Error('EmbodiedControl is not initialized.');
+    }
+    return this.executor.reachTo(handIndex, target, options);
+  }
+
+  click(
+    handIndex = 1,
+    options?: {durationMs?: number}
+  ): Promise<EmbodiedControlStepResult> {
+    if (!this.executor) {
+      throw new Error('EmbodiedControl is not initialized.');
+    }
+    return this.executor.click(handIndex, options);
+  }
 }

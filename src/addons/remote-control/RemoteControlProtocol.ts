@@ -21,6 +21,51 @@ export type RemoteControlStepMessage = EmbodiedControlStep & {
   control: XRCompoundControl;
 };
 
+export type RemoteControlTeleportMessage = {
+  id?: string;
+  type: 'TELEPORT_TO';
+  target: [number, number, number] | string;
+  options?: {distance?: number; faceTarget?: boolean; snapToGround?: boolean};
+};
+
+export type RemoteControlLookAtMessage = {
+  id?: string;
+  type: 'LOOK_AT_TARGET';
+  target: [number, number, number] | string;
+  options?: {velocity?: number};
+};
+
+export type RemoteControlPointToMessage = {
+  id?: string;
+  type: 'POINT_TO';
+  handIndex: number;
+  target: [number, number, number] | string;
+  options?: {velocity?: number};
+};
+
+export type RemoteControlReachToMessage = {
+  id?: string;
+  type: 'REACH_TO';
+  handIndex: number;
+  target: [number, number, number] | string;
+  options?: {velocity?: number};
+};
+
+export type RemoteControlClickMessage = {
+  id?: string;
+  type: 'CLICK';
+  handIndex: number;
+  options?: {durationMs?: number};
+};
+
+export type RemoteControlMessage =
+  | RemoteControlStepMessage
+  | RemoteControlTeleportMessage
+  | RemoteControlLookAtMessage
+  | RemoteControlPointToMessage
+  | RemoteControlReachToMessage
+  | RemoteControlClickMessage;
+
 export type RemoteControlStepCompletedMessage = EmbodiedControlStepResult & {
   type: 'STEP_COMPLETED';
 };
@@ -55,12 +100,19 @@ export function createHandshake(): RemoteControlHandshakeMessage {
   };
 }
 
-export function isStepMessage(
+export function isCommandMessage(
   value: unknown
-): value is RemoteControlStepMessage {
+): value is RemoteControlMessage {
   if (!value || typeof value !== 'object') return false;
-  const message = value as Partial<RemoteControlStepMessage>;
-  return message.type === 'STEP' && !!message.control;
+  const type = (value as {type?: string}).type;
+  return (
+    type === 'STEP' ||
+    type === 'TELEPORT_TO' ||
+    type === 'LOOK_AT_TARGET' ||
+    type === 'POINT_TO' ||
+    type === 'REACH_TO' ||
+    type === 'CLICK'
+  );
 }
 
 export function parseRemoteControlMessage(data: MessageEvent['data']): unknown {

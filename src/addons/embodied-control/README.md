@@ -121,6 +121,37 @@ controller selected state. This is different from passing raw pinching
 
 ---
 
+## High-level actions
+
+In addition to raw coordinate-relative `step()` controls, `EmbodiedControl` exposes high-level, intent-based methods that perform automatic vector math and frame stepping. These methods are designed for layout-independent testing and semantic agent execution:
+
+```ts
+// Teleport directly in front of the yellow cube
+await embodied.teleportTo(cube, {distance: 1.2, faceTarget: true});
+
+// Smoothly turn user head to look at target at 1.5 radians/sec
+await embodied.lookAtTarget(cube, {velocity: 1.5});
+
+// Smoothly point right controller at target at 1.5 radians/sec
+await embodied.pointTo(1, cube, {velocity: 1.5}); // 1 = right hand
+
+// Smoothly extend right hand to cube at 0.5 meters/sec
+await embodied.reachTo(1, cube, {velocity: 0.5});
+
+// Perform click (selectStart + selectEnd sequence)
+await embodied.click(1);
+```
+
+All high-level methods return a `Promise<EmbodiedControlStepResult>` containing the elapsed time and completed observation:
+
+- **`teleportTo(target, options)`**: Teleports the camera to coordinates or facing an object. Options: `distance` (default 1.5m), `faceTarget` (default true), and `snapToGround` (default false; if true, snaps camera Y coordinate to user standing height above closest detected horizontal ground plane).
+- **`lookAtTarget(target, options)`**: Rotates the camera to look at the target. Options: `velocity` (radians/second; if omitted, snaps instantly in 1 frame).
+- **`pointTo(handIndex, target, options)`**: Rotates the controller locally in camera space to point directly at the target, keeping its position/radius unchanged. Options: `velocity` (radians/second; if omitted, snaps instantly in 1 frame).
+- **`reachTo(handIndex, target, options)`**: Moves the controller position towards the target. Options: `velocity` (meters/second; if omitted, moves instantly).
+- **`click(handIndex, options)`**: Simulates click gesture press and release. Options: `durationMs` (default 200ms).
+
+---
+
 ## Observations
 
 Only `step()` resolves with an observation:

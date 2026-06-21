@@ -112,7 +112,7 @@ export class RemoteControl extends Script {
   }) {
     this.dependencies = dependencies;
 
-    // 1. Initialize EmbodiedControl
+    // Initialize EmbodiedControl
     if (!this.embodiedControl.executor) {
       this.embodiedControl.init(dependencies);
       dependencies.core.registry.register(
@@ -122,7 +122,7 @@ export class RemoteControl extends Script {
       dependencies.core.scene.add(this.embodiedControl);
     }
 
-    // 2. Initialize Sensors (and register as core singleton)
+    // Initialize Sensors (and register as core singleton)
     const registrySensors = dependencies.core.registry.get(
       SensorsManager
     ) as SensorsManager;
@@ -134,7 +134,7 @@ export class RemoteControl extends Script {
       this.sensors = registrySensors;
     }
 
-    // 3. Connect transport
+    // Connect transport
     this.transport = new WebSocketRemoteControlTransport(
       {
         url: this.options.url,
@@ -181,7 +181,7 @@ export class RemoteControl extends Script {
   ): Promise<RemoteControlStepResult> {
     const sensorOpts = message.sensors;
 
-    // A. Start recording telemetry locally
+    // Start recording telemetry locally
     if (sensorOpts?.recordHistory) {
       this.localHistory = [];
       this.recordingSensors = getSensorsForKeys(
@@ -191,7 +191,7 @@ export class RemoteControl extends Script {
       this.isRecording = true;
     }
 
-    // B. Actuate the command
+    // Execute the command
     let elapsedMs = 0;
     switch (message.type) {
       case 'STEP': {
@@ -251,7 +251,7 @@ export class RemoteControl extends Script {
         );
     }
 
-    // C. Stop recording telemetry and map the local history buffer
+    // Stop recording telemetry and map the local history buffer
     let history = undefined;
     if (sensorOpts?.recordHistory) {
       this.isRecording = false;
@@ -268,7 +268,7 @@ export class RemoteControl extends Script {
       this.localHistory = [];
     }
 
-    // D. Capture final observation (forcing 'sync' updateMode for absolute temporal alignment)
+    // Capture final observation (forcing 'sync' updateMode for absolute temporal alignment)
     const targetSensors = getSensorsForKeys(
       sensorOpts?.keys,
       sensorOpts?.options

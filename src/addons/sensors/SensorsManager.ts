@@ -116,7 +116,7 @@ export class SensorsManager extends Script {
     }
     this.checkAndClearCache();
     const instance = this.getOrCreateInstance(target);
-    const mode = instance.options?.updateMode ?? 'sync';
+    const mode = options?.updateMode ?? instance.options?.updateMode ?? 'sync';
 
     // Returns lastCompletedValue immediately, runs update in background.
     if (mode === 'background') {
@@ -128,7 +128,7 @@ export class SensorsManager extends Script {
               core: this.core,
               camera: this.camera,
               input: this.input,
-              get: (t) => this.get(t),
+              get: (t, opts) => this.get(t, opts ?? options),
               defer: (fn) => this.defer(fn),
             });
             state.lastCompletedValue = val;
@@ -161,7 +161,7 @@ export class SensorsManager extends Script {
           core: this.core,
           camera: this.camera,
           input: this.input,
-          get: (t) => this.get(t),
+          get: (t, opts) => this.get(t, opts ?? options),
           defer: (fn) => this.defer(fn),
         });
         this.results.set(instance, val);
@@ -185,7 +185,7 @@ export class SensorsManager extends Script {
         core: this.core,
         camera: this.camera,
         input: this.input,
-        get: (t) => this.get(t),
+        get: (t, opts) => this.get(t, opts ?? options),
         defer: (fn) => this.defer(fn),
       });
       this.results.set(instance, val);

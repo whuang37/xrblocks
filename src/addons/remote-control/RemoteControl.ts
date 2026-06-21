@@ -156,16 +156,19 @@ export class RemoteControl extends Script {
   override update(time: number) {
     if (this.isRecording && this.recordingSensors.length > 0) {
       // Capture the sensors on this frame tick asynchronously and buffer the results
-      this.sensors.capture(this.recordingSensors).then((results) => {
-        const valuesMap = new Map<Sensor<unknown>, unknown>();
-        this.recordingSensors.forEach((sensor, index) => {
-          valuesMap.set(sensor, results[index]);
+      // (forcing 'sync' updateMode to guarantee that every history frame is perfectly aligned)
+      this.sensors
+        .capture(this.recordingSensors, {updateMode: 'sync'})
+        .then((results) => {
+          const valuesMap = new Map<Sensor<unknown>, unknown>();
+          this.recordingSensors.forEach((sensor, index) => {
+            valuesMap.set(sensor, results[index]);
+          });
+          this.localHistory.push({
+            timestamp: time,
+            values: valuesMap,
+          });
         });
-        this.localHistory.push({
-          timestamp: time,
-          values: valuesMap,
-        });
-      });
     }
   }
 
@@ -265,15 +268,15 @@ export class RemoteControl extends Script {
       this.localHistory = [];
     }
 
-    // D. Capture final observation
+    // D. Capture final observation (forcing 'sync' updateMode for absolute temporal alignment)
     const targetSensors = getSensorsForKeys(
       sensorOpts?.keys,
       sensorOpts?.options
     );
-    const values = await this.sensors.capture(
-      targetSensors,
-      sensorOpts?.options
-    );
+    const values = await this.sensors.capture(targetSensors, {
+      ...sensorOpts?.options,
+      updateMode: 'sync',
+    });
 
     const observation: Record<string, unknown> = {};
     targetSensors.forEach((sensor, idx) => {

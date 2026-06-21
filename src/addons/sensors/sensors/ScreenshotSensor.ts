@@ -73,8 +73,10 @@ export class ScreenshotSOMSensor extends Sensor<string> {
     const visibilitySensor = this.deps.visibility ?? VisibilitySensor;
 
     const [xr, visibleObjects] = await Promise.all([
-      context.get(xrSensor) as Promise<string>,
-      context.get(visibilitySensor) as Promise<VisibilityItem[]>,
+      context.get(xrSensor, {updateMode: 'sync'}) as Promise<string>,
+      context.get(visibilitySensor, {updateMode: 'sync'}) as Promise<
+        VisibilityItem[]
+      >,
     ]);
 
     if (!xr || !visibleObjects) return xr || '';

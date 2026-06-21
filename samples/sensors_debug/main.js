@@ -2,7 +2,15 @@ import 'xrblocks/addons/simulator/SimulatorAddons.js';
 
 import * as THREE from 'three';
 import * as xb from 'xrblocks';
-import {Sensors} from 'xrblocks/addons/sensors/index.js';
+import {
+  SensorsManager,
+  ProprioceptionSensor,
+  SceneGraphSensor,
+  TargetingSensor,
+  DepthSensor,
+  ScreenshotSOMSensor,
+  SemanticMapSensor,
+} from 'xrblocks/addons/sensors/index.js';
 
 // 1. Configure the engine options
 const options = new xb.Options();
@@ -203,7 +211,11 @@ class PrototypingScene extends xb.Script {
     // A colorful green Torus
     const torus = new THREE.Mesh(
       new THREE.TorusGeometry(0.2, 0.05, 12, 48),
-      new THREE.MeshStandardMaterial({color: 0x2ecc71, roughness: 0.3, metalness: 0.1})
+      new THREE.MeshStandardMaterial({
+        color: 0x2ecc71,
+        roughness: 0.3,
+        metalness: 0.1,
+      })
     );
     torus.name = 'Green Torus';
     torus.position.set(-0.5, 1.35, -1.2);
@@ -214,7 +226,11 @@ class PrototypingScene extends xb.Script {
     // A colorful orange Box
     const box = new THREE.Mesh(
       new THREE.BoxGeometry(0.3, 0.3, 0.3),
-      new THREE.MeshStandardMaterial({color: 0xe67e22, roughness: 0.5, metalness: 0.2})
+      new THREE.MeshStandardMaterial({
+        color: 0xe67e22,
+        roughness: 0.5,
+        metalness: 0.2,
+      })
     );
     box.name = 'Orange Box';
     box.position.set(0, 1.35, -1.2);
@@ -225,7 +241,11 @@ class PrototypingScene extends xb.Script {
     // A colorful blue Sphere
     const sphere = new THREE.Mesh(
       new THREE.SphereGeometry(0.2, 32, 32),
-      new THREE.MeshStandardMaterial({color: 0x3498db, roughness: 0.4, metalness: 0.1})
+      new THREE.MeshStandardMaterial({
+        color: 0x3498db,
+        roughness: 0.4,
+        metalness: 0.1,
+      })
     );
     sphere.name = 'Blue Sphere';
     sphere.position.set(0.5, 1.35, -1.2);
@@ -238,7 +258,7 @@ class PrototypingScene extends xb.Script {
 // 4. Implement a custom script to tick, capture, and render sensor observations
 class DebuggerScript extends xb.Script {
   static dependencies = {
-    sensors: Sensors,
+    sensors: SensorsManager,
   };
 
   sensors = null;
@@ -258,77 +278,86 @@ class DebuggerScript extends xb.Script {
 
   async updateDebuggerUI() {
     try {
-      // Capture the full, high-fidelity observation from all telemetry streams
-      const obs = await this.sensors.captureObservation({
-        includeScreenshot: true,
-        annotateScreenshot: true,
-        includeSemanticMap: true,
-        includeUserTransforms: true,
-        includeSceneGraph: true,
-        includeDepth: true,
-        includeTargeting: true,
-      });
+      // Capture the full, high-fidelity observation from all telemetry streams by reference
+      const [
+        state,
+        sceneGraph,
+        targeting,
+        depth,
+        screenshotSOM,
+        visibleObjects,
+      ] = await this.sensors.capture([
+        ProprioceptionSensor,
+        SceneGraphSensor,
+        TargetingSensor,
+        DepthSensor,
+        ScreenshotSOMSensor,
+        SemanticMapSensor,
+      ]);
 
       // 1. Update Set-of-Mark annotated screenshot
       const somImg = document.getElementById('som-image');
-      if (somImg && obs.screenshot) {
-        somImg.src = obs.screenshot;
+      if (somImg && screenshotSOM) {
+        somImg.src = screenshotSOM;
       }
 
       // 2. Render environmental depth heatmap on canvas
       const depthCanvas = document.getElementById('depth-canvas');
-      if (depthCanvas && obs.depth) {
-        this.drawDepthHeatmap(depthCanvas, obs.depth);
+      if (depthCanvas && depth) {
+        this.drawDepthHeatmap(depthCanvas, depth);
       }
 
       // 3. Update plaintext visible objects (Set-of-Mark index subtitles)
       const subContainer = document.getElementById('subtitles-container');
       if (subContainer) {
-        if (obs.visibleObjects && obs.visibleObjects.length > 0) {
-          subContainer.innerHTML = obs.visibleObjects
+        if (visibleObjects && visibleObjects.length > 0) {
+          subContainer.innerHTML = visibleObjects
             .map((ref) => `<div>${ref.description}</div>`)
             .join('');
         } else {
-          subContainer.innerHTML = '<div style="color: #888;">No unoccluded entities visible</div>';
+          subContainer.innerHTML =
+            '<div style="color: #888;">No unoccluded entities visible</div>';
         }
       }
 
       // 4. Update Proprioception coordinates
-      if (obs.state) {
-        const head = obs.state.camera;
-        const left = obs.state.leftHand;
-        const right = obs.state.rightHand;
+      if (state) {
+        const head = state.camera;
+        const left = state.leftHand;
+        const right = state.rightHand;
 
         const q = new THREE.Quaternion(...head.quaternion);
         const euler = new THREE.Euler().setFromQuaternion(q);
-        const degX = (euler.x * 180 / Math.PI).toFixed(1);
-        const degY = (euler.y * 180 / Math.PI).toFixed(1);
-        const degZ = (euler.z * 180 / Math.PI).toFixed(1);
+        const degX = ((euler.x * 180) / Math.PI).toFixed(1);
+        const degY = ((euler.y * 180) / Math.PI).toFixed(1);
+        const degZ = ((euler.z * 180) / Math.PI).toFixed(1);
 
-        document.getElementById('tel-head').innerHTML = 
-          `Head Pos: <span>[${head.position.map(n => n.toFixed(2)).join(', ')}]</span><br/>` +
+        document.getElementById('tel-head').innerHTML =
+          `Head Pos: <span>[${head.position.map((n) => n.toFixed(2)).join(', ')}]</span><br/>` +
           `Head Rot: <span>[P: ${degX}°, Y: ${degY}°, R: ${degZ}°]</span>`;
-        
-        document.getElementById('tel-lhand').innerHTML = 
-          `Left Hand: <span>[${left.position.map(n => n.toFixed(2)).join(', ')}]</span> | Vis: <span>${left.visible}</span> | Pinch: <span>${left.selected}</span>`;
-        
-        document.getElementById('tel-rhand').innerHTML = 
-          `Right Hand: <span>[${right.position.map(n => n.toFixed(2)).join(', ')}]</span> | Vis: <span>${right.visible}</span> | Pinch: <span>${right.selected}</span>`;
+
+        document.getElementById('tel-lhand').innerHTML =
+          `Left Hand: <span>[${left.position.map((n) => n.toFixed(2)).join(', ')}]</span> | Vis: <span>${left.visible}</span> | Pinch: <span>${left.selected}</span>`;
+
+        document.getElementById('tel-rhand').innerHTML =
+          `Right Hand: <span>[${right.position.map((n) => n.toFixed(2)).join(', ')}]</span> | Vis: <span>${right.visible}</span> | Pinch: <span>${right.selected}</span>`;
       }
 
       // 5. Update Pointer Targeting intersections and normals
-      if (obs.targeting) {
+      if (targeting) {
         const getTargetString = (target) => {
           if (!target) return 'Inactive';
           if (target.hoveredObjectId === null) return 'No intersection';
-          return `Hit Obj ID: <span>${target.hoveredObjectId}</span> | Dist: <span>${target.distanceToHoveredObject?.toFixed(2)}m</span><br/>Pos: <span>[${target.intersectionPoint?.map(n => n.toFixed(2)).join(', ')}]</span><br/>Normal: <span>[${target.surfaceNormal?.map(n => n.toFixed(2)).join(', ')}]</span>`;
+          return `Hit Obj ID: <span>${target.hoveredObjectId}</span> | Dist: <span>${target.distanceToHoveredObject?.toFixed(2)}m</span><br/>Pos: <span>[${target.intersectionPoint?.map((n) => n.toFixed(2)).join(', ')}]</span><br/>Normal: <span>[${target.surfaceNormal?.map((n) => n.toFixed(2)).join(', ')}]</span>`;
         };
 
-        document.getElementById('target-left').innerHTML = `Left: ${getTargetString(obs.targeting.leftHand)}`;
-        document.getElementById('target-right').innerHTML = `Right: ${getTargetString(obs.targeting.rightHand)}`;
-        document.getElementById('target-gaze').innerHTML = `Gaze: ${getTargetString(obs.targeting.gaze)}`;
+        document.getElementById('target-left').innerHTML =
+          `Left: ${getTargetString(targeting.leftHand)}`;
+        document.getElementById('target-right').innerHTML =
+          `Right: ${getTargetString(targeting.rightHand)}`;
+        document.getElementById('target-gaze').innerHTML =
+          `Gaze: ${getTargetString(targeting.gaze)}`;
       }
-
     } catch (e) {
       console.error('Sensor Debugger Capture Error:', e);
     }
@@ -347,15 +376,15 @@ class DebuggerScript extends xb.Script {
     for (let y = 0; y < rows; y++) {
       for (let x = 0; x < cols; x++) {
         const distance = depthGrid[y][x];
-        
+
         // Map distance in meters (0m to 4m) to a normalized value [0, 1]
         const t = Math.min(distance / 4.0, 1.0);
-        
+
         // Compute blue (close) to red (far) color ramp
         const r = Math.round(t * 255);
         const g = Math.round((1 - Math.abs(t - 0.5) * 2) * 255);
         const b = Math.round((1 - t) * 255);
-        
+
         ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
         ctx.fillRect(x * cellW, y * cellH, cellW, cellH);
       }
@@ -367,12 +396,19 @@ class DebuggerScript extends xb.Script {
 async function start() {
   createDebuggerSidebar();
 
-  const sensors = new Sensors();
-  
+  const sensors = new SensorsManager([
+    ProprioceptionSensor,
+    SceneGraphSensor,
+    TargetingSensor,
+    DepthSensor,
+    ScreenshotSOMSensor,
+    SemanticMapSensor,
+  ]);
+
   // Register the sensors instance in the dependency injection container
   // so that DebuggerScript can successfully inject it!
   xb.core.registry.register(sensors);
-  
+
   // Register the debugging and scenario scripts
   xb.add(new PrototypingScene());
   xb.add(new xb.DragManager());

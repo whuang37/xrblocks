@@ -221,6 +221,8 @@ export class SimulatorControlMode {
 
   enableSimulatorHands() {
     this.hands.showHands();
+    if (this.input.controllers[0]) this.input.controllers[0].visible = true;
+    if (this.input.controllers[1]) this.input.controllers[1].visible = true;
     this.input.dispatchEvent({
       type: 'connected',
       target: this.input.controllers[0],
@@ -235,6 +237,8 @@ export class SimulatorControlMode {
 
   disableSimulatorHands() {
     this.hands.hideHands();
+    if (this.input.controllers[0]) this.input.controllers[0].visible = false;
+    if (this.input.controllers[1]) this.input.controllers[1].visible = false;
     this.input.dispatchEvent({
       type: 'disconnected',
       target: this.input.controllers[0],

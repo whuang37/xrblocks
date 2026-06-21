@@ -4,7 +4,61 @@ import {
   EmbodiedControl,
   type EmbodiedControlOptions,
 } from '../embodied-control';
-import {Sensors, type SensorsOptions} from '../sensors';
+import {
+  SensorsManager,
+  type SensorsOptions,
+  Sensor,
+  ProprioceptionSensor,
+  SceneGraphSensor,
+  TargetingSensor,
+  DepthSensor,
+  VisibilitySensor,
+  ScreenshotCameraSensor,
+  ScreenshotXRSensor,
+  ScreenshotSOMSensor,
+  SemanticMapSensor,
+} from '../sensors';
+
+function getSensorsForKeys(
+  keys?: string[],
+  options?: SensorsOptions
+): Sensor<unknown>[] {
+  if (!keys || keys.length === 0) {
+    return [new ProprioceptionSensor()];
+  }
+  return keys
+    .map((k) => {
+      switch (k) {
+        case 'state':
+          return new ProprioceptionSensor();
+        case 'sceneGraph':
+          return new SceneGraphSensor();
+        case 'targeting':
+          return new TargetingSensor();
+        case 'depth':
+          return new DepthSensor({gridSize: options?.depthGridSize as number});
+        case 'screenshotCamera':
+          return new ScreenshotCameraSensor();
+        case 'screenshotXR':
+          return new ScreenshotXRSensor();
+        case 'screenshotSOM': {
+          const visibility = new VisibilitySensor({
+            verifyLineOfSight: options?.verifyLineOfSight as boolean,
+          });
+          return new ScreenshotSOMSensor({visibility});
+        }
+        case 'visibleObjects': {
+          const visibility = new VisibilitySensor({
+            verifyLineOfSight: options?.verifyLineOfSight as boolean,
+          });
+          return new SemanticMapSensor({visibility});
+        }
+        default:
+          return null;
+      }
+    })
+    .filter(Boolean) as Sensor<unknown>[];
+}
 
 import {
   WebSocketRemoteControlTransport,
@@ -18,7 +72,7 @@ import {
 export type RemoteControlOptions = WebSocketRemoteControlTransportOptions & {
   embodiedControl?: EmbodiedControl;
   embodiedOptions?: EmbodiedControlOptions;
-  sensors?: Sensors;
+  sensors?: SensorsManager;
   sensorsOptions?: SensorsOptions;
 };
 
@@ -32,7 +86,7 @@ export class RemoteControl extends Script {
 
   editorIcon = 'settings_remote';
   embodiedControl: EmbodiedControl;
-  sensors: Sensors;
+  sensors: SensorsManager;
   transport?: WebSocketRemoteControlTransport;
 
   dependencies!: {
@@ -46,7 +100,8 @@ export class RemoteControl extends Script {
     super();
     this.embodiedControl =
       options.embodiedControl ?? new EmbodiedControl(options.embodiedOptions);
-    this.sensors = options.sensors ?? new Sensors(options.sensorsOptions);
+    this.sensors =
+      options.sensors ?? new SensorsManager(undefined, options.sensorsOptions);
   }
 
   init(dependencies: {
@@ -60,15 +115,20 @@ export class RemoteControl extends Script {
     // 1. Initialize EmbodiedControl
     if (!this.embodiedControl.executor) {
       this.embodiedControl.init(dependencies);
-      dependencies.core.registry.register(this.embodiedControl, EmbodiedControl);
+      dependencies.core.registry.register(
+        this.embodiedControl,
+        EmbodiedControl
+      );
       dependencies.core.scene.add(this.embodiedControl);
     }
 
     // 2. Initialize Sensors (and register as core singleton)
-    const registrySensors = dependencies.core.registry.get(Sensors) as Sensors;
+    const registrySensors = dependencies.core.registry.get(
+      SensorsManager
+    ) as SensorsManager;
     if (!registrySensors) {
       this.sensors.init(dependencies);
-      dependencies.core.registry.register(this.sensors, Sensors);
+      dependencies.core.registry.register(this.sensors, SensorsManager);
       dependencies.core.scene.add(this.sensors);
     } else {
       this.sensors = registrySensors;
@@ -97,7 +157,11 @@ export class RemoteControl extends Script {
 
     // A. Start recording telemetry
     if (sensorOpts?.recordHistory) {
-      this.sensors.startRecording(sensorOpts);
+      const recordSensors = getSensorsForKeys(
+        sensorOpts.keys,
+        sensorOpts.options
+      );
+      this.sensors.startRecording(recordSensors, sensorOpts.options);
     }
 
     // B. Actuate the command
@@ -163,11 +227,34 @@ export class RemoteControl extends Script {
     // C. Stop recording telemetry
     let history = undefined;
     if (sensorOpts?.recordHistory) {
-      history = this.sensors.stopRecording();
+      const rawHistory = this.sensors.stopRecording();
+      history = rawHistory.map((rec) => {
+        const flatValues: Record<string, unknown> = {};
+        for (const [sensor, val] of rec.values.entries()) {
+          flatValues[sensor.key] = val;
+        }
+        return {
+          timestamp: rec.timestamp,
+          ...flatValues,
+        };
+      });
     }
 
     // D. Capture final observation
-    const observation = await this.sensors.captureObservation(sensorOpts);
+    const targetSensors = getSensorsForKeys(
+      sensorOpts?.keys,
+      sensorOpts?.options
+    );
+    const values = await this.sensors.capture(
+      targetSensors,
+      sensorOpts?.options
+    );
+
+    const observation: Record<string, unknown> = {};
+    targetSensors.forEach((sensor, idx) => {
+      observation[sensor.key] = values[idx];
+    });
+
     if (history) {
       observation.history = history;
     }

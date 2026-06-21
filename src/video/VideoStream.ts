@@ -226,7 +226,10 @@ export class VideoStream<
     const cacheKey = `${outputFormat}_${width}_${height}_${mimeType}_${quality}`;
 
     // 1. Return cached snapshot if requested within the same frame tick (configurable window)
-    if (now - this.lastCaptureTime_ < cacheWindowMs && this.snapshotCache_.has(cacheKey)) {
+    if (
+      now - this.lastCaptureTime_ < cacheWindowMs &&
+      this.snapshotCache_.has(cacheKey)
+    ) {
       return this.snapshotCache_.get(cacheKey) as SnapshotResult;
     }
 

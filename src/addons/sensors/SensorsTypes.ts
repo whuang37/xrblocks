@@ -1,56 +1,108 @@
+import * as THREE from 'three';
+import {Core, Input, core, Constructor} from 'xrblocks';
+import type {SensorsManager} from './SensorsManager';
 
 export type Vec3Tuple = [number, number, number];
 export type QuatTuple = [number, number, number, number];
 
+export type SensorUpdateMode = 'sync' | 'background' | 'idle';
+
 export interface SensorsOptions {
   /** The time window in milliseconds to cache observations within the same frame (default: 8.0). Set to 0 to disable caching. */
   cacheWindowMs?: number;
-  /** Serialize the Three.js scene graph structural topology. */
-  includeSceneGraph?: boolean;
-  /** Return a downsampled 2D depth grid. */
-  includeDepth?: boolean;
-  /** Return head (camera), hand, and torso proprioception transforms. */
-  includeProprioception?: boolean;
-  /** Return raw pointer targeting/hover metrics. */
-  includeTargeting?: boolean;
-  /** Capture the raw physical camera feed only (no virtual objects). */
-  includeScreenshotCamera?: boolean;
-  /** Capture the blended augmented reality screenshot (camera + virtual meshes). */
-  includeScreenshotXR?: boolean;
-  /** Capture the Set-of-Mark annotated augmented reality screenshot (camera + meshes + badges). */
-  includeScreenshotSOM?: boolean;
+  /** The execution mode of the sensor (sync, background, or idle) */
+  updateMode?: SensorUpdateMode;
+  /** Allow arbitrary sensor-specific options */
+  [key: string]: unknown;
+}
 
-  /** Enable generating the semantic visible objects list mapping (default: false). */
-  includeSemanticMap?: boolean;
-  /** Size of the downsampled depth grid (e.g. 16 for 16x16, default 16). */
-  depthGridSize?: number;
-  /** Perform line-of-sight raycasts to verify object visibility (default: true). */
-  verifyLineOfSight?: boolean;
-  /** Enable recording of lightweight per-frame data in the memory buffer (default: false). */
-  recordHistory?: boolean;
-  /** Capture real-world surfaces and planes (TODO). */
-  includePlanes?: boolean;
-  /** Capture high-level hand gestures (TODO). */
-  includeGestures?: boolean;
-  /** Capture user facial blendshapes and expressions (TODO). */
-  includeFaces?: boolean;
-  /** Capture environmental audio events (TODO). */
-  includeSounds?: boolean;
-  /** [TODO] Capture 3D drawing stroke/sketch paths drawn by the user. */
-  includeStrokes?: boolean;
-  /** [TODO] Capture physical Bluetooth gamepad triggers and analog stick inputs. */
-  includeGamepad?: boolean;
-  /** [TODO] Capture real-world lighting direction and light estimation coefficients. */
-  includeLighting?: boolean;
+export const DEFAULT_SENSORS_OPTIONS: Required<
+  Pick<SensorsOptions, 'cacheWindowMs'>
+> = {
+  cacheWindowMs: 8.0,
+};
+
+export interface SensorContext {
+  core: Core;
+  camera: THREE.Camera;
+  input: Input;
+  get<S>(sensor: Sensor<S> | Constructor<Sensor<S>>): Promise<S>;
+  defer<R>(fn: () => Promise<R> | R): Promise<R>;
+}
+
+export abstract class Sensor<T = unknown> {
+  /** Internal unique key used for debugging and logging */
+  abstract readonly key: string;
+
+  readonly options?: SensorsOptions;
+
+  constructor(options?: SensorsOptions) {
+    this.options = options;
+  }
+
+  /**
+   * Primary execution endpoint for the sensor.
+   */
+  abstract update(context: SensorContext): Promise<T> | T;
+
+  /**
+   * Direct, strongly-typed capture. Self-bootstraps SensorsManager if needed.
+   */
+  async capture(options?: SensorsOptions): Promise<T> {
+    const manager = await Sensor.resolveManager();
+    return manager.capture(this, options);
+  }
+
+  /**
+   * Direct, strongly-typed subscription. Self-bootstraps SensorsManager if needed.
+   */
+  subscribe(
+    callback: (value: T) => void,
+    frequency = 0,
+    options?: SensorsOptions
+  ): () => void {
+    let unsubscribed = false;
+    let innerUnsubscribe: (() => void) | null = null;
+
+    Sensor.resolveManager().then((manager) => {
+      if (unsubscribed) return;
+      const sub = manager.subscribe(
+        [this],
+        frequency,
+        ([val]) => callback(val as T),
+        options
+      );
+      innerUnsubscribe = () => sub.unsubscribe();
+    });
+
+    return () => {
+      unsubscribed = true;
+      if (innerUnsubscribe) {
+        innerUnsubscribe();
+      }
+    };
+  }
+
+  private static async resolveManager(): Promise<SensorsManager> {
+    const {SensorsManager} = await import('./SensorsManager');
+    let manager = core.registry.get(SensorsManager);
+    if (!manager) {
+      manager = new SensorsManager();
+      core.registry.register(manager, SensorsManager);
+      core.scene.add(manager);
+      await core.scriptsManager.initScript(manager);
+    }
+    return manager;
+  }
 }
 
 export interface SerializableSceneNode {
   id: number;
   name: string;
   type: string;
-  position: Vec3Tuple; // World position
-  quaternion: QuatTuple; // World rotation
-  scale: Vec3Tuple; // World scale
+  position: Vec3Tuple;
+  quaternion: QuatTuple;
+  scale: Vec3Tuple;
   boundingBox?: {
     min: Vec3Tuple;
     max: Vec3Tuple;
@@ -60,14 +112,12 @@ export interface SerializableSceneNode {
   children: number[]; // Child node IDs
 }
 
-
 export interface HandObservation {
   position: Vec3Tuple;
   quaternion: QuatTuple;
   selected: boolean;
   squeezing: boolean;
   visible: boolean;
-  /** Skeletal joint world positions [x, y, z] in meters. */
   jointKeypoints?: Record<string, Vec3Tuple>;
 }
 
@@ -88,7 +138,7 @@ export interface TargetingMetrics {
 
 /** Plaintext description mapping for Set-of-Mark visual references. */
 export interface VisibleObjectReference {
-  label: string; // "1", "2", "3", etc.
+  label: string;
   objectId: number;
   name: string;
   type: string;
@@ -97,91 +147,7 @@ export interface VisibleObjectReference {
 }
 
 /** Lightweight per-frame trajectory record. */
-export interface SensorsFrameRecord {
+export interface SensorFrameRecord {
   timestamp: number;
-  state?: {
-    camera: {
-      position: Vec3Tuple;
-      quaternion: QuatTuple;
-    };
-    leftHand?: HandObservation;
-    rightHand?: HandObservation;
-    torso?: TorsoObservation;
-  };
-  sceneGraph?: SerializableSceneNode[];
-  targeting?: {
-    leftHand?: TargetingMetrics;
-    rightHand?: TargetingMetrics;
-    gaze?: TargetingMetrics;
-  };
+  values: Map<Sensor<unknown>, unknown>;
 }
-
-export interface SensorsObservation {
-  /** Capture the raw physical camera feed only (no virtual objects). */
-  screenshotCamera?: string;
-  /** Capture the blended augmented reality screenshot (camera + virtual meshes). */
-  screenshotXR?: string;
-  /** Capture the Set-of-Mark annotated augmented reality screenshot (camera + meshes + badges). */
-  screenshotSOM?: string;
-
-  /** Plaintext screen-reader descriptions for the VLM agent. */
-  visibleObjects?: VisibleObjectReference[];
-  state?: {
-    camera: {
-      position: Vec3Tuple;
-      quaternion: QuatTuple;
-    };
-    leftHand: HandObservation;
-    rightHand: HandObservation;
-    torso?: TorsoObservation;
-  };
-  sceneGraph?: SerializableSceneNode[];
-  depth?: number[][];
-  targeting?: {
-    leftHand?: TargetingMetrics;
-    rightHand?: TargetingMetrics;
-    gaze?: TargetingMetrics;
-  };
-  /** Captured high-frequency per-frame trajectory history (if recordHistory was enabled). */
-  history?: SensorsFrameRecord[];
-  /** Scanned physical planes and surfaces (TODO). */
-  planes?: unknown[];
-  /** Active hand gestures (TODO). */
-  gestures?: {
-    leftHandGesture?: string;
-    rightHandGesture?: string;
-  };
-  /** Facial expressions and blendshapes (TODO). */
-  faces?: unknown[];
-  /** Classified environmental audio sound events (TODO). */
-  sounds?: unknown[];
-  /** [TODO] 3D drawing stroke and sketch paths. */
-  strokes?: unknown[];
-  /** [TODO] Tactile gamepad trigger and joystick analog vectors. */
-  gamepad?: unknown[];
-  /** [TODO] Physical environmental lighting parameters. */
-  lighting?: unknown;
-}
-
-export const DEFAULT_SENSORS_OPTIONS: Required<SensorsOptions> = {
-  cacheWindowMs: 8.0,
-  includeScreenshotCamera: false,
-  includeScreenshotXR: false,
-  includeScreenshotSOM: false,
-
-  includeSceneGraph: false,
-  includeDepth: false,
-  includeProprioception: true,
-  includeTargeting: false,
-  includeSemanticMap: false,
-  depthGridSize: 16,
-  verifyLineOfSight: true,
-  recordHistory: false,
-  includePlanes: false,
-  includeGestures: false,
-  includeFaces: false,
-  includeSounds: false,
-  includeStrokes: false,
-  includeGamepad: false,
-  includeLighting: false,
-};

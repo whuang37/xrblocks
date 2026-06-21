@@ -65,8 +65,10 @@ describe('VideoStream', () => {
     };
 
     // Inject mock canvas and context to bypass JSDOM canvas limitations
-    (stream as unknown as {canvas_: unknown; context_: unknown}).canvas_ = mockCanvas;
-    (stream as unknown as {canvas_: unknown; context_: unknown}).context_ = mockContext;
+    (stream as unknown as {canvas_: unknown; context_: unknown}).canvas_ =
+      mockCanvas;
+    (stream as unknown as {canvas_: unknown; context_: unknown}).context_ =
+      mockContext;
 
     // 1. Verify default 8ms window caching works
     const snap1 = stream.getSnapshot({outputFormat: 'texture'});
@@ -86,25 +88,42 @@ describe('VideoStream', () => {
     mockContext.drawImage.mockClear();
 
     // 2. Verify cacheWindowMs: 0 completely disables caching
-    const snapA = stream.getSnapshot({outputFormat: 'texture', cacheWindowMs: 0});
-    const snapB = stream.getSnapshot({outputFormat: 'texture', cacheWindowMs: 0});
+    const snapA = stream.getSnapshot({
+      outputFormat: 'texture',
+      cacheWindowMs: 0,
+    });
+    const snapB = stream.getSnapshot({
+      outputFormat: 'texture',
+      cacheWindowMs: 0,
+    });
     expect(snapB).not.toBe(snapA); // Cache is disabled, returns fresh capture!
     expect(mockContext.drawImage).toHaveBeenCalledTimes(2);
 
     mockContext.drawImage.mockClear();
 
     // Force clear the cache to start the custom window test fresh
-    (stream as unknown as {snapshotCache_: Map<string, unknown>}).snapshotCache_.clear();
+    (
+      stream as unknown as {snapshotCache_: Map<string, unknown>}
+    ).snapshotCache_.clear();
 
     // 3. Verify custom cacheWindowMs: 20 extends the cache window
-    const snapC = stream.getSnapshot({outputFormat: 'texture', cacheWindowMs: 20});
+    const snapC = stream.getSnapshot({
+      outputFormat: 'texture',
+      cacheWindowMs: 20,
+    });
     await new Promise((resolve) => setTimeout(resolve, 10)); // wait 10ms (<20ms)
-    const snapD = stream.getSnapshot({outputFormat: 'texture', cacheWindowMs: 20});
+    const snapD = stream.getSnapshot({
+      outputFormat: 'texture',
+      cacheWindowMs: 20,
+    });
     expect(snapD).toBe(snapC); // Cache is still valid!
     expect(mockContext.drawImage).toHaveBeenCalledTimes(1);
 
     await new Promise((resolve) => setTimeout(resolve, 15)); // wait another 15ms (total 25ms > 20ms)
-    const snapE = stream.getSnapshot({outputFormat: 'texture', cacheWindowMs: 20});
+    const snapE = stream.getSnapshot({
+      outputFormat: 'texture',
+      cacheWindowMs: 20,
+    });
     expect(snapE).not.toBe(snapC); // Cache expired!
     expect(mockContext.drawImage).toHaveBeenCalledTimes(2);
   });

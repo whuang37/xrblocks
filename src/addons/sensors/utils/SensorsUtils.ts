@@ -29,7 +29,8 @@ export function isInternalHelper(object: THREE.Object3D): boolean {
       name.includes('environment') ||
       name.includes('pivot') ||
       current.type === 'Line' ||
-      (current as {ignoreReticleRaycast?: boolean}).ignoreReticleRaycast === true ||
+      (current as {ignoreReticleRaycast?: boolean}).ignoreReticleRaycast ===
+        true ||
       current.userData.isInternalHelper === true
     ) {
       return true;

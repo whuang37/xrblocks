@@ -1,5 +1,5 @@
 import type {EmbodiedControlStep, XRCompoundControl} from '../embodied-control';
-import type {SensorsOptions, SensorsObservation} from '../sensors';
+import type {SensorsOptions} from '../sensors';
 
 export const REMOTE_CONTROL_PROTOCOL_VERSION = 1;
 
@@ -15,7 +15,11 @@ export type RemoteControlHandshakeMessage = {
 
 export type RemoteControlBaseMessage = {
   id?: string;
-  sensors?: SensorsOptions; // Support configuring sensors on any command!
+  sensors?: {
+    keys?: string[];
+    options?: SensorsOptions;
+    recordHistory?: boolean;
+  };
 };
 
 export type RemoteControlStepMessage = EmbodiedControlStep &
@@ -67,7 +71,7 @@ export type RemoteControlMessage =
 export type RemoteControlStepResult = {
   id?: string;
   elapsedMs: number;
-  observation: SensorsObservation; // Return the rich unified observation!
+  observation: Record<string, unknown>; // Return the rich unified observation!
 };
 
 export type RemoteControlStepCompletedMessage = RemoteControlStepResult & {

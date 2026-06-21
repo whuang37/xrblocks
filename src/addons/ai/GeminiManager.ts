@@ -2,7 +2,11 @@ import type * as GoogleGenAITypes from '@google/genai';
 import * as THREE from 'three';
 import * as xb from 'xrblocks';
 import {AUDIO_CAPTURE_PROCESSOR_CODE} from './AudioCaptureProcessorCode';
-import {Sensors, SensorsOptions} from '../sensors/index.js';
+import {
+  SensorsManager,
+  SensorsOptions,
+  ScreenshotCameraSensor,
+} from '../sensors/index.js';
 
 const DEFAULT_SCHEDULE_AHEAD_TIME = 1.0;
 
@@ -17,12 +21,12 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
   // Declare Sensors as a mandatory dependency.
   // Injected automatically by the core Registry!
   static dependencies = {
-    sensors: Sensors,
+    sensors: SensorsManager,
   };
 
   // Core components
   ai!: xb.AI;
-  sensors!: Sensors;
+  sensors!: SensorsManager;
 
   // Audio setup
   audioStream: MediaStream | null = null;
@@ -33,7 +37,6 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
 
   // AI state
   isAIRunning: boolean = false;
-  useSetOfMark: boolean = false;
   sensorsOptions?: SensorsOptions;
 
   // Audio playback setup
@@ -65,12 +68,10 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
   async startGeminiLive({
     liveParams,
     model,
-    useSetOfMark = false,
     sensorsOptions,
   }: {
     liveParams?: GoogleGenAITypes.LiveConnectConfig;
     model?: string;
-    useSetOfMark?: boolean;
     sensorsOptions?: SensorsOptions;
   } = {}) {
     if (this.isAIRunning || !this.ai) {
@@ -78,7 +79,6 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
       return;
     }
 
-    this.useSetOfMark = useSetOfMark;
     this.sensorsOptions = sensorsOptions;
 
     liveParams = liveParams || {};
@@ -192,32 +192,19 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
 
   async captureAndSendScreenshot() {
     try {
-      // 1. Query the Sensory Cortex (Sensors Addon) using the primary screenshot flags
-      const obs = await this.sensors.captureObservation({
-        includeScreenshotSOM: this.useSetOfMark,
-        includeScreenshotXR: !this.useSetOfMark,
-        includeSemanticMap: this.useSetOfMark,
-        ...this.sensorsOptions,
-      });
- 
-      // 2. Stream the primary environment screenshot (either raw, XR, or SOM depending on options)
-      const screenshot = this.useSetOfMark ? obs.screenshotSOM : obs.screenshotXR;
+      // 1. Query the Sensory Cortex (Sensors Addon) for the raw camera screenshot by reference
+      const screenshot = await this.sensors.capture(
+        ScreenshotCameraSensor,
+        this.sensorsOptions
+      );
+
+      // 2. Stream the raw camera screenshot to the Gemini Live session
       if (screenshot) {
         // Strip the data URL prefix if present
         const base64Data = screenshot.startsWith('data:')
           ? screenshot.split(',')[1]
           : screenshot;
         this.sendVideoFrame(base64Data);
-      }
- 
-      // 3. If Set-of-Mark is active, also stream the plaintext subtitles list
-      if (this.useSetOfMark && obs.visibleObjects && obs.visibleObjects.length > 0 && this.ai.sendRealtimeInput) {
-        const subtitlesText = 'Visible objects in my view:\n' + 
-          obs.visibleObjects.map(obj => obj.description).join('\n');
-        
-        this.ai.sendRealtimeInput({
-          text: subtitlesText
-        });
       }
     } catch (error) {
       console.error('Failed to capture screenshot:', error);

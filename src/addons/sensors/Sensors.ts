@@ -31,6 +31,9 @@ export class Sensors extends Script {
   private recordingOptions: SensorsOptions = {};
   private lastFrameTime = 0; // Simulated frame time in seconds
 
+  private lastObservationTime_ = 0;
+  private cachedObservation_: SensorsObservation | null = null;
+
   onFrameRecord: ((record: SensorsFrameRecord) => void) | null = null;
 
   constructor(options: SensorsOptions = {}) {
@@ -173,7 +176,7 @@ export class Sensors extends Script {
         squeezing = !!controller.userData.squeezing;
       }
 
-      // Extract skeletal joint world positions [x, y, z] using core.user.hands
+      // Extract skeletal joint world positions [x, y, z]
       const jointKeypoints: Record<string, Vec3Tuple> = {};
       if (userHand && userHand.joints) {
         const jointPos = new THREE.Vector3();
@@ -375,13 +378,12 @@ export class Sensors extends Script {
 
       if (!isValid || !obj.visible) return;
 
-      // 3. Perform view frustum check
       box.setFromObject(obj);
       if (frustum.intersectsBox(box)) {
         const objPos = new THREE.Vector3();
         obj.getWorldPosition(objPos);
         
-        // 4. Distance-aware line-of-sight occlusion check
+        // Perform distance-aware line-of-sight occlusion check.
         const direction = new THREE.Vector3().subVectors(objPos, camPos).normalize();
         const raycaster = new THREE.Raycaster(camPos, direction);
         const intersects = raycaster.intersectObjects(scene.children, true);
@@ -465,49 +467,165 @@ export class Sensors extends Script {
       ...customOptions,
     };
 
-    const observation: SensorsObservation = {};
+    const now = performance.now();
 
-    // Cache visible unoccluded objects if we need screenshots or semantic maps
-    const visibleObjects = (options.includeScreenshot && options.annotateScreenshot) || options.includeSemanticMap
-      ? this.getVisibleInteractiveObjects()
-      : null;
+    // 1. Frame Lifecycle Management: Reset cache if time has advanced beyond the configurable window
+    if (
+      this.cachedObservation_ === null ||
+      now - this.lastObservationTime_ >= options.cacheWindowMs
+    ) {
+      this.cachedObservation_ = {};
+      this.lastObservationTime_ = now;
+    }
 
-    // 1. Screenshot & Set-of-Mark Overlay
-    if (options.includeScreenshot) {
+    const observation = this.cachedObservation_;
+
+    // 2. Determine screenshot mode
+    const mode = options.screenshotMode;
+
+    // 3. Self-caching lazy evaluator for visible interactive objects (scene raycasting)
+    let cachedVisibleObjects: Array<{
+      object: THREE.Object3D;
+      worldPosition: THREE.Vector3;
+      distance: number;
+    }> | null = null;
+    const getVisibleObjects = () => {
+      if (cachedVisibleObjects === null) {
+        cachedVisibleObjects = this.getVisibleInteractiveObjects();
+      }
+      return cachedVisibleObjects;
+    };
+
+    // Helper: Lazily capture raw physical camera screenshot
+    const getRawCameraSnapshot = async (): Promise<string | undefined> => {
+      if (observation.screenshotCamera) return observation.screenshotCamera;
+      const camera = this.core.deviceCamera;
+      if (camera) {
+        return (
+          (await camera.getSnapshot({outputFormat: 'base64'})) || undefined
+        );
+      }
+      return undefined;
+    };
+
+    // Helper: Lazily capture blended XR screenshot
+    const getXRScreenshot = async (): Promise<string | undefined> => {
+      if (observation.screenshotXR) return observation.screenshotXR;
       const synth = this.core.screenshotSynthesizer;
       if (synth) {
-        const rawScreenshot = await synth.getScreenshot(true);
-        if (options.annotateScreenshot && visibleObjects) {
-          observation.screenshot = await this.renderAnnotatedScreenshot(rawScreenshot, visibleObjects);
-        } else {
-          observation.screenshot = rawScreenshot;
-        }
+        observation.screenshotXR =
+          (await synth.getScreenshot(true)) || undefined;
+      }
+      return observation.screenshotXR;
+    };
+
+    // 4. Progressive Screenshot Generation
+
+    // Raw Camera
+    if (options.includeScreenshotCamera && !observation.screenshotCamera) {
+      observation.screenshotCamera = await getRawCameraSnapshot();
+    }
+
+    // Blended XR
+    if (options.includeScreenshotXR && !observation.screenshotXR) {
+      observation.screenshotXR = await getXRScreenshot();
+    }
+
+    // Set-of-Mark (SOM)
+    if (options.includeScreenshotSOM && !observation.screenshotSOM) {
+      const xr = observation.screenshotXR || (await getXRScreenshot());
+      if (xr) {
+        observation.screenshotSOM = await this.renderAnnotatedScreenshot(
+          xr,
+          getVisibleObjects()
+        );
       }
     }
 
-    // 2. Semantic Map & Plaintext Subtitles List (Rosetta Stone)
-    if (options.includeSemanticMap && visibleObjects) {
-      observation.visibleObjects = this.generateSemanticMap(visibleObjects);
+    // Legacy/Primary Screenshot Mapping
+    if (mode !== 'off' && !observation.screenshot) {
+      if (mode === 'camera') {
+        observation.screenshot =
+          observation.screenshotCamera || (await getRawCameraSnapshot());
+      } else if (mode === 'som') {
+        if (observation.screenshotSOM) {
+          observation.screenshot = observation.screenshotSOM;
+        } else {
+          const xr = observation.screenshotXR || (await getXRScreenshot());
+          if (xr) {
+            observation.screenshot = await this.renderAnnotatedScreenshot(
+              xr,
+              getVisibleObjects()
+            );
+          }
+        }
+      } else if (mode === 'xr') {
+        observation.screenshot =
+          observation.screenshotXR || (await getXRScreenshot());
+      }
     }
 
-    // 3. Proprioception
-    if (options.includeUserTransforms) {
+    // 5. Progressive Semantic Map Generation
+    if (options.includeSemanticMap && !observation.visibleObjects) {
+      observation.visibleObjects = this.generateSemanticMap(getVisibleObjects());
+    }
+
+    // 6. Progressive Proprioception Capture
+    if (options.includeUserTransforms && !observation.state) {
       observation.state = this.captureProprioception();
     }
 
-    // 4. Scene Graph
-    if (options.includeSceneGraph) {
+    // 7. Progressive Scene Graph Capture
+    if (options.includeSceneGraph && !observation.sceneGraph) {
       observation.sceneGraph = this.captureSceneGraph();
     }
 
-    // 5. Downsampled Depth
-    if (options.includeDepth) {
+    // 8. Progressive Depth Grid Capture
+    if (options.includeDepth && !observation.depth) {
       observation.depth = this.captureDepth(options.depthGridSize ?? 16);
     }
 
-    // 6. Targeting
-    if (options.includeTargeting) {
+    // 9. Progressive Targeting Capture
+    if (options.includeTargeting && !observation.targeting) {
       observation.targeting = this.captureTargeting(this.input);
+    }
+
+    // 10. [TODO] Capture Scanned Physical Planes
+    if (options.includePlanes && !observation.planes) {
+      observation.planes = []; // TODO: Integrate with PlaneDetector
+    }
+
+    // 11. [TODO] Capture Active Hand Gestures
+    if (options.includeGestures && !observation.gestures) {
+      observation.gestures = {
+        leftHandGesture: 'none',
+        rightHandGesture: 'none',
+      }; // TODO: Integrate with Gestures / HeuristicGestureRecognizer
+    }
+
+    // 12. [TODO] Capture Facial Expressions & Blendshapes
+    if (options.includeFaces && !observation.faces) {
+      observation.faces = []; // TODO: Integrate with FaceRecognizer
+    }
+
+    // 13. [TODO] Capture Environmental Sounds
+    if (options.includeSounds && !observation.sounds) {
+      observation.sounds = []; // TODO: Integrate with SoundDetector
+    }
+
+    // 14. [TODO] Capture 3D Drawing Strokes
+    if (options.includeStrokes && !observation.strokes) {
+      observation.strokes = []; // TODO: Integrate with Strokes
+    }
+
+    // 15. [TODO] Capture Gamepad/Thumbstick Inputs
+    if (options.includeGamepad && !observation.gamepad) {
+      observation.gamepad = []; // TODO: Integrate with GamepadController
+    }
+
+    // 16. [TODO] Capture Real-World Light Estimation
+    if (options.includeLighting && !observation.lighting) {
+      observation.lighting = {}; // TODO: Integrate with Lighting
     }
 
     return observation;

@@ -2,9 +2,13 @@
 export type Vec3Tuple = [number, number, number];
 export type QuatTuple = [number, number, number, number];
 
+export type SensorsScreenshotMode = 'off' | 'camera' | 'xr' | 'som';
+
 export interface SensorsOptions {
-  /** Capture a screenshot in the final observation. */
-  includeScreenshot?: boolean;
+  /** The primary screenshot capture mode (default: 'off'). */
+  screenshotMode?: SensorsScreenshotMode;
+  /** The time window in milliseconds to cache observations within the same frame (default: 8.0). Set to 0 to disable caching. */
+  cacheWindowMs?: number;
   /** Serialize the Three.js scene graph structural topology. */
   includeSceneGraph?: boolean;
   /** Return a downsampled 2D depth grid. */
@@ -13,8 +17,12 @@ export interface SensorsOptions {
   includeUserTransforms?: boolean;
   /** Return raw pointer targeting/hover metrics. */
   includeTargeting?: boolean;
-  /** Enable Set-of-Mark alphanumeric overlays on the screenshot (default: false). */
-  annotateScreenshot?: boolean;
+  /** Capture the raw physical camera feed only (no virtual objects). */
+  includeScreenshotCamera?: boolean;
+  /** Capture the blended augmented reality screenshot (camera + virtual meshes). */
+  includeScreenshotXR?: boolean;
+  /** Capture the Set-of-Mark annotated augmented reality screenshot (camera + meshes + badges). */
+  includeScreenshotSOM?: boolean;
   /** Enable generating the semantic visible objects list mapping (default: false). */
   includeSemanticMap?: boolean;
   /** Size of the downsampled depth grid (e.g. 16 for 16x16, default 16). */
@@ -23,6 +31,20 @@ export interface SensorsOptions {
   verifyLineOfSight?: boolean;
   /** Enable recording of lightweight per-frame data in the memory buffer (default: false). */
   recordHistory?: boolean;
+  /** Capture real-world surfaces and planes (TODO). */
+  includePlanes?: boolean;
+  /** Capture high-level hand gestures (TODO). */
+  includeGestures?: boolean;
+  /** Capture user facial blendshapes and expressions (TODO). */
+  includeFaces?: boolean;
+  /** Capture environmental audio events (TODO). */
+  includeSounds?: boolean;
+  /** [TODO] Capture 3D drawing stroke/sketch paths drawn by the user. */
+  includeStrokes?: boolean;
+  /** [TODO] Capture physical Bluetooth gamepad triggers and analog stick inputs. */
+  includeGamepad?: boolean;
+  /** [TODO] Capture real-world lighting direction and light estimation coefficients. */
+  includeLighting?: boolean;
 }
 
 export interface SerializableSceneNode {
@@ -98,7 +120,13 @@ export interface SensorsFrameRecord {
 }
 
 export interface SensorsObservation {
-  screenshot?: string; // Raw or Set-of-Mark annotated
+  screenshot?: string; // Legacy primary screenshot
+  /** Capture the raw physical camera feed only (no virtual objects). */
+  screenshotCamera?: string;
+  /** Capture the blended augmented reality screenshot (camera + virtual meshes). */
+  screenshotXR?: string;
+  /** Capture the Set-of-Mark annotated augmented reality screenshot (camera + meshes + badges). */
+  screenshotSOM?: string;
   /** Plaintext screen-reader descriptions for the VLM agent. */
   visibleObjects?: VisibleObjectReference[];
   state?: {
@@ -119,17 +147,44 @@ export interface SensorsObservation {
   };
   /** Captured high-frequency per-frame trajectory history (if recordHistory was enabled). */
   history?: SensorsFrameRecord[];
+  /** Scanned physical planes and surfaces (TODO). */
+  planes?: unknown[];
+  /** Active hand gestures (TODO). */
+  gestures?: {
+    leftHandGesture?: string;
+    rightHandGesture?: string;
+  };
+  /** Facial expressions and blendshapes (TODO). */
+  faces?: unknown[];
+  /** Classified environmental audio sound events (TODO). */
+  sounds?: unknown[];
+  /** [TODO] 3D drawing stroke and sketch paths. */
+  strokes?: unknown[];
+  /** [TODO] Tactile gamepad trigger and joystick analog vectors. */
+  gamepad?: unknown[];
+  /** [TODO] Physical environmental lighting parameters. */
+  lighting?: unknown;
 }
 
 export const DEFAULT_SENSORS_OPTIONS: Required<SensorsOptions> = {
-  includeScreenshot: false,
+  screenshotMode: 'off',
+  cacheWindowMs: 8.0,
+  includeScreenshotCamera: false,
+  includeScreenshotXR: false,
+  includeScreenshotSOM: false,
   includeSceneGraph: false,
   includeDepth: false,
   includeUserTransforms: true,
   includeTargeting: false,
-  annotateScreenshot: false,
   includeSemanticMap: false,
   depthGridSize: 16,
   verifyLineOfSight: true,
   recordHistory: false,
+  includePlanes: false,
+  includeGestures: false,
+  includeFaces: false,
+  includeSounds: false,
+  includeStrokes: false,
+  includeGamepad: false,
+  includeLighting: false,
 };

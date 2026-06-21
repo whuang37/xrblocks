@@ -107,6 +107,7 @@ export interface TargetingMetrics {
   isSelecting: boolean;
   intersectionPoint: Vec3Tuple | null;
   surfaceNormal: Vec3Tuple | null;
+  collidingObjectId: number | null;
 }
 
 /** Plaintext description mapping for Set-of-Mark visual references. */

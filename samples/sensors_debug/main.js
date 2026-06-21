@@ -347,8 +347,17 @@ class DebuggerScript extends xb.Script {
       if (targeting) {
         const getTargetString = (target) => {
           if (!target) return 'Inactive';
-          if (target.hoveredObjectId === null) return 'No intersection';
-          return `Hit Obj ID: <span>${target.hoveredObjectId}</span> | Dist: <span>${target.distanceToHoveredObject?.toFixed(2)}m</span><br/>Pos: <span>[${target.intersectionPoint?.map((n) => n.toFixed(2)).join(', ')}]</span><br/>Normal: <span>[${target.surfaceNormal?.map((n) => n.toFixed(2)).join(', ')}]</span>`;
+          const hitStr =
+            target.hoveredObjectId === null
+              ? 'No intersection'
+              : `Hit Obj ID: <span>${target.hoveredObjectId}</span> | Dist: <span>${target.distanceToHoveredObject?.toFixed(2)}m</span><br/>Pos: <span>[${target.intersectionPoint?.map((n) => n.toFixed(2)).join(', ')}]</span><br/>Normal: <span>[${target.surfaceNormal?.map((n) => n.toFixed(2)).join(', ')}]</span>`;
+
+          const collideStr =
+            target.collidingObjectId === null
+              ? 'None'
+              : `<span>${target.collidingObjectId}</span>`;
+
+          return `${hitStr}<br/>Colliding: ${collideStr}`;
         };
 
         document.getElementById('target-left').innerHTML =

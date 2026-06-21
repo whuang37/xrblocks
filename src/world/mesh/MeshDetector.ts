@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import {Script} from '../../core/Script';
 import {DetectedMesh} from './DetectedMesh';
 import {MeshDetectionOptions} from './MeshDetectionOptions';
+import {SimulatorMesh} from './SimulatorMesh';
 import {Physics} from '../../physics/Physics';
 
 const SEMANTIC_LABELS = ['floor', 'ceiling', 'wall'];
@@ -17,13 +18,16 @@ export class MeshDetector extends Script {
   };
   private debugMaterials = new Map<string, THREE.Material>();
   private fallbackDebugMaterial: THREE.Material | null = null;
-  xrMeshToThreeMesh = new Map<XRMesh, DetectedMesh>();
-  threeMeshToXrMesh = new Map<DetectedMesh, XRMesh>();
+  xrMeshToThreeMesh = new Map<XRMesh | SimulatorMesh, DetectedMesh>();
+  threeMeshToXrMesh = new Map<DetectedMesh, XRMesh | SimulatorMesh>();
   private renderer!: THREE.WebGLRenderer;
   private physics?: Physics;
+  // When true, meshes are injected by the simulator and the WebXR
+  // detectedMeshes path is skipped (mirrors PlaneDetector.usingSimulatorPlanes).
+  private usingSimulatorMeshes = false;
   private defaultMaterial = new THREE.MeshBasicMaterial({visible: false});
   private meshTimedata = new Map<
-    XRMesh,
+    XRMesh | SimulatorMesh,
     {
       lastChangedTime: number;
       lastSeenTime: number;
@@ -81,6 +85,7 @@ export class MeshDetector extends Script {
   }
 
   updateMeshes(_timestamp: number, frame?: XRFrame) {
+    if (this.usingSimulatorMeshes) return;
     this.frameCount++;
 
     // Profiling1: Time spent in accessing detectedMeshes
@@ -170,7 +175,7 @@ export class MeshDetector extends Script {
     }
   }
 
-  private removeMesh(xrMesh: XRMesh, threeMesh: DetectedMesh) {
+  private removeMesh(xrMesh: XRMesh | SimulatorMesh, threeMesh: DetectedMesh) {
     this.xrMeshToThreeMesh.delete(xrMesh);
     this.threeMeshToXrMesh.delete(threeMesh);
     this.meshTimedata.delete(xrMesh);
@@ -179,7 +184,7 @@ export class MeshDetector extends Script {
   }
 
   private cleanupStaleMeshes(now: number) {
-    const meshesToRemove: XRMesh[] = [];
+    const meshesToRemove: (XRMesh | SimulatorMesh)[] = [];
     for (const [xrMesh] of this.xrMeshToThreeMesh.entries()) {
       const cachedSeenTime = this.meshTimedata.get(xrMesh)?.lastSeenTime;
       const timeSinceLastSeen = now - (cachedSeenTime || 0);
@@ -192,6 +197,45 @@ export class MeshDetector extends Script {
       const threeMesh = this.xrMeshToThreeMesh.get(xrMesh);
       if (threeMesh) {
         this.removeMesh(xrMesh, threeMesh);
+      }
+    }
+  }
+
+  /**
+   * Injects a set of meshes from the desktop simulator, bypassing the WebXR
+   * `frame.detectedMeshes` path. Mirrors `PlaneDetector.setSimulatorPlanes`.
+   */
+  setSimulatorMeshes(meshes: SimulatorMesh[]) {
+    this.usingSimulatorMeshes = true;
+
+    for (const [, threeMesh] of this.xrMeshToThreeMesh) {
+      this.remove(threeMesh);
+      threeMesh.dispose();
+    }
+    this.xrMeshToThreeMesh.clear();
+    this.threeMeshToXrMesh.clear();
+
+    for (const simMesh of meshes) {
+      const material =
+        (simMesh.semanticLabel &&
+          this.debugMaterials.get(simMesh.semanticLabel)) ||
+        this.fallbackDebugMaterial ||
+        this.defaultMaterial;
+      const threeMesh = new DetectedMesh(simMesh, material);
+      if (simMesh.position) {
+        threeMesh.position.copy(simMesh.position);
+      }
+      if (simMesh.quaternion) {
+        threeMesh.quaternion.copy(simMesh.quaternion);
+      }
+      this.xrMeshToThreeMesh.set(simMesh, threeMesh);
+      this.threeMeshToXrMesh.set(threeMesh, simMesh);
+      this.add(threeMesh);
+      if (this.physics) {
+        threeMesh.initRapierPhysics(
+          this.physics.RAPIER,
+          this.physics.blendedWorld
+        );
       }
     }
   }

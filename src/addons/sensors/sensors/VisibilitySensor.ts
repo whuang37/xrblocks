@@ -73,7 +73,51 @@ export class VisibilitySensor extends Sensor<VisibilityItem[]> {
       box.setFromObject(obj);
       if (frustum.intersectsBox(box)) {
         const objPos = new THREE.Vector3();
-        obj.getWorldPosition(objPos);
+        const boxCenter = box.getCenter(new THREE.Vector3());
+
+        // Project the geometric center of the box to screen space (-1 to 1)
+        const screenPos = boxCenter
+          .clone()
+          .applyMatrix4(camera.matrixWorldInverse)
+          .applyMatrix4(camera.projectionMatrix);
+
+        // Check if the center is off-screen or too close to the edges
+        const margin = 0.85; // 15% margin for clean UX
+        const isOffScreen =
+          Math.abs(screenPos.x) > margin ||
+          Math.abs(screenPos.y) > margin ||
+          screenPos.z > 1 ||
+          screenPos.z < -1;
+
+        if (isOffScreen) {
+          // Clamp to safe screen coordinates
+          const clampedX = Math.max(-margin, Math.min(margin, screenPos.x));
+          const clampedY = Math.max(-margin, Math.min(margin, screenPos.y));
+
+          // Unproject the safe screen point back to world space rays
+          const rayOrigin = new THREE.Vector3(clampedX, clampedY, -1).unproject(
+            camera
+          );
+          const rayTarget = new THREE.Vector3(clampedX, clampedY, 1).unproject(
+            camera
+          );
+          const direction = new THREE.Vector3()
+            .subVectors(rayTarget, rayOrigin)
+            .normalize();
+
+          const ray = new THREE.Ray(rayOrigin, direction);
+          const intersectionPoint = new THREE.Vector3();
+
+          if (ray.intersectBox(box, intersectionPoint)) {
+            objPos.copy(intersectionPoint);
+          } else {
+            // Fallback to clamping the center point to the box boundaries
+            box.clampPoint(boxCenter, objPos);
+          }
+        } else {
+          // Center is in-bounds and on-screen, use it!
+          objPos.copy(boxCenter);
+        }
 
         const distance = camPos.distanceTo(objPos);
 

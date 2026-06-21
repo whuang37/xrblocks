@@ -2,19 +2,15 @@
 export type Vec3Tuple = [number, number, number];
 export type QuatTuple = [number, number, number, number];
 
-export type SensorsScreenshotMode = 'off' | 'camera' | 'xr' | 'som';
-
 export interface SensorsOptions {
-  /** The primary screenshot capture mode (default: 'off'). */
-  screenshotMode?: SensorsScreenshotMode;
   /** The time window in milliseconds to cache observations within the same frame (default: 8.0). Set to 0 to disable caching. */
   cacheWindowMs?: number;
   /** Serialize the Three.js scene graph structural topology. */
   includeSceneGraph?: boolean;
   /** Return a downsampled 2D depth grid. */
   includeDepth?: boolean;
-  /** Return head (camera), hand, and torso transforms. */
-  includeUserTransforms?: boolean;
+  /** Return head (camera), hand, and torso proprioception transforms. */
+  includeProprioception?: boolean;
   /** Return raw pointer targeting/hover metrics. */
   includeTargeting?: boolean;
   /** Capture the raw physical camera feed only (no virtual objects). */
@@ -23,6 +19,7 @@ export interface SensorsOptions {
   includeScreenshotXR?: boolean;
   /** Capture the Set-of-Mark annotated augmented reality screenshot (camera + meshes + badges). */
   includeScreenshotSOM?: boolean;
+
   /** Enable generating the semantic visible objects list mapping (default: false). */
   includeSemanticMap?: boolean;
   /** Size of the downsampled depth grid (e.g. 16 for 16x16, default 16). */
@@ -120,13 +117,13 @@ export interface SensorsFrameRecord {
 }
 
 export interface SensorsObservation {
-  screenshot?: string; // Legacy primary screenshot
   /** Capture the raw physical camera feed only (no virtual objects). */
   screenshotCamera?: string;
   /** Capture the blended augmented reality screenshot (camera + virtual meshes). */
   screenshotXR?: string;
   /** Capture the Set-of-Mark annotated augmented reality screenshot (camera + meshes + badges). */
   screenshotSOM?: string;
+
   /** Plaintext screen-reader descriptions for the VLM agent. */
   visibleObjects?: VisibleObjectReference[];
   state?: {
@@ -167,14 +164,14 @@ export interface SensorsObservation {
 }
 
 export const DEFAULT_SENSORS_OPTIONS: Required<SensorsOptions> = {
-  screenshotMode: 'off',
   cacheWindowMs: 8.0,
   includeScreenshotCamera: false,
   includeScreenshotXR: false,
   includeScreenshotSOM: false,
+
   includeSceneGraph: false,
   includeDepth: false,
-  includeUserTransforms: true,
+  includeProprioception: true,
   includeTargeting: false,
   includeSemanticMap: false,
   depthGridSize: 16,

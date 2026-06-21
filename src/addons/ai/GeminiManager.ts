@@ -194,17 +194,19 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
     try {
       // 1. Query the Sensory Cortex (Sensors Addon) using the primary screenshot flags
       const obs = await this.sensors.captureObservation({
-        screenshotMode: this.useSetOfMark ? 'som' : 'xr',
+        includeScreenshotSOM: this.useSetOfMark,
+        includeScreenshotXR: !this.useSetOfMark,
         includeSemanticMap: this.useSetOfMark,
         ...this.sensorsOptions,
       });
  
       // 2. Stream the primary environment screenshot (either raw, XR, or SOM depending on options)
-      if (obs.screenshot) {
+      const screenshot = this.useSetOfMark ? obs.screenshotSOM : obs.screenshotXR;
+      if (screenshot) {
         // Strip the data URL prefix if present
-        const base64Data = obs.screenshot.startsWith('data:')
-          ? obs.screenshot.split(',')[1]
-          : obs.screenshot;
+        const base64Data = screenshot.startsWith('data:')
+          ? screenshot.split(',')[1]
+          : screenshot;
         this.sendVideoFrame(base64Data);
       }
  

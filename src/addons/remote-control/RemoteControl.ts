@@ -146,6 +146,29 @@ export class RemoteControl extends Script {
     this.transport.connect();
   }
 
+  private isRecording = false;
+  private localHistory: {
+    timestamp: number;
+    values: Map<Sensor<unknown>, unknown>;
+  }[] = [];
+  private recordingSensors: Sensor<unknown>[] = [];
+
+  override update(time: number) {
+    if (this.isRecording && this.recordingSensors.length > 0) {
+      // Capture the sensors on this frame tick asynchronously and buffer the results
+      this.sensors.capture(this.recordingSensors).then((results) => {
+        const valuesMap = new Map<Sensor<unknown>, unknown>();
+        this.recordingSensors.forEach((sensor, index) => {
+          valuesMap.set(sensor, results[index]);
+        });
+        this.localHistory.push({
+          timestamp: time,
+          values: valuesMap,
+        });
+      });
+    }
+  }
+
   dispose() {
     this.transport?.disconnect();
   }
@@ -155,13 +178,14 @@ export class RemoteControl extends Script {
   ): Promise<RemoteControlStepResult> {
     const sensorOpts = message.sensors;
 
-    // A. Start recording telemetry
+    // A. Start recording telemetry locally
     if (sensorOpts?.recordHistory) {
-      const recordSensors = getSensorsForKeys(
+      this.localHistory = [];
+      this.recordingSensors = getSensorsForKeys(
         sensorOpts.keys,
         sensorOpts.options
       );
-      this.sensors.startRecording(recordSensors, sensorOpts.options);
+      this.isRecording = true;
     }
 
     // B. Actuate the command
@@ -224,11 +248,11 @@ export class RemoteControl extends Script {
         );
     }
 
-    // C. Stop recording telemetry
+    // C. Stop recording telemetry and map the local history buffer
     let history = undefined;
     if (sensorOpts?.recordHistory) {
-      const rawHistory = this.sensors.stopRecording();
-      history = rawHistory.map((rec) => {
+      this.isRecording = false;
+      history = this.localHistory.map((rec) => {
         const flatValues: Record<string, unknown> = {};
         for (const [sensor, val] of rec.values.entries()) {
           flatValues[sensor.key] = val;
@@ -238,6 +262,7 @@ export class RemoteControl extends Script {
           ...flatValues,
         };
       });
+      this.localHistory = [];
     }
 
     // D. Capture final observation

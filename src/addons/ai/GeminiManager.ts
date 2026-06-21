@@ -193,7 +193,7 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
   async captureAndSendScreenshot() {
     try {
       // 1. Query the Sensory Cortex (Sensors Addon) for the raw camera screenshot by reference
-      const screenshot = await this.sensors.capture(
+      const screenshot = await this.sensors.get(
         ScreenshotCameraSensor,
         this.sensorsOptions
       );

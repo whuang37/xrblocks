@@ -3,7 +3,6 @@ import {Core, Input, Script, core, Constructor} from 'xrblocks';
 import {
   DEFAULT_SENSORS_OPTIONS,
   type SensorsOptions,
-  type SensorFrameRecord,
   type Sensor,
 } from './SensorsTypes';
 
@@ -26,22 +25,6 @@ export class SensorsManager extends Script {
   input!: Input;
   camera!: THREE.Camera;
 
-  private isRecording = false;
-  private frameHistory: SensorFrameRecord[] = [];
-  private recordingSubscription: {unsubscribe: () => void} | null = null;
-  private subscriptions = new Map<
-    string,
-    {
-      id: string;
-      sensors: Sensor<unknown>[];
-      options: SensorsOptions;
-      frequency: number;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      callback?: (values: any[]) => void;
-      lastTriggeredTime: number;
-    }
-  >();
-
   private sensors = new Set<Sensor<unknown>>();
   private sensorStates = new Map<Sensor<unknown>, SensorState>();
 
@@ -49,13 +32,6 @@ export class SensorsManager extends Script {
   private results = new Map<Sensor<unknown>, unknown>();
   private lastObservationTime = 0;
   private cacheWindowMs = 8.0;
-
-  private currentFrameTime = 0;
-  onFrameRecord: ((record: SensorFrameRecord) => void) | null = null;
-
-  get recording(): boolean {
-    return this.isRecording;
-  }
 
   constructor(
     initialSensors: (Sensor<unknown> | Constructor<Sensor<unknown>>)[] = [],
@@ -69,8 +45,7 @@ export class SensorsManager extends Script {
     this.cacheWindowMs = this.defaultOptions.cacheWindowMs;
 
     for (const s of initialSensors) {
-      const instance = this.getOrCreateInstance(s);
-      this.enabledSensors.add(instance);
+      this.getOrCreateInstance(s);
     }
   }
 
@@ -102,8 +77,6 @@ export class SensorsManager extends Script {
     }
   }
 
-  private enabledSensors = new Set<Sensor<unknown>>();
-
   getOrCreateInstance<T extends Sensor<unknown>>(
     target: T | Constructor<T>
   ): T {
@@ -134,39 +107,18 @@ export class SensorsManager extends Script {
     return target;
   }
 
-  // Alias for backward compatibility
-  getSensorInstance<T extends Sensor<unknown>>(target: T | Constructor<T>): T {
-    return this.getOrCreateInstance(target);
-  }
-
-  enable(sensor: Sensor<unknown> | Constructor<Sensor<unknown>>) {
-    const instance = this.getOrCreateInstance(sensor);
-    this.enabledSensors.add(instance);
-  }
-
-  disable(sensor: Sensor<unknown> | Constructor<Sensor<unknown>>) {
-    const instance = this.getOrCreateInstance(sensor);
-    this.enabledSensors.delete(instance);
-  }
-
-  async updateSensors(): Promise<Record<string, unknown>> {
-    this.clearCache();
-    const promises = Array.from(this.enabledSensors).map((s) => this.get(s));
-    await Promise.all(promises);
-
-    const output: Record<string, unknown> = {};
-    for (const s of this.enabledSensors) {
-      output[s.key] = this.results.get(s);
+  async get<T>(
+    target: Sensor<T> | Constructor<Sensor<T>>,
+    options?: SensorsOptions
+  ): Promise<T> {
+    if (options?.cacheWindowMs !== undefined) {
+      this.cacheWindowMs = options.cacheWindowMs;
     }
-    return output;
-  }
-
-  async get<T>(target: Sensor<T> | Constructor<Sensor<T>>): Promise<T> {
     this.checkAndClearCache();
     const instance = this.getOrCreateInstance(target);
     const mode = instance.options?.updateMode ?? 'sync';
 
-    // 1. Background Mode: returns lastCompletedValue immediately, runs update in background
+    // Returns lastCompletedValue immediately, runs update in background.
     if (mode === 'background') {
       const state = this.sensorStates.get(instance)!;
       if (!state.activePromise) {
@@ -181,7 +133,6 @@ export class SensorsManager extends Script {
             });
             state.lastCompletedValue = val;
             this.results.set(instance, val);
-            this.notifySubscriptions(new Set([instance]));
             return val;
           } finally {
             state.activePromise = null;
@@ -196,7 +147,7 @@ export class SensorsManager extends Script {
       return value as any;
     }
 
-    // 2. Idle Mode: defers execution to requestIdleCallback
+    // Defers execution to requestIdleCallback
     if (mode === 'idle') {
       if (this.results.has(instance)) {
         return this.results.get(instance) as T;
@@ -221,7 +172,7 @@ export class SensorsManager extends Script {
       return promise;
     }
 
-    // 3. Sync Mode (Default): executes inline on the frame tick
+    // Executes inline on the frame tick
     if (this.results.has(instance)) {
       return this.results.get(instance) as T;
     }
@@ -263,135 +214,7 @@ export class SensorsManager extends Script {
     });
   }
 
-  // --- Recording & Subscription API ---
-
-  subscribe<T extends (Sensor<unknown> | Constructor<Sensor<unknown>>)[]>(
-    sensors: [...T],
-    frequency = 0,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    callback?: (values: any[]) => void,
-    options?: SensorsOptions
-  ) {
-    const id = Math.random().toString(36).substring(2, 11);
-    const resolvedInstances = sensors.map((s) => this.getOrCreateInstance(s));
-
-    const sub = {
-      id,
-      sensors: resolvedInstances,
-      options: options || {},
-      frequency,
-      callback,
-      lastTriggeredTime: 0,
-    };
-    this.subscriptions.set(id, sub);
-
-    return {
-      id,
-      sensors: resolvedInstances,
-      options: sub.options,
-      frequency,
-      unsubscribe: () => this.unsubscribe(id),
-    };
-  }
-
-  unsubscribe(id: string) {
-    this.subscriptions.delete(id);
-  }
-
-  startRecording(
-    sensors: (Sensor<unknown> | Constructor<Sensor<unknown>>)[] = [],
-    options: SensorsOptions = {}
-  ) {
-    this.frameHistory = [];
-    this.isRecording = true;
-
-    const resolvedSensors = sensors.map((s) => this.getOrCreateInstance(s));
-
-    this.recordingSubscription = this.subscribe(
-      resolvedSensors,
-      60,
-      (values) => {
-        const valuesMap = new Map<Sensor<unknown>, unknown>();
-        resolvedSensors.forEach((sensor, index) => {
-          valuesMap.set(sensor, values[index]);
-        });
-
-        const record: SensorFrameRecord = {
-          timestamp: this.currentFrameTime || performance.now(),
-          values: valuesMap,
-        };
-
-        this.frameHistory.push(record);
-        if (this.onFrameRecord) {
-          this.onFrameRecord(record);
-        }
-      },
-      options
-    );
-  }
-
-  stopRecording(): SensorFrameRecord[] {
-    this.isRecording = false;
-    if (this.recordingSubscription) {
-      this.recordingSubscription.unsubscribe();
-      this.recordingSubscription = null;
-    }
-    const history = this.frameHistory;
-    this.frameHistory = [];
-    return history;
-  }
-
-  clearRecording() {
-    this.frameHistory = [];
-  }
-
-  override update(time: number) {
-    this.currentFrameTime = time;
-    const now = time; // Use simulation time instead of performance.now()
-    const sensorsToTrigger = new Set<Sensor<unknown>>();
-
-    // Check subscriptions
-    for (const sub of this.subscriptions.values()) {
-      const intervalMs = sub.frequency > 0 ? 1000 / sub.frequency : 0;
-      if (intervalMs > 0 && now - sub.lastTriggeredTime >= intervalMs) {
-        sub.lastTriggeredTime = now;
-        for (const sensor of sub.sensors) {
-          sensorsToTrigger.add(sensor);
-        }
-      }
-    }
-
-    if (sensorsToTrigger.size > 0) {
-      this.capture(Array.from(sensorsToTrigger)).then(() => {
-        this.notifySubscriptions(sensorsToTrigger);
-      });
-    }
-  }
-
-  private notifySubscriptions(updatedSensors: Set<Sensor<unknown>>) {
-    for (const sub of this.subscriptions.values()) {
-      if (!sub.callback) continue;
-
-      const matches = sub.sensors.some((sensor) => updatedSensors.has(sensor));
-      if (matches) {
-        const values = sub.sensors.map((sensor) => this.results.get(sensor));
-        sub.callback(values);
-      }
-    }
-  }
-
-  // --- Backward Compatible capture API ---
-
-  async capture<T extends Sensor<unknown> | Constructor<Sensor<unknown>>>(
-    target: T,
-    options?: SensorsOptions
-  ): Promise<
-    T extends Sensor<infer S>
-      ? S
-      : T extends Constructor<Sensor<infer S>>
-        ? S
-        : never
-  >;
+  // --- Batch Capture API ---
 
   async capture<T extends (Sensor<unknown> | Constructor<Sensor<unknown>>)[]>(
     targets: [...T],
@@ -402,20 +225,11 @@ export class SensorsManager extends Script {
       : T[K] extends Constructor<Sensor<infer S>>
         ? S
         : never;
-  }>;
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async capture(target: any, customOptions?: SensorsOptions): Promise<any> {
-    if (customOptions?.cacheWindowMs !== undefined) {
-      this.cacheWindowMs = customOptions.cacheWindowMs;
-    }
-    const isArray = Array.isArray(target);
-    const targets = isArray ? target : [target];
-
-    const promises = targets.map((t) => this.get(t));
+  }> {
+    const promises = targets.map((t) => this.get(t, options));
     const results = await Promise.all(promises);
-
-    return isArray ? results : results[0];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return results as any;
   }
 
   getLatest<T extends Sensor<unknown> | Constructor<Sensor<unknown>>>(
@@ -450,32 +264,6 @@ export class SensorsManager extends Script {
     const manager = await SensorsManager.resolve();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return manager.capture(sensors, options) as any;
-  }
-
-  static subscribe<
-    T extends (Sensor<unknown> | Constructor<Sensor<unknown>>)[],
-  >(
-    sensors: [...T],
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    callback: (values: any[]) => void,
-    frequency = 0,
-    options?: SensorsOptions
-  ): () => void {
-    let unsubscribed = false;
-    let innerUnsubscribe: (() => void) | null = null;
-
-    SensorsManager.resolve().then((manager) => {
-      if (unsubscribed) return;
-      const sub = manager.subscribe(sensors, frequency, callback, options);
-      innerUnsubscribe = () => sub.unsubscribe();
-    });
-
-    return () => {
-      unsubscribed = true;
-      if (innerUnsubscribe) {
-        innerUnsubscribe();
-      }
-    };
   }
 
   private static async resolve(): Promise<SensorsManager> {

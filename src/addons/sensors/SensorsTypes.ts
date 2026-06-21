@@ -50,37 +50,7 @@ export abstract class Sensor<T = unknown> {
    */
   async capture(options?: SensorsOptions): Promise<T> {
     const manager = await Sensor.resolveManager();
-    return manager.capture(this, options);
-  }
-
-  /**
-   * Direct, strongly-typed subscription. Self-bootstraps SensorsManager if needed.
-   */
-  subscribe(
-    callback: (value: T) => void,
-    frequency = 0,
-    options?: SensorsOptions
-  ): () => void {
-    let unsubscribed = false;
-    let innerUnsubscribe: (() => void) | null = null;
-
-    Sensor.resolveManager().then((manager) => {
-      if (unsubscribed) return;
-      const sub = manager.subscribe(
-        [this],
-        frequency,
-        ([val]) => callback(val as T),
-        options
-      );
-      innerUnsubscribe = () => sub.unsubscribe();
-    });
-
-    return () => {
-      unsubscribed = true;
-      if (innerUnsubscribe) {
-        innerUnsubscribe();
-      }
-    };
+    return manager.get(this, options);
   }
 
   private static async resolveManager(): Promise<SensorsManager> {
@@ -144,10 +114,4 @@ export interface VisibleObjectReference {
   type: string;
   distanceToCamera: number;
   description: string; // e.g. "[1]: TextButton 'Submit' at 0.85m"
-}
-
-/** Lightweight per-frame trajectory record. */
-export interface SensorFrameRecord {
-  timestamp: number;
-  values: Map<Sensor<unknown>, unknown>;
 }

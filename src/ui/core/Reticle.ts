@@ -74,6 +74,7 @@ export class Reticle extends THREE.Mesh<
 
     this.rotationSmoothing = rotationSmoothing;
     this.offset = offset;
+    this.userData.isInternal = true;
   }
 
   /**

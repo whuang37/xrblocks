@@ -1,11 +1,10 @@
-import type {EmbodiedControlStepResult} from '../embodied-control';
-
 import {
   createHandshake,
   isCommandMessage,
   parseRemoteControlMessage,
   type RemoteControlOutgoingMessage,
   type RemoteControlMessage,
+  type RemoteControlStepResult,
 } from './RemoteControlProtocol';
 
 export type WebSocketRemoteControlTransportOptions = {
@@ -16,7 +15,7 @@ export type WebSocketRemoteControlTransportOptions = {
 
 export type RemoteControlCommandHandler = (
   command: RemoteControlMessage
-) => Promise<EmbodiedControlStepResult>;
+) => Promise<RemoteControlStepResult>;
 
 export class WebSocketRemoteControlTransport {
   private ws?: WebSocket;

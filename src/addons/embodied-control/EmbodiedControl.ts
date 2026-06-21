@@ -36,13 +36,7 @@ export class EmbodiedControl extends Script {
     input: Input;
     camera: THREE.Camera;
   }) {
-    this.executor = new EmbodiedControlExecutor(
-      {
-        ...dependencies,
-        screenshotSynthesizer: dependencies.core.screenshotSynthesizer,
-      },
-      this.options
-    );
+    this.executor = new EmbodiedControlExecutor(dependencies, this.options);
     if (this.options.autoPause) {
       dependencies.core.pause();
     }

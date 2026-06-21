@@ -14,7 +14,6 @@ const embodied = new EmbodiedControl({
   autoPause: false,
   realTime: true,
   defaultDurationMs: 250,
-  includeScreenshot: false,
 });
 
 const POSES = xb.SIMULATOR_HAND_POSE_ROTATIONS;

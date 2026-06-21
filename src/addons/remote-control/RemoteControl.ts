@@ -3,18 +3,23 @@ import {Core, Input, Script, Simulator} from 'xrblocks';
 import {
   EmbodiedControl,
   type EmbodiedControlOptions,
-  type EmbodiedControlStepResult,
 } from '../embodied-control';
+import {Sensors, type SensorsOptions} from '../sensors';
 
 import {
   WebSocketRemoteControlTransport,
   type WebSocketRemoteControlTransportOptions,
 } from './WebSocketRemoteControlTransport';
-import {RemoteControlMessage} from './RemoteControlProtocol';
+import {
+  type RemoteControlMessage,
+  type RemoteControlStepResult,
+} from './RemoteControlProtocol';
 
 export type RemoteControlOptions = WebSocketRemoteControlTransportOptions & {
   embodiedControl?: EmbodiedControl;
   embodiedOptions?: EmbodiedControlOptions;
+  sensors?: Sensors;
+  sensorsOptions?: SensorsOptions;
 };
 
 export class RemoteControl extends Script {
@@ -27,6 +32,7 @@ export class RemoteControl extends Script {
 
   editorIcon = 'settings_remote';
   embodiedControl: EmbodiedControl;
+  sensors: Sensors;
   transport?: WebSocketRemoteControlTransport;
 
   dependencies!: {
@@ -40,6 +46,7 @@ export class RemoteControl extends Script {
     super();
     this.embodiedControl =
       options.embodiedControl ?? new EmbodiedControl(options.embodiedOptions);
+    this.sensors = options.sensors ?? new Sensors(options.sensorsOptions);
   }
 
   init(dependencies: {
@@ -49,10 +56,25 @@ export class RemoteControl extends Script {
     camera: THREE.Camera;
   }) {
     this.dependencies = dependencies;
+
+    // 1. Initialize EmbodiedControl
     if (!this.embodiedControl.executor) {
       this.embodiedControl.init(dependencies);
+      dependencies.core.registry.register(this.embodiedControl, EmbodiedControl);
+      dependencies.core.scene.add(this.embodiedControl);
     }
 
+    // 2. Initialize Sensors (and register as core singleton)
+    const registrySensors = dependencies.core.registry.get(Sensors) as Sensors;
+    if (!registrySensors) {
+      this.sensors.init(dependencies);
+      dependencies.core.registry.register(this.sensors, Sensors);
+      dependencies.core.scene.add(this.sensors);
+    } else {
+      this.sensors = registrySensors;
+    }
+
+    // 3. Connect transport
     this.transport = new WebSocketRemoteControlTransport(
       {
         url: this.options.url,
@@ -70,41 +92,91 @@ export class RemoteControl extends Script {
 
   async handleCommand(
     message: RemoteControlMessage
-  ): Promise<EmbodiedControlStepResult> {
+  ): Promise<RemoteControlStepResult> {
+    const sensorOpts = message.sensors;
+
+    // A. Start recording telemetry
+    if (sensorOpts?.recordHistory) {
+      this.sensors.startRecording(sensorOpts);
+    }
+
+    // B. Actuate the command
+    let elapsedMs = 0;
     switch (message.type) {
-      case 'STEP':
-        return this.embodiedControl.step(message);
+      case 'STEP': {
+        const res = await this.embodiedControl.step(message);
+        elapsedMs = res.elapsedMs;
+        break;
+      }
       case 'TELEPORT_TO': {
         const target = this.resolveTarget(message.target);
-        return this.embodiedControl.teleportTo(target, message.options);
+        const res = await this.embodiedControl.teleportTo(
+          target,
+          message.options
+        );
+        elapsedMs = res.elapsedMs;
+        break;
       }
       case 'LOOK_AT_TARGET': {
         const target = this.resolveTarget(message.target);
-        return this.embodiedControl.lookAtTarget(target, message.options);
+        const res = await this.embodiedControl.lookAtTarget(
+          target,
+          message.options
+        );
+        elapsedMs = res.elapsedMs;
+        break;
       }
       case 'POINT_TO': {
         const target = this.resolveTarget(message.target);
-        return this.embodiedControl.pointTo(
+        const res = await this.embodiedControl.pointTo(
           message.handIndex,
           target,
           message.options
         );
+        elapsedMs = res.elapsedMs;
+        break;
       }
       case 'REACH_TO': {
         const target = this.resolveTarget(message.target);
-        return this.embodiedControl.reachTo(
+        const res = await this.embodiedControl.reachTo(
           message.handIndex,
           target,
           message.options
         );
+        elapsedMs = res.elapsedMs;
+        break;
       }
-      case 'CLICK':
-        return this.embodiedControl.click(message.handIndex, message.options);
+      case 'CLICK': {
+        const res = await this.embodiedControl.click(
+          message.handIndex,
+          message.options
+        );
+        elapsedMs = res.elapsedMs;
+        break;
+      }
       default:
         throw new Error(
           `Unsupported command type: ${(message as {type: string}).type}`
         );
     }
+
+    // C. Stop recording telemetry
+    let history = undefined;
+    if (sensorOpts?.recordHistory) {
+      history = this.sensors.stopRecording();
+    }
+
+    // D. Capture final observation
+    const observation = await this.sensors.captureObservation(sensorOpts);
+    if (history) {
+      observation.history = history;
+    }
+
+    return {
+      id: message.id,
+      elapsedMs,
+      observation,
+    };
   }
 
   private resolveTarget(

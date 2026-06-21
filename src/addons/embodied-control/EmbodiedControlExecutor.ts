@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import {
   Core,
   Input,
-  ScreenshotSynthesizer,
   Simulator,
   User,
   World,
@@ -13,12 +12,10 @@ import {
   DEFAULT_EMBODIED_CONTROL_OPTIONS,
   type XRCompoundControl,
   type EmbodiedControlExecutorOptions,
-  type EmbodiedControlObservation,
   type EmbodiedControlOptions,
   type EmbodiedControlStep,
   type EmbodiedControlStepResult,
   type HandControl,
-  type HandObservation,
   type LocomotionControl,
 } from './EmbodiedControlTypes';
 
@@ -27,7 +24,6 @@ export type EmbodiedControlExecutorDependencies = {
   simulator: Simulator;
   input: Input;
   camera: THREE.Camera;
-  screenshotSynthesizer: ScreenshotSynthesizer;
 };
 
 const vector = new THREE.Vector3();
@@ -39,9 +35,6 @@ function mergeOptions(
 ): EmbodiedControlExecutorOptions {
   return {
     tickMs: options.tickMs ?? DEFAULT_EMBODIED_CONTROL_OPTIONS.tickMs,
-    includeScreenshot:
-      options.includeScreenshot ??
-      DEFAULT_EMBODIED_CONTROL_OPTIONS.includeScreenshot,
     applyHandRotationConstraints:
       options.applyHandRotationConstraints ??
       DEFAULT_EMBODIED_CONTROL_OPTIONS.applyHandRotationConstraints,
@@ -113,7 +106,6 @@ export class EmbodiedControlExecutor {
       const initialCameraQuaternion =
         this.dependencies.camera.quaternion.clone();
 
-      let screenshotPromise: Promise<string> | undefined;
       for (let i = 0; i < stepCount; i++) {
         const remainingMs = Math.max(0, durationMs - elapsedMs);
         const currentTickMs =
@@ -128,11 +120,6 @@ export class EmbodiedControlExecutor {
           initialCameraQuaternion
         );
 
-        if (this.options.includeScreenshot && i === stepCount - 1) {
-          screenshotPromise =
-            this.dependencies.screenshotSynthesizer.getScreenshot();
-        }
-
         this.dependencies.core.stepFrame(currentTickMs);
         elapsedMs += currentTickMs;
         if (this.options.realTime && i < stepCount - 1) {
@@ -140,11 +127,9 @@ export class EmbodiedControlExecutor {
         }
       }
 
-      const observation = await this.createObservation(screenshotPromise);
       return {
         id: step.id,
         elapsedMs,
-        observation,
       };
     } finally {
       this.activeStep = false;
@@ -285,16 +270,9 @@ export class EmbodiedControlExecutor {
     }
     this.activeStep = true;
     try {
-      let screenshotPromise: Promise<string> | undefined;
       const elapsedMs = await actionFn();
-      if (this.options.includeScreenshot) {
-        screenshotPromise =
-          this.dependencies.screenshotSynthesizer.getScreenshot();
-      }
-      const observation = await this.createObservation(screenshotPromise);
       return {
         elapsedMs,
-        observation,
       };
     } finally {
       this.activeStep = false;
@@ -542,7 +520,6 @@ export class EmbodiedControlExecutor {
   ): Promise<EmbodiedControlStepResult> {
     const {durationMs = 200} = options;
     const {simulator} = this.dependencies;
-    // Change the lerp speed to allow the hand to pinch and open all the way.
     const originalLerpSpeed = simulator.hands.lerpSpeed;
     simulator.hands.lerpSpeed = 0.3;
 
@@ -568,51 +545,9 @@ export class EmbodiedControlExecutor {
       return {
         id: releaseResult.id,
         elapsedMs: pressResult.elapsedMs + releaseResult.elapsedMs,
-        observation: releaseResult.observation,
       };
     } finally {
       simulator.hands.lerpSpeed = originalLerpSpeed;
     }
-  }
-
-  private async createObservation(
-    screenshotPromise: Promise<string> | undefined
-  ): Promise<EmbodiedControlObservation> {
-    const screenshot = await screenshotPromise;
-    return {
-      screenshot,
-      state: {
-        camera: {
-          position: this.dependencies.camera.position.toArray(),
-          quaternion: this.dependencies.camera.quaternion.toArray(),
-        },
-        leftHand: this.createHandObservation(0),
-        rightHand: this.createHandObservation(1),
-      },
-    };
-  }
-
-  private createHandObservation(handIndex: number): HandObservation {
-    const {input, simulator} = this.dependencies;
-    const controllerState = simulator.simulatorControllerState;
-    const controller = input.controllers[handIndex];
-    const hand =
-      handIndex === 0
-        ? simulator.hands.leftController
-        : simulator.hands.rightController;
-    const rotations =
-      handIndex === 0
-        ? simulator.hands.leftHandTargetRotations
-        : simulator.hands.rightHandTargetRotations;
-
-    return {
-      position: controllerState.localControllerPositions[handIndex].toArray(),
-      quaternion:
-        controllerState.localControllerOrientations[handIndex].toArray(),
-      selected: !!controller?.userData.selected,
-      squeezing: !!controller?.userData.squeezing,
-      visible: hand.visible,
-      rotations: {...rotations},
-    };
   }
 }

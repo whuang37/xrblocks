@@ -1,8 +1,5 @@
-import type {
-  EmbodiedControlStep,
-  EmbodiedControlStepResult,
-  XRCompoundControl,
-} from '../embodied-control';
+import type {EmbodiedControlStep, XRCompoundControl} from '../embodied-control';
+import type {SensorsOptions, SensorsObservation} from '../sensors';
 
 export const REMOTE_CONTROL_PROTOCOL_VERSION = 1;
 
@@ -16,43 +13,44 @@ export type RemoteControlHandshakeMessage = {
   };
 };
 
-export type RemoteControlStepMessage = EmbodiedControlStep & {
-  type: 'STEP';
-  control: XRCompoundControl;
+export type RemoteControlBaseMessage = {
+  id?: string;
+  sensors?: SensorsOptions; // Support configuring sensors on any command!
 };
 
-export type RemoteControlTeleportMessage = {
-  id?: string;
+export type RemoteControlStepMessage = EmbodiedControlStep &
+  RemoteControlBaseMessage & {
+    type: 'STEP';
+    control: XRCompoundControl;
+  };
+
+export type RemoteControlTeleportMessage = RemoteControlBaseMessage & {
   type: 'TELEPORT_TO';
   target: [number, number, number] | string;
   options?: {distance?: number; faceTarget?: boolean; snapToGround?: boolean};
 };
 
-export type RemoteControlLookAtMessage = {
-  id?: string;
+export type RemoteControlLookAtMessage = RemoteControlBaseMessage & {
   type: 'LOOK_AT_TARGET';
   target: [number, number, number] | string;
   options?: {velocity?: number};
 };
 
-export type RemoteControlPointToMessage = {
-  id?: string;
+export type RemoteControlPointToMessage = RemoteControlBaseMessage & {
   type: 'POINT_TO';
   handIndex: number;
   target: [number, number, number] | string;
   options?: {velocity?: number};
 };
 
-export type RemoteControlReachToMessage = {
-  id?: string;
+export type RemoteControlReachToMessage = RemoteControlBaseMessage & {
   type: 'REACH_TO';
   handIndex: number;
   target: [number, number, number] | string;
   options?: {velocity?: number};
 };
 
-export type RemoteControlClickMessage = {
-  id?: string;
+export type RemoteControlClickMessage = RemoteControlBaseMessage & {
   type: 'CLICK';
   handIndex: number;
   options?: {durationMs?: number};
@@ -66,7 +64,13 @@ export type RemoteControlMessage =
   | RemoteControlReachToMessage
   | RemoteControlClickMessage;
 
-export type RemoteControlStepCompletedMessage = EmbodiedControlStepResult & {
+export type RemoteControlStepResult = {
+  id?: string;
+  elapsedMs: number;
+  observation: SensorsObservation; // Return the rich unified observation!
+};
+
+export type RemoteControlStepCompletedMessage = RemoteControlStepResult & {
   type: 'STEP_COMPLETED';
 };
 

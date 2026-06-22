@@ -84,8 +84,9 @@ function handActions(hand) {
     step('Yaw Out', {[hand]: {rotate: [0, hand === 'leftHand' ? 15 : -15, 0]}}),
     step('Relaxed', {[hand]: {rotations: POSES[xb.SimulatorHandPose.RELAXED]}}),
     step('Fist', {[hand]: {rotations: POSES[xb.SimulatorHandPose.FIST]}}),
-    step('Pinch Start', {[hand]: {selectStart: true}}),
-    step('Pinch End', {[hand]: {selectEnd: true}}),
+    step('Select Start', {[hand]: {selectStart: true}}),
+    step('Squeeze Start', {[hand]: {squeezeStart: true}}),
+    step('Release', {[hand]: {release: true}}),
     step('Point', {[hand]: {rotations: POSES[xb.SimulatorHandPose.POINTING]}}),
     step('Victory', {[hand]: {rotations: POSES[xb.SimulatorHandPose.VICTORY]}}),
     {

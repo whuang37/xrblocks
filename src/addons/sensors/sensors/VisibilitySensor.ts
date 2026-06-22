@@ -3,6 +3,9 @@ import {objectIsDescendantOf} from 'xrblocks';
 import {Sensor, type SensorContext, type SensorsOptions} from '../SensorsTypes';
 import {isInternalHelper} from '../utils/SensorsUtils';
 
+const OCCLUSION_DISTANCE_TOLERANCE = 0.05; // 5cm tolerance to account for rounding/smoothing
+const MARGIN = 0.85; // 15% margin for clean UX
+
 export interface VisibilityItem {
   object: THREE.Object3D;
   worldPosition: THREE.Vector3;
@@ -82,17 +85,16 @@ export class VisibilitySensor extends Sensor<VisibilityItem[]> {
           .applyMatrix4(camera.projectionMatrix);
 
         // Check if the center is off-screen or too close to the edges
-        const margin = 0.85; // 15% margin for clean UX
         const isOffScreen =
-          Math.abs(screenPos.x) > margin ||
-          Math.abs(screenPos.y) > margin ||
+          Math.abs(screenPos.x) > MARGIN ||
+          Math.abs(screenPos.y) > MARGIN ||
           screenPos.z > 1 ||
           screenPos.z < -1;
 
         if (isOffScreen) {
           // Clamp to safe screen coordinates
-          const clampedX = Math.max(-margin, Math.min(margin, screenPos.x));
-          const clampedY = Math.max(-margin, Math.min(margin, screenPos.y));
+          const clampedX = Math.max(-MARGIN, Math.min(MARGIN, screenPos.x));
+          const clampedY = Math.max(-MARGIN, Math.min(MARGIN, screenPos.y));
 
           // Unproject the safe screen point back to world space rays
           const rayOrigin = new THREE.Vector3(clampedX, clampedY, -1).unproject(
@@ -133,7 +135,7 @@ export class VisibilitySensor extends Sensor<VisibilityItem[]> {
             !firstHit ||
             firstHit.object === obj ||
             objectIsDescendantOf(firstHit.object, obj) ||
-            firstHit.distance >= distance - 0.05
+            firstHit.distance >= distance - OCCLUSION_DISTANCE_TOLERANCE
           ) {
             interactiveObjects.add(obj);
             list.push({

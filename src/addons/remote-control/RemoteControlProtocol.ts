@@ -58,13 +58,37 @@ export type RemoteControlClickMessage = {
   options?: {durationMs?: number};
 };
 
+export type RemoteControlSelectStartMessage = {
+  id?: string;
+  type: 'SELECT_START';
+  handIndex: number;
+  options?: {durationMs?: number};
+};
+
+export type RemoteControlSqueezeStartMessage = {
+  id?: string;
+  type: 'SQUEEZE_START';
+  handIndex: number;
+  options?: {durationMs?: number};
+};
+
+export type RemoteControlReleaseMessage = {
+  id?: string;
+  type: 'RELEASE';
+  handIndex: number;
+  options?: {durationMs?: number};
+};
+
 export type RemoteControlMessage =
   | RemoteControlStepMessage
   | RemoteControlTeleportMessage
   | RemoteControlLookAtMessage
   | RemoteControlPointToMessage
   | RemoteControlReachToMessage
-  | RemoteControlClickMessage;
+  | RemoteControlClickMessage
+  | RemoteControlSelectStartMessage
+  | RemoteControlSqueezeStartMessage
+  | RemoteControlReleaseMessage;
 
 export type RemoteControlStepCompletedMessage = EmbodiedControlStepResult & {
   type: 'STEP_COMPLETED';
@@ -111,7 +135,10 @@ export function isCommandMessage(
     type === 'LOOK_AT_TARGET' ||
     type === 'POINT_TO' ||
     type === 'REACH_TO' ||
-    type === 'CLICK'
+    type === 'CLICK' ||
+    type === 'SELECT_START' ||
+    type === 'SQUEEZE_START' ||
+    type === 'RELEASE'
   );
 }
 

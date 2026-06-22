@@ -100,6 +100,18 @@ export class RemoteControl extends Script {
       }
       case 'CLICK':
         return this.embodiedControl.click(message.handIndex, message.options);
+      case 'SELECT_START':
+        return this.embodiedControl.selectStart(
+          message.handIndex,
+          message.options
+        );
+      case 'SQUEEZE_START':
+        return this.embodiedControl.squeezeStart(
+          message.handIndex,
+          message.options
+        );
+      case 'RELEASE':
+        return this.embodiedControl.release(message.handIndex, message.options);
       default:
         throw new Error(
           `Unsupported command type: ${(message as {type: string}).type}`

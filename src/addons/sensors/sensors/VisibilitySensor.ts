@@ -130,10 +130,10 @@ export class VisibilitySensor extends Sensor<VisibilityItem[]> {
           const firstHit = intersects.find((i) => !isInternalHelper(i.object));
 
           if (
-            firstHit &&
-            (firstHit.object === obj ||
-              objectIsDescendantOf(firstHit.object, obj) ||
-              firstHit.distance >= distance - 0.05)
+            !firstHit ||
+            firstHit.object === obj ||
+            objectIsDescendantOf(firstHit.object, obj) ||
+            firstHit.distance >= distance - 0.05
           ) {
             interactiveObjects.add(obj);
             list.push({

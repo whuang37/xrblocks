@@ -122,7 +122,7 @@ export class Simulator extends Script {
     );
     renderer.autoClearColor = false;
     await this.simulatorScene.init(simulatorOptions);
-    await this.simulatorWorld.init(options, world);
+    await this.simulatorWorld.init(options, world, this.simulatorScene);
     this.hands.init({input});
     this.controls.init({camera, input, timer, renderer, simulatorOptions});
     if (

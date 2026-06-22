@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import type RAPIER_NS from 'rapier3d';
 
+import {SimulatorMesh} from './SimulatorMesh';
+
 export class DetectedMesh extends THREE.Mesh {
   private RAPIER?: typeof RAPIER_NS;
   private rigidBody?: RAPIER_NS.RigidBody;
@@ -14,7 +16,7 @@ export class DetectedMesh extends THREE.Mesh {
     return this.rigidBody;
   }
 
-  constructor(mesh: XRMesh, material: THREE.Material) {
+  constructor(mesh: XRMesh | SimulatorMesh, material: THREE.Material) {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute(
       'position',
@@ -23,7 +25,7 @@ export class DetectedMesh extends THREE.Mesh {
     geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
     geometry.computeVertexNormals();
     super(geometry, material);
-    this.lastChangedTime = mesh.lastChangedTime;
+    this.lastChangedTime = 'lastChangedTime' in mesh ? mesh.lastChangedTime : 0;
     this.semanticLabel = mesh.semanticLabel;
   }
 

@@ -519,6 +519,9 @@ export class Core {
     // Traverse the scene to find all scripts.
     this.scriptsManager.syncScriptsWithScene(this.scene);
 
+    // Force matrix updates since there is no active renderer render loop in headless/test environments.
+    this.scene.updateMatrixWorld(true);
+
     // Updates reticles and UIs.
     this.scriptsManager.resetUX();
     this.input.update();

@@ -1,6 +1,13 @@
 import {defineConfig} from 'vitest/config';
+import {resolve} from 'path';
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      'xrblocks/addons': resolve(__dirname, './src/addons'),
+      xrblocks: resolve(__dirname, './src/xrblocks.ts'),
+    },
+  },
   test: {
     include: ['src/**/*.test.ts'],
     environment: 'jsdom',

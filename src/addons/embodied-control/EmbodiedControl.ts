@@ -117,4 +117,34 @@ export class EmbodiedControl extends Script {
     }
     return this.executor.click(handIndex, options);
   }
+
+  release(
+    handIndex = 1,
+    options?: {durationMs?: number}
+  ): Promise<EmbodiedControlStepResult> {
+    if (!this.executor) {
+      throw new Error('EmbodiedControl is not initialized.');
+    }
+    return this.executor.release(handIndex, options);
+  }
+
+  selectStart(
+    handIndex = 1,
+    options?: {durationMs?: number}
+  ): Promise<EmbodiedControlStepResult> {
+    if (!this.executor) {
+      throw new Error('EmbodiedControl is not initialized.');
+    }
+    return this.executor.selectStart(handIndex, options);
+  }
+
+  squeezeStart(
+    handIndex = 1,
+    options?: {durationMs?: number}
+  ): Promise<EmbodiedControlStepResult> {
+    if (!this.executor) {
+      throw new Error('EmbodiedControl is not initialized.');
+    }
+    return this.executor.squeezeStart(handIndex, options);
+  }
 }

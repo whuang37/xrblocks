@@ -4,6 +4,7 @@ import {
   Input,
   ScreenshotSynthesizer,
   Simulator,
+  SimulatorHandPose,
   User,
   World,
   type SimulatorHandPoseRotations,
@@ -243,8 +244,14 @@ export class EmbodiedControlExecutor {
 
     if (control.selectStart) {
       this.applyHandSelect(handIndex, true);
-    } else if (control.selectEnd) {
-      this.applyHandSelect(handIndex, false);
+    }
+
+    if (control.squeezeStart) {
+      this.applyHandSqueeze(handIndex, true);
+    }
+
+    if (control.release) {
+      this.applyHandRelease(handIndex);
     }
   }
 
@@ -254,6 +261,24 @@ export class EmbodiedControlExecutor {
       simulator.hands.setLeftHandPinching(selected);
     } else {
       simulator.hands.setRightHandPinching(selected);
+    }
+  }
+
+  private applyHandSqueeze(handIndex: number, squeezing: boolean) {
+    const {simulator} = this.dependencies;
+    if (handIndex === 0) {
+      simulator.hands.setLeftHandSqueezing(squeezing);
+    } else {
+      simulator.hands.setRightHandSqueezing(squeezing);
+    }
+  }
+
+  private applyHandRelease(handIndex: number) {
+    const {simulator} = this.dependencies;
+    if (handIndex === 0) {
+      simulator.hands.setLeftHandLerpPose(SimulatorHandPose.RELAXED);
+    } else {
+      simulator.hands.setRightHandLerpPose(SimulatorHandPose.RELAXED);
     }
   }
 
@@ -561,8 +586,8 @@ export class EmbodiedControlExecutor {
 
       const releaseControl: XRCompoundControl =
         handIndex === 0
-          ? {leftHand: {selectEnd: true}}
-          : {rightHand: {selectEnd: true}};
+          ? {leftHand: {release: true}}
+          : {rightHand: {release: true}};
       const releaseResult = await this.step({
         control: releaseControl,
         durationMs,
@@ -576,6 +601,51 @@ export class EmbodiedControlExecutor {
     } finally {
       simulator.hands.lerpSpeed = originalLerpSpeed;
     }
+  }
+
+  async release(
+    handIndex = 1,
+    options: {durationMs?: number} = {}
+  ): Promise<EmbodiedControlStepResult> {
+    const {durationMs = 200} = options;
+    const releaseControl: XRCompoundControl =
+      handIndex === 0
+        ? {leftHand: {release: true}}
+        : {rightHand: {release: true}};
+    return this.step({
+      control: releaseControl,
+      durationMs,
+    });
+  }
+
+  async selectStart(
+    handIndex = 1,
+    options: {durationMs?: number} = {}
+  ): Promise<EmbodiedControlStepResult> {
+    const {durationMs = 200} = options;
+    const pressControl: XRCompoundControl =
+      handIndex === 0
+        ? {leftHand: {selectStart: true}}
+        : {rightHand: {selectStart: true}};
+    return this.step({
+      control: pressControl,
+      durationMs,
+    });
+  }
+
+  async squeezeStart(
+    handIndex = 1,
+    options: {durationMs?: number} = {}
+  ): Promise<EmbodiedControlStepResult> {
+    const {durationMs = 200} = options;
+    const pressControl: XRCompoundControl =
+      handIndex === 0
+        ? {leftHand: {squeezeStart: true}}
+        : {rightHand: {squeezeStart: true}};
+    return this.step({
+      control: pressControl,
+      durationMs,
+    });
   }
 
   private async createObservation(

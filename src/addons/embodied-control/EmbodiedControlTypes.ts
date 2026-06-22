@@ -17,8 +17,10 @@ export type HandControl = {
   rotate?: Vec3Tuple;
   /** Begin the hand's primary select gesture. In the simulator this starts a pinch. */
   selectStart?: boolean;
-  /** End the hand's primary select gesture. In the simulator this releases a pinch. */
-  selectEnd?: boolean;
+  /** Begin the hand's squeeze gesture. In the simulator this starts a fist. */
+  squeezeStart?: boolean;
+  /** Release any active gesture and return the hand to its relaxed state. */
+  release?: boolean;
   /** Sparse angular joint targets in radians. */
   rotations?: SimulatorHandPoseRotations;
   visible?: boolean;

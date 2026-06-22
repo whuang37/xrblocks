@@ -84,10 +84,7 @@ the camera. Locomotion `rotate` is `[pitchDegrees, yawDegrees, rollDegrees]`.
 Hand `move` and `rotate` are relative to the simulator controller pose. Hand
 `rotations` can apply sparse simulator joint rotations in radians.
 
-Use `selectStart` and `selectEnd` for pinch-like primary actions. In the
-simulator these call the semantic pinching APIs, which emit normal XR Blocks
-`selectstart` and `selectend` events. Raw pinching rotations only change the
-visual pose; they do not trigger selection.
+Use `selectStart` and `squeezeStart` to trigger pinch (select) and fist (squeeze) gestures, which emit standard WebXR events (`selectstart`/`squeezestart` and `selectend`/`squeezeend`). Use `release` to terminate any active select or squeeze gesture and return the hand to its relaxed state. Raw pinching/fist rotations only change the visual pose; they do not trigger selection or squeezing state changes.
 
 ---
 
@@ -97,7 +94,7 @@ Only `step()` resolves to elapsed time and an observation:
 
 ```javascript
 const result = await embodied.step({
-  control: {rightHand: {selectEnd: true}},
+  control: {rightHand: {release: true}},
 });
 
 console.log(result.observation.state.camera.position);

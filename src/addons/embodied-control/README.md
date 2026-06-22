@@ -104,7 +104,8 @@ rightHand: {
   move?: [xMeters, yMeters, zMeters];
   rotate?: [pitchDegrees, yawDegrees, rollDegrees];
   selectStart?: boolean;
-  selectEnd?: boolean;
+  squeezeStart?: boolean;
+  release?: boolean;
   rotations?: SimulatorHandPoseRotations;
   visible?: boolean;
 }
@@ -113,11 +114,12 @@ rightHand: {
 Hand `move` and `rotate` are relative to the current simulator controller pose.
 `rotations` applies sparse simulator hand joint rotations in radians.
 
-Use `selectStart` and `selectEnd` for WebXR-like hand selection. In the
-simulator these call `setLeftHandPinching()` / `setRightHandPinching()`, which
-emits the normal XR Blocks `selectstart` / `selectend` events and updates the
-controller selected state. This is different from passing raw pinching
-`rotations`, which only changes the visual hand pose.
+Use `selectStart` and `squeezeStart` to trigger gestures:
+
+- `selectStart`: Starts a pinch gesture (fires WebXR `selectstart`, sets `selected = true`).
+- `squeezeStart`: Starts a fist gesture (fires WebXR `squeezestart`, sets `squeezing = true`).
+
+Use `release` to terminate any active pinch or fist gesture, reset manual joint rotation overrides, and return the hand to its relaxed state (firing the appropriate `selectend`/`squeezeend` events and clearing the tracking states). This is different from passing raw relaxed `rotations`, which only changes the visual hand pose.
 
 ---
 
@@ -138,8 +140,17 @@ await embodied.pointTo(1, cube, {velocity: 1.5}); // 1 = right hand
 // Smoothly extend right hand to cube at 0.5 meters/sec
 await embodied.reachTo(1, cube, {velocity: 0.5});
 
-// Perform click (selectStart + selectEnd sequence)
+// Perform click (selectStart + release sequence)
 await embodied.click(1);
+
+// Perform selectStart only (starts a pinch and holds it)
+await embodied.selectStart(1);
+
+// Perform squeezeStart only (starts a fist and holds it)
+await embodied.squeezeStart(1);
+
+// Perform release (ends any active select or squeeze gesture)
+await embodied.release(1);
 ```
 
 All high-level methods return a `Promise<EmbodiedControlStepResult>` containing the elapsed time and completed observation:
@@ -149,6 +160,9 @@ All high-level methods return a `Promise<EmbodiedControlStepResult>` containing 
 - **`pointTo(handIndex, target, options)`**: Rotates the controller locally in camera space to point directly at the target, keeping its position/radius unchanged. Options: `velocity` (radians/second; if omitted, snaps instantly in 1 frame).
 - **`reachTo(handIndex, target, options)`**: Moves the controller position towards the target. Options: `velocity` (meters/second; if omitted, moves instantly).
 - **`click(handIndex, options)`**: Simulates click gesture press and release. Options: `durationMs` (default 200ms).
+- **`selectStart(handIndex, options)`**: Starts a pinch gesture and holds it. Options: `durationMs` (default 200ms).
+- **`squeezeStart(handIndex, options)`**: Starts a fist gesture and holds it. Options: `durationMs` (default 200ms).
+- **`release(handIndex, options)`**: Simulates releasing any active pinch or fist gesture and returning to the relaxed pose. Options: `durationMs` (default 200ms).
 
 ---
 
@@ -157,7 +171,7 @@ All high-level methods return a `Promise<EmbodiedControlStepResult>` containing 
 Only `step()` resolves with an observation:
 
 ```ts
-const result = await embodied.step({control: {rightHand: {selectEnd: true}}});
+const result = await embodied.step({control: {rightHand: {release: true}}});
 
 console.log(result.elapsedMs);
 console.log(result.observation.state.camera.position);
@@ -177,7 +191,7 @@ and call `EmbodiedControl` directly:
 ```ts
 await embodied.step({control: {rightHand: {selectStart: true}}});
 await embodied.step({control: {rightHand: {move: [0, 0, -0.1]}}});
-await embodied.step({control: {rightHand: {selectEnd: true}}});
+await embodied.step({control: {rightHand: {release: true}}});
 ```
 
 Only one step may run at a time. If a second step is requested while another is

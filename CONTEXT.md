@@ -98,4 +98,4 @@ Open a sample/template/demo under that URL; add `?formFactor=desktop` to force t
 
 For "how do I do X", use the focused skills in [`skills/`](skills/): `xb-core`, `xb-ui`,
 `xb-uiblocks`, `xb-modelviewer`, `xb-hands`, `xb-gestures`, `xb-depth`, `xb-world`, `xb-ai`,
-`xb-physics`, `xb-simulator`, `xb-netblocks`, `xb-sound`.
+`xb-physics`, `xb-simulator`, `xb-netblocks`, `xb-sound`, `xb-testing`.

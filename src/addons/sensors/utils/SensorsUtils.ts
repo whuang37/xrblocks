@@ -9,7 +9,8 @@ export function isInternalHelper(object: THREE.Object3D): boolean {
 
   while (current) {
     if (
-      current.userData.isInternal === true ||
+      current.type === 'XRSystems' ||
+      (current.constructor as {isDepthMesh?: boolean}).isDepthMesh === true ||
       current.type === 'Line' ||
       (current as {ignoreReticleRaycast?: boolean}).ignoreReticleRaycast ===
         true

@@ -22,21 +22,11 @@ import {XRSystems} from '../core/components/XRSystems';
 export class ActiveControllers extends THREE.Group {
   type = 'ActiveControllers';
   name = 'Active Controllers';
-
-  constructor() {
-    super();
-    this.userData.isInternal = true;
-  }
 }
 
 export class Reticles extends THREE.Group {
   type = 'Reticles';
   name = 'Reticles';
-
-  constructor() {
-    super();
-    this.userData.isInternal = true;
-  }
 }
 
 export type HasIgnoreReticleRaycast = {

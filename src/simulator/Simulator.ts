@@ -82,7 +82,6 @@ export class Simulator extends Script {
     private renderMainScene: (cameraOverride?: THREE.Camera) => void
   ) {
     super();
-    this.userData.isInternal = true;
     this.add(this.simulatorUser);
   }
 

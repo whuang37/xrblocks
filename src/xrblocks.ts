@@ -20,6 +20,7 @@ export * from './core/components/WaitFrame';
 export * from './core/components/XRButton';
 export * from './core/components/XREffects';
 export * from './core/Core';
+export * from './core/components/XRSystems';
 export * from './core/Options';
 export * from './core/UIKitOptions';
 export * from './core/Script';

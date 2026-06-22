@@ -14,6 +14,6 @@
     }
   },
   "include": ["**/*.ts"],
-  "exclude": ["**/cli/**/*.ts"],
+  "exclude": ["**/cli/**/*.ts", "**/*.test.ts", "**/*.test.js"],
   "references": [{"path": "../../"}]
 }

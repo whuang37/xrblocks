@@ -39,9 +39,6 @@ function mergeOptions(
 ): EmbodiedControlExecutorOptions {
   return {
     tickMs: options.tickMs ?? DEFAULT_EMBODIED_CONTROL_OPTIONS.tickMs,
-    defaultDurationMs:
-      options.defaultDurationMs ??
-      DEFAULT_EMBODIED_CONTROL_OPTIONS.defaultDurationMs,
     includeScreenshot:
       options.includeScreenshot ??
       DEFAULT_EMBODIED_CONTROL_OPTIONS.includeScreenshot,
@@ -109,8 +106,8 @@ export class EmbodiedControlExecutor {
     this.activeStep = true;
 
     try {
-      const durationMs = step.durationMs ?? this.options.defaultDurationMs;
       const tickMs = this.options.tickMs;
+      const durationMs = step.durationMs ?? tickMs;
       const stepCount = Math.max(1, Math.ceil(durationMs / tickMs));
       let elapsedMs = 0;
       const initialCameraQuaternion =
@@ -126,7 +123,7 @@ export class EmbodiedControlExecutor {
         const fraction = durationMs > 0 ? currentTickMs / durationMs : 1;
 
         this.applyControlFraction(
-          step.control,
+          step.control || {},
           fraction,
           initialCameraQuaternion
         );

@@ -33,6 +33,7 @@ The `xb-` prefix matches the `xb` import alias.
 | [`xb-netblocks`](xb-netblocks/SKILL.md)     | Add multiplayer presence, shared objects, voice                   |
 | [`xb-lipsync`](xb-lipsync/SKILL.md)         | Drive audio-driven avatar mouths from any `MediaStream`           |
 | [`xb-sound`](xb-sound/SKILL.md)             | Play spatial audio, record, recognize/synthesize speech           |
+| [`xb-testing`](xb-testing/SKILL.md)         | Write sequential functional, integration, or simulator tests      |
 
 Deep references some skills link to live next to the code:
 [`../src/SKILL.md`](../src/SKILL.md), [`../src/addons/uiblocks/SKILL.md`](../src/addons/uiblocks/SKILL.md),

@@ -213,6 +213,30 @@ export class SimulatorHands {
       });
     }
 
+    if (
+      this.leftHandPose !== SimulatorHandPose.FIST &&
+      pose === SimulatorHandPose.FIST
+    ) {
+      this.input.dispatchEvent({
+        type: 'squeezestart',
+        target: this.input.controllers[0],
+        data: {
+          handedness: 'left',
+        },
+      });
+    } else if (
+      this.leftHandPose === SimulatorHandPose.FIST &&
+      pose !== SimulatorHandPose.FIST
+    ) {
+      this.input.dispatchEvent({
+        type: 'squeezeend',
+        target: this.input.controllers[0],
+        data: {
+          handedness: 'left',
+        },
+      });
+    }
+
     this.leftHandPose = pose;
     this.leftHandRawTargetJoints = undefined;
     this.leftHandTargetRotations = cloneHandPoseRotations(
@@ -246,6 +270,30 @@ export class SimulatorHands {
       });
     }
 
+    if (
+      this.rightHandPose !== SimulatorHandPose.FIST &&
+      pose === SimulatorHandPose.FIST
+    ) {
+      this.input.dispatchEvent({
+        type: 'squeezestart',
+        target: this.input.controllers[1],
+        data: {
+          handedness: 'right',
+        },
+      });
+    } else if (
+      this.rightHandPose === SimulatorHandPose.FIST &&
+      pose !== SimulatorHandPose.FIST
+    ) {
+      this.input.dispatchEvent({
+        type: 'squeezeend',
+        target: this.input.controllers[1],
+        data: {
+          handedness: 'right',
+        },
+      });
+    }
+
     this.rightHandPose = pose;
     this.rightHandRawTargetJoints = undefined;
     this.rightHandTargetRotations = cloneHandPoseRotations(
@@ -262,6 +310,14 @@ export class SimulatorHands {
     if (this.leftHandPose === SimulatorHandPose.PINCHING) {
       this.input.dispatchEvent({
         type: 'selectend',
+        target: this.input.controllers[0],
+        data: {
+          handedness: 'left',
+        },
+      });
+    } else if (this.leftHandPose === SimulatorHandPose.FIST) {
+      this.input.dispatchEvent({
+        type: 'squeezeend',
         target: this.input.controllers[0],
         data: {
           handedness: 'left',
@@ -291,6 +347,14 @@ export class SimulatorHands {
           handedness: 'right',
         },
       });
+    } else if (this.rightHandPose === SimulatorHandPose.FIST) {
+      this.input.dispatchEvent({
+        type: 'squeezeend',
+        target: this.input.controllers[1],
+        data: {
+          handedness: 'right',
+        },
+      });
     }
     this.rightHandPose = undefined;
     this.rightHandRawTargetJoints = undefined;
@@ -307,7 +371,15 @@ export class SimulatorHands {
     if (this.leftHandPose === SimulatorHandPose.PINCHING) {
       this.input.dispatchEvent({
         type: 'selectend',
-        target: this.input.controllers[1],
+        target: this.input.controllers[0],
+        data: {
+          handedness: 'left',
+        },
+      });
+    } else if (this.leftHandPose === SimulatorHandPose.FIST) {
+      this.input.dispatchEvent({
+        type: 'squeezeend',
+        target: this.input.controllers[0],
         data: {
           handedness: 'left',
         },
@@ -323,6 +395,14 @@ export class SimulatorHands {
     if (this.rightHandPose === SimulatorHandPose.PINCHING) {
       this.input.dispatchEvent({
         type: 'selectend',
+        target: this.input.controllers[1],
+        data: {
+          handedness: 'right',
+        },
+      });
+    } else if (this.rightHandPose === SimulatorHandPose.FIST) {
+      this.input.dispatchEvent({
+        type: 'squeezeend',
         target: this.input.controllers[1],
         data: {
           handedness: 'right',
@@ -441,6 +521,18 @@ export class SimulatorHands {
   setRightHandPinching(pinching = true) {
     this.setRightHandLerpPose(
       pinching ? SimulatorHandPose.PINCHING : SimulatorHandPose.RELAXED
+    );
+  }
+
+  setLeftHandSqueezing(squeezing = true) {
+    this.setLeftHandLerpPose(
+      squeezing ? SimulatorHandPose.FIST : SimulatorHandPose.RELAXED
+    );
+  }
+
+  setRightHandSqueezing(squeezing = true) {
+    this.setRightHandLerpPose(
+      squeezing ? SimulatorHandPose.FIST : SimulatorHandPose.RELAXED
     );
   }
 

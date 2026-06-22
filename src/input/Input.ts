@@ -160,8 +160,8 @@ export class Input {
 
     this.bindSelectStart(this.defaultOnSelectStart.bind(this));
     this.bindSelectEnd(this.defaultOnSelectEnd.bind(this));
-    this.bindSqueezeStart(this.defaultOnSelectStart.bind(this));
-    this.bindSqueezeEnd(this.defaultOnSelectEnd.bind(this));
+    this.bindSqueezeStart(this.defaultOnSqueezeStart.bind(this));
+    this.bindSqueezeEnd(this.defaultOnSqueezeEnd.bind(this));
     this.bindListener('connected', this.defaultOnConnected.bind(this));
     this.bindListener('disconnected', this.defaultOnDisconnected.bind(this));
   }

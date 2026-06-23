@@ -5,7 +5,11 @@ import {
   type SensorContext,
   type SensorsOptions,
 } from '../SensorsTypes';
-import {isInternalHelper} from '../utils/SensorsUtils';
+import {
+  isInternalHelper,
+  getUIBoundingBox,
+  isUIInteractable,
+} from '../utils/SensorsUtils';
 
 const HAND_COLLISION_OFFSET = 0.12; // 12cm forward from wrist to middle-finger MCP knuckle
 const HAND_COLLISION_RADIUS = 0.08; // 8cm bounding radius around the knuckle
@@ -38,7 +42,38 @@ export class TargetingSensor extends Sensor<TargetingSnapshot> {
 
       const intersections =
         input.intersectionsForController.get(controller) || [];
-      const firstHit = intersections.find((i) => !isInternalHelper(i.object));
+      // Map raycast hits on low-level UI child meshes to their closest high-level interactable UI ancestor
+      const resolvedIntersections = intersections.map((i) => {
+        let current: THREE.Object3D | null = i.object;
+        let isPartOfUI = false;
+        let interactableUI: THREE.Object3D | null = null;
+
+        while (current) {
+          if ((current as {isUI?: boolean}).isUI === true) {
+            isPartOfUI = true;
+            if (isUIInteractable(current)) {
+              interactableUI = current;
+              break;
+            }
+          }
+          current = current.parent;
+        }
+
+        if (isPartOfUI) {
+          if (interactableUI) {
+            return {
+              ...i,
+              object: interactableUI,
+            };
+          }
+          return i;
+        }
+        return i;
+      });
+
+      const firstHit = resolvedIntersections.find(
+        (i) => !isInternalHelper(i.object)
+      );
 
       // Calculate colliding object (what object the hand/pointer is within/overlapping)
       let collidingObjectId: number | null = null;
@@ -56,10 +91,26 @@ export class TargetingSensor extends Sensor<TargetingSnapshot> {
 
         context.core.scene.traverse((obj) => {
           if (isInternalHelper(obj) || obj === context.core.scene) return;
-          if (!(obj instanceof THREE.Mesh)) return;
-          if (!obj.visible) return;
+          let isValid = false;
+          if (obj instanceof THREE.Mesh && !isInternalHelper(obj)) {
+            isValid = true;
+          } else if (isUIInteractable(obj)) {
+            isValid = true;
+          }
 
-          box.setFromObject(obj);
+          if (!isValid || !obj.visible) return;
+
+          let isValidBox = false;
+          if ((obj as {isUI?: boolean}).isUI === true) {
+            isValidBox = getUIBoundingBox(obj, box);
+          }
+          if (!isValidBox) {
+            try {
+              box.setFromObject(obj);
+            } catch (_err) {
+              return;
+            }
+          }
           if (box.intersectsSphere(handSphere)) {
             box.getSize(size);
             const volume = size.x * size.y * size.z;

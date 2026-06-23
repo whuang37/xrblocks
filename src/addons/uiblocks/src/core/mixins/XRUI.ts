@@ -17,6 +17,8 @@ export function XRUI<TBase extends Constructor<THREE.Object3D>>(Base: TBase) {
    * Mixed class wrapping ScriptMixin interface hooks.
    */
   class Mixed extends ScriptMixin(Base) {
+    public readonly isUI = true;
+
     /**
      * Optional callback executed on every frame update step.
      */

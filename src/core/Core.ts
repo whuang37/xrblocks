@@ -546,14 +546,14 @@ export class Core {
     this.scriptsManager.update(time, frame);
 
     this.renderSimulatorAndScene();
-    if (this.simulatorRunning) {
-      this.simulator.renderSimulatorScene();
-    }
     this.screenshotSynthesizer.onAfterRender(
       this.renderer,
       this.renderSceneCallback,
       this.deviceCamera
     );
+    if (this.simulatorRunning) {
+      this.simulator.renderSimulatorScene();
+    }
   };
 
   /**

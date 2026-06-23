@@ -5,7 +5,7 @@ import {
   type SensorContext,
   type SensorsOptions,
 } from '../SensorsTypes';
-import {isInternalHelper} from '../utils/SensorsUtils';
+import {isInternalHelper, getUIBoundingBox} from '../utils/SensorsUtils';
 
 export class SceneGraphSensor extends Sensor<SerializableSceneNode[]> {
   readonly key = 'sceneGraph';
@@ -110,7 +110,17 @@ export class SceneGraphSensor extends Sensor<SerializableSceneNode[]> {
       obj.getWorldQuaternion(worldQuat);
       obj.getWorldScale(worldScale);
 
-      box.setFromObject(obj);
+      let isValidBox = false;
+      if ((obj as {isUI?: boolean}).isUI === true) {
+        isValidBox = getUIBoundingBox(obj, box);
+      }
+      if (!isValidBox) {
+        try {
+          box.setFromObject(obj);
+        } catch (_err) {
+          box.makeEmpty();
+        }
+      }
       const size = new THREE.Vector3();
       box.getSize(size);
 

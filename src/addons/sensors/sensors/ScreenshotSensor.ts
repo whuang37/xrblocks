@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import {Sensor, type SensorContext, type SensorsOptions} from '../SensorsTypes';
 import {VisibilitySensor, type VisibilityItem} from './VisibilitySensor';
-import {SensorsManager} from '../SensorsManager';
 
 export type ScreenshotXROverlayMode = boolean | 'auto';
 
@@ -21,15 +20,10 @@ export class ScreenshotCameraSensor extends Sensor<string> {
         'ScreenshotCameraSensor requires an initialized XRDeviceCamera.'
       );
     }
-    const cacheWindowMs = core.registry
-      .get(SensorsManager)
-      ?.getLatest(ScreenshotCameraSensor)
-      ? 8.0
-      : 0.0;
     return (
       (await deviceCamera.getSnapshot({
         outputFormat: 'base64',
-        cacheWindowMs,
+        cacheWindowMs: 0.0,
       })) || ''
     );
   }

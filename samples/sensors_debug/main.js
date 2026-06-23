@@ -2,6 +2,17 @@ import 'xrblocks/addons/simulator/SimulatorAddons.js';
 
 import * as THREE from 'three';
 import * as xb from 'xrblocks';
+import * as uikit from '@pmndrs/uikit';
+import {
+  UICore,
+  UIPanel,
+  UIText,
+  UIImage,
+  UIIcon,
+  BillboardBehavior,
+  ManipulationBehavior,
+  raycastSortFunction,
+} from 'uiblocks';
 import {
   SensorsManager,
   ProprioceptionSensor,
@@ -14,12 +25,44 @@ import {
   SemanticMapSensor,
 } from 'xrblocks/addons/sensors/index.js';
 
-// 1. Configure the engine options
+// --- Safe Formatting Helpers ---
+
+/** Gracefully formats any 3D vector representation (Array tuple, Vector3, or plain {x,y,z} object) */
+function formatVec3(v) {
+  if (!v) return '[-]';
+  if (Array.isArray(v)) {
+    return `[${v.map((n) => (typeof n === 'number' ? n.toFixed(3) : String(n))).join(', ')}]`;
+  }
+  if (typeof v === 'object') {
+    const x = typeof v.x === 'number' ? v.x : 0;
+    const y = typeof v.y === 'number' ? v.y : 0;
+    const z = typeof v.z === 'number' ? v.z : 0;
+    return `[${x.toFixed(3)}, ${y.toFixed(3)}, ${z.toFixed(3)}]`;
+  }
+  return String(v);
+}
+
+/** Safely extracts a THREE.Quaternion from any valid representation */
+function toQuaternion(q) {
+  if (!q) return new THREE.Quaternion();
+  if (q instanceof THREE.Quaternion) return q;
+  if (Array.isArray(q)) {
+    return new THREE.Quaternion(q[0] ?? 0, q[1] ?? 0, q[2] ?? 0, q[3] ?? 1);
+  }
+  if (typeof q === 'object') {
+    return new THREE.Quaternion(q.x ?? 0, q.y ?? 0, q.z ?? 0, q.w ?? 1);
+  }
+  return new THREE.Quaternion();
+}
+
+// 1. Configure the engine options for XR
 const options = new xb.Options();
-options.formFactor = 'desktop';
-options.xrButton.enabled = false;
+options.formFactor = 'auto'; // Detects XR device, supports ?formFactor=desktop simulator
+options.xrButton.enabled = true; // Show standard Enter XR button
 options.enableHands();
 options.enableCamera();
+options.enableUI();
+options.uikit.enable(uikit);
 
 // Enable core environmental depth mapping
 options.depth = new xb.DepthOptions();
@@ -28,225 +71,30 @@ options.depth.depthMesh.enabled = true;
 options.depth.depthTexture.enabled = true;
 options.setAppTitle('Sensors Debugger');
 
-// 2. Create the floating debugger sidebar panel in the DOM
-function createDebuggerSidebar() {
-  const style = document.createElement('style');
-  style.textContent = `
-    #sensors-debugger-sidebar {
-      position: fixed;
-      top: 12px;
-      right: 12px;
-      width: 380px;
-      max-height: calc(100vh - 24px);
-      overflow-y: auto;
-      padding: 16px;
-      border-radius: 12px;
-      background: rgba(10, 12, 16, 0.88);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      color: #f0f0f0;
-      font-family: 'Google Sans', 'Segoe UI', Roboto, Arial, sans-serif;
-      font-size: 13px;
-      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
-      z-index: 9999;
-      box-sizing: border-box;
-    }
-    #sensors-debugger-sidebar h1 {
-      margin: 0 0 12px;
-      font-size: 18px;
-      font-weight: 700;
-      color: #fff;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.15);
-      padding-bottom: 8px;
-    }
-    #sensors-debugger-sidebar section {
-      margin-top: 16px;
-      border-top: 1px solid rgba(255, 255, 255, 0.08);
-      padding-top: 12px;
-    }
-    #sensors-debugger-sidebar h2 {
-      margin: 0 0 8px;
-      color: #ff0055;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-    }
-    .preview-container {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-    .camera-grid {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 10px;
-    }
-    .camera-card {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-    .camera-card h3 {
-      margin: 0;
-      color: #b9e6ff;
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-    }
-    .preview-box {
-      width: 100%;
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 8px;
-      overflow: hidden;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      box-sizing: border-box;
-    }
-    .preview-box img {
-      width: 100%;
-      height: auto;
-      display: block;
-    }
-    .preview-box canvas {
-      width: 100%;
-      height: 180px;
-      display: block;
-      background: #000;
-    }
-    .subtitles-list {
-      max-height: 150px;
-      overflow-y: auto;
-      font-family: monospace;
-      font-size: 11px;
-      background: rgba(0, 0, 0, 0.25);
-      padding: 8px;
-      border-radius: 6px;
-      border: 1px solid rgba(255, 255, 255, 0.06);
-    }
-    .subtitles-list div {
-      margin-bottom: 4px;
-      color: #a0ffb0;
-    }
-    .telemetry-grid {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 6px;
-      font-family: monospace;
-      font-size: 11px;
-    }
-    .telemetry-item {
-      background: rgba(255, 255, 255, 0.03);
-      padding: 6px 8px;
-      border-radius: 4px;
-      border-left: 3px solid #69d2e7;
-    }
-    .telemetry-item span {
-      color: #ffc857;
-      font-weight: bold;
-    }
-    .debug-json {
-      max-height: 360px;
-      overflow: auto;
-      margin: 0;
-      padding: 10px;
-      border-radius: 6px;
-      background: rgba(0, 0, 0, 0.35);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      color: #d8f3dc;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 10px;
-      line-height: 1.35;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-  `;
-  document.head.appendChild(style);
+// List of all sensors for the dropdown
+const SENSOR_LIST = [
+  {name: 'Proprioception', sensorClass: ProprioceptionSensor, type: 'text'},
+  {name: 'Scene Graph', sensorClass: SceneGraphSensor, type: 'text'},
+  {name: 'Targeting / Raycasts', sensorClass: TargetingSensor, type: 'text'},
+  {name: 'Semantic Map', sensorClass: SemanticMapSensor, type: 'text'},
+  {name: 'Depth Heatmap', sensorClass: DepthSensor, type: 'depth'},
+  {
+    name: 'Screenshot (Camera)',
+    sensorClass: ScreenshotCameraSensor,
+    type: 'image',
+  },
+  {name: 'Screenshot (XR)', sensorClass: ScreenshotXRSensor, type: 'image'},
+  {name: 'Screenshot (SOM)', sensorClass: ScreenshotSOMSensor, type: 'image'},
+];
 
-  const sidebar = document.createElement('aside');
-  sidebar.id = 'sensors-debugger-sidebar';
-  sidebar.innerHTML = `
-    <h1>Sensors Debugger</h1>
-    
-    <section>
-      <h2>Camera & Screenshot Sensors</h2>
-      <div class="camera-grid">
-        <div class="camera-card">
-          <h3>screenshotCamera</h3>
-          <div class="preview-box">
-            <img id="camera-image" alt="Waiting for raw camera screenshot..." src="" />
-          </div>
-        </div>
-        <div class="camera-card">
-          <h3>screenshotXR</h3>
-          <div class="preview-box">
-            <img id="xr-image" alt="Waiting for XR screenshot..." src="" />
-          </div>
-        </div>
-        <div class="camera-card">
-          <h3>screenshotSOM</h3>
-          <div class="preview-box">
-            <img id="som-image" alt="Waiting for set-of-mark screenshot..." src="" />
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section>
-      <h2>Environmental Depth Heatmap</h2>
-      <div class="preview-container">
-        <div class="preview-box">
-          <canvas id="depth-canvas" width="320" height="180"></canvas>
-        </div>
-      </div>
-    </section>
-
-    <section>
-      <h2>Plaintext Subtitles (SOM Index)</h2>
-      <div id="subtitles-container" class="subtitles-list">
-        <div>Loading visible entities...</div>
-      </div>
-    </section>
-
-    <section>
-      <h2>Skeletal Proprioception</h2>
-      <div class="telemetry-grid">
-        <div class="telemetry-item" id="tel-head">Head Position: <span>-</span></div>
-        <div class="telemetry-item" id="tel-lhand">Left Hand: <span>-</span></div>
-        <div class="telemetry-item" id="tel-rhand">Right Hand: <span>-</span></div>
-      </div>
-    </section>
-
-    <section>
-      <h2>Targeting & Pointer Normals</h2>
-      <div class="telemetry-grid">
-        <div class="telemetry-item" id="target-left">Left Ray: <span>-</span></div>
-        <div class="telemetry-item" id="target-right">Right Ray: <span>-</span></div>
-      </div>
-    </section>
-
-    <section>
-      <h2>All Sensor Data</h2>
-      <pre id="sensor-json" class="debug-json">Waiting for sensor capture...</pre>
-    </section>
-  `;
-  document.body.appendChild(sidebar);
-  return sidebar;
-}
-
-// 3. Define the main prototyping scene containing testable entities
+// 2. Define the main prototyping scene containing testable entities (same as original)
 class PrototypingScene extends xb.Script {
   init() {
-    // Basic room lights
     this.add(new THREE.HemisphereLight(0xffffff, 0x606060, 3.5));
     const keyLight = new THREE.DirectionalLight(0xffffff, 2.5);
     keyLight.position.set(1.5, 3.0, 1.5);
     this.add(keyLight);
 
-    // Ground plane (so the depth sensing has a flat floor to collide with)
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(10, 10),
       new THREE.MeshStandardMaterial({color: 0x222428, roughness: 0.8})
@@ -256,7 +104,6 @@ class PrototypingScene extends xb.Script {
     floor.position.y = 0;
     this.add(floor);
 
-    // A colorful green Torus
     const torus = new THREE.Mesh(
       new THREE.TorusGeometry(0.2, 0.05, 12, 48),
       new THREE.MeshStandardMaterial({
@@ -271,7 +118,6 @@ class PrototypingScene extends xb.Script {
     torus.draggingMode = xb.DragMode.TRANSLATING;
     this.add(torus);
 
-    // A colorful orange Box
     const box = new THREE.Mesh(
       new THREE.BoxGeometry(0.3, 0.3, 0.3),
       new THREE.MeshStandardMaterial({
@@ -286,7 +132,6 @@ class PrototypingScene extends xb.Script {
     box.draggingMode = xb.DragMode.TRANSLATING;
     this.add(box);
 
-    // A colorful blue Sphere
     const sphere = new THREE.Mesh(
       new THREE.SphereGeometry(0.2, 32, 32),
       new THREE.MeshStandardMaterial({
@@ -303,176 +148,427 @@ class PrototypingScene extends xb.Script {
   }
 }
 
-// 4. Implement a custom script to tick, capture, and render sensor observations
+// 3. Custom Script to manage the spatial UI blocks panel and query the selected sensor
 class DebuggerScript extends xb.Script {
   static dependencies = {
     sensors: SensorsManager,
   };
 
+  constructor() {
+    super();
+    this.uiCore = new UICore(this);
+  }
+
   sensors = null;
   lastCaptureTime = 0;
   isCapturing = false;
 
+  // Selected sensor tracking
+  activeSensorIndex = 0;
+  isDropdownExpanded = false;
+
+  // Offscreen canvas for depth rendering
+  depthCanvas = null;
+  depthTexture = null;
+
+  // UI Components references
+  uiText = null;
+  uiImage = null;
+  dropdownText = null;
+  dropdownArrow = null;
+  optionsContainer = null;
+
   init(dependencies) {
     this.sensors = dependencies.sensors;
+
+    // Set sort function for raycasting against uiblocks
+    if (xb.core.input.raycaster) {
+      xb.core.input.raycaster.sortFunction = raycastSortFunction;
+    }
+
+    // Setup offscreen canvas for depth heatmap
+    this.depthCanvas = document.createElement('canvas');
+    this.depthCanvas.width = 320;
+    this.depthCanvas.height = 180;
+    this.depthTexture = new THREE.CanvasTexture(this.depthCanvas);
+
+    // Build the beautiful spatial UI card
+    this.buildSpatialUI();
+  }
+
+  buildSpatialUI() {
+    const card = this.uiCore.createCard({
+      name: 'SensorsDebuggerCard',
+      sizeX: 0.8,
+      sizeY: 0.65,
+      pixelSize: 0.0016, // crisp text at arm's length
+      position: new THREE.Vector3(0, 1.5, -1.5), // Placed higher and further back to avoid shape occlusion
+      alignItems: 'center',
+      behaviors: [
+        new BillboardBehavior({mode: 'cylindrical'}),
+        new ManipulationBehavior({
+          draggable: true,
+          faceCamera: true,
+          manipulationMargin: 20,
+          manipulationCornerRadius: 24,
+        }),
+      ],
+    });
+
+    const root = new UIPanel({
+      width: '100%',
+      height: '100%',
+      flexDirection: 'column',
+      fillColor: '#111318',
+      cornerRadius: 24,
+      padding: 24,
+      gap: 12,
+      strokeWidth: 1,
+      strokeColor: '#2d313e',
+      strokeAlign: 'inside',
+      dropShadowColor: '#000000',
+      dropShadowBlur: 20,
+      dropShadowSpread: 1,
+    });
+    card.add(root);
+
+    // Title Bar
+    const titleBar = new UIPanel({
+      width: '100%',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    });
+    titleBar.add(
+      new UIIcon('sensors', {color: '#ff0055', width: 24, height: 24})
+    );
+    titleBar.add(
+      new UIText('Sensors Debugger', {
+        fontSize: 20,
+        fontWeight: 'bold',
+        color: '#ffffff',
+      })
+    );
+    root.add(titleBar);
+
+    // Dropdown Container
+    const dropdownContainer = new UIPanel({
+      width: '100%',
+      flexDirection: 'column',
+      gap: 4,
+      zIndex: 100, // Make sure dropdown options render on top of the output panel
+    });
+    root.add(dropdownContainer);
+
+    // Dropdown Selector Button (Header)
+    this.dropdownText = new UIText(SENSOR_LIST[this.activeSensorIndex].name, {
+      fontSize: 14,
+      fontWeight: 'bold',
+      color: '#ffffff',
+    });
+    this.dropdownArrow = new UIIcon('keyboard_arrow_down', {
+      color: '#ffffff',
+      width: 20,
+      height: 20,
+    });
+
+    const dropdownHeader = new UIPanel({
+      width: '100%',
+      height: 40,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingLeft: 16,
+      paddingRight: 16,
+      fillColor: '#1f232e',
+      cornerRadius: 8,
+      strokeWidth: 1,
+      strokeColor: '#3a3f50',
+      onClick: () => this.toggleDropdown(),
+      onHoverEnter: () => dropdownHeader.setFillColor('#2c3242'),
+      onHoverExit: () => dropdownHeader.setFillColor('#1f232e'),
+    });
+    dropdownHeader.add(this.dropdownText);
+    dropdownHeader.add(this.dropdownArrow);
+    dropdownContainer.add(dropdownHeader);
+
+    // Dropdown Options List Container (hidden by default)
+    this.optionsContainer = new UIPanel({
+      width: '100%',
+      flexDirection: 'column',
+      fillColor: '#1a1d26',
+      cornerRadius: 8,
+      strokeWidth: 1,
+      strokeColor: '#2e3342',
+      display: 'none',
+      padding: 4,
+      gap: 2,
+    });
+    dropdownContainer.add(this.optionsContainer);
+
+    // Add options to dropdown list
+    SENSOR_LIST.forEach((item, index) => {
+      const optionBtn = new UIPanel({
+        width: '100%',
+        height: 32,
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingLeft: 12,
+        cornerRadius: 6,
+        fillColor: '#00000000',
+        onClick: () => this.selectSensor(index),
+        onHoverEnter: () => optionBtn.setFillColor('#2c3242'),
+        onHoverExit: () => optionBtn.setFillColor('#00000000'),
+      });
+      optionBtn.add(new UIText(item.name, {fontSize: 13, color: '#e0e0e0'}));
+      this.optionsContainer.add(optionBtn);
+    });
+
+    // Output Display Box (Recessed area)
+    const outputWrapper = new UIPanel({
+      width: '100%',
+      flexGrow: 1,
+      fillColor: '#090b0e',
+      cornerRadius: 12,
+      padding: 16,
+      strokeWidth: 1,
+      strokeColor: '#1c1f26',
+      justifyContent: 'center',
+      alignItems: 'center',
+      overflow: 'hidden',
+    });
+    root.add(outputWrapper);
+
+    // Text Display Component
+    this.uiText = new UIText('Loading sensor telemetry...', {
+      fontSize: 12,
+      color: '#d8f3dc',
+      width: '100%',
+      lineHeight: 1.4,
+    });
+    outputWrapper.add(this.uiText);
+
+    // Image Display Component (hidden initially)
+    // Pass undefined as first argument (src) and properties as second argument (style properties)
+    this.uiImage = new UIImage(undefined, {
+      width: '100%',
+      height: '100%',
+      objectFit: 'contain',
+      display: 'none',
+      borderRadius: 8,
+    });
+    outputWrapper.add(this.uiImage);
+
+    // Initial load setup
+    this.selectSensor(0);
+  }
+
+  toggleDropdown() {
+    this.isDropdownExpanded = !this.isDropdownExpanded;
+    this.optionsContainer.setProperties({
+      display: this.isDropdownExpanded ? 'flex' : 'none',
+    });
+    this.dropdownArrow.setProperties({
+      icon: this.isDropdownExpanded
+        ? 'keyboard_arrow_up'
+        : 'keyboard_arrow_down',
+    });
+  }
+
+  selectSensor(index) {
+    this.activeSensorIndex = index;
+    this.dropdownText.setText(SENSOR_LIST[index].name);
+
+    if (this.isDropdownExpanded) {
+      this.toggleDropdown();
+    }
+
+    // Reset visual display elements
+    const activeInfo = SENSOR_LIST[index];
+    if (activeInfo.type === 'text') {
+      this.uiText.setProperties({display: 'flex'});
+      this.uiImage.setProperties({display: 'none'});
+      this.uiText.setText(`Initializing capture for ${activeInfo.name}...`);
+    } else {
+      this.uiText.setProperties({display: 'none'});
+      this.uiImage.setProperties({display: 'flex'});
+      // Pass undefined to cleanly clear the texture without triggering browser load errors
+      this.uiImage.setSrc(undefined);
+    }
   }
 
   update(time) {
-    // Throttle capture to 250ms and avoid overlapping screenshot captures.
-    if (this.isCapturing || time - this.lastCaptureTime < 250) return;
+    // Throttle sensor captures to 300ms to maintain great performance in XR
+    if (this.isCapturing || time - this.lastCaptureTime < 300) return;
     this.lastCaptureTime = time;
 
-    this.updateDebuggerUI();
+    this.captureActiveSensor();
   }
 
-  async updateDebuggerUI() {
+  async captureActiveSensor() {
     this.isCapturing = true;
+    const sensorInfo = SENSOR_LIST[this.activeSensorIndex];
     try {
-      const [
-        state,
-        sceneGraph,
-        targeting,
-        depth,
-        screenshotCamera,
-        screenshotXR,
-        screenshotSOM,
-        visibleObjects,
-      ] = await this.sensors.capture([
-        ProprioceptionSensor,
-        SceneGraphSensor,
-        TargetingSensor,
-        DepthSensor,
-        ScreenshotCameraSensor,
-        ScreenshotXRSensor,
-        ScreenshotSOMSensor,
-        SemanticMapSensor,
-      ]);
-      const sensorErrors = this.sensors.getLastCaptureErrors();
+      // Perform dynamic single-sensor query
+      const data = await this.sensors.get(sensorInfo.sensorClass);
 
-      // 1. Update all screenshot sensors
-      const cameraImg = document.getElementById('camera-image');
-      if (cameraImg && screenshotCamera) {
-        cameraImg.src = screenshotCamera;
+      if (this.activeSensorIndex !== SENSOR_LIST.indexOf(sensorInfo)) {
+        // Selected sensor changed during the async capture, ignore result
+        return;
       }
 
-      const xrImg = document.getElementById('xr-image');
-      if (xrImg && screenshotXR) {
-        xrImg.src = screenshotXR;
-      }
-
-      const somImg = document.getElementById('som-image');
-      if (somImg && screenshotSOM) {
-        somImg.src = screenshotSOM;
-      }
-
-      // 2. Render environmental depth heatmap on canvas
-      const depthCanvas = document.getElementById('depth-canvas');
-      if (depthCanvas && depth) {
-        this.drawDepthHeatmap(depthCanvas, depth);
-      }
-
-      // 3. Update plaintext visible objects (Set-of-Mark index subtitles)
-      const subContainer = document.getElementById('subtitles-container');
-      if (subContainer) {
-        if (visibleObjects && visibleObjects.length > 0) {
-          subContainer.innerHTML = visibleObjects
-            .map((ref) => `<div>${ref.description}</div>`)
-            .join('');
+      if (sensorInfo.type === 'text') {
+        let formattedText = '';
+        switch (sensorInfo.sensorClass) {
+          case ProprioceptionSensor:
+            formattedText = this.formatProprioception(data);
+            break;
+          case SceneGraphSensor:
+            formattedText = this.formatSceneGraph(data);
+            break;
+          case TargetingSensor:
+            formattedText = this.formatTargeting(data);
+            break;
+          case SemanticMapSensor:
+            formattedText = this.formatSemanticMap(data);
+            break;
+          default:
+            formattedText = JSON.stringify(data, null, 2);
+        }
+        this.uiText.setText(formattedText);
+      } else if (sensorInfo.type === 'depth') {
+        if (data) {
+          this.drawDepthHeatmap(data);
+          this.depthTexture.needsUpdate = true;
+          this.uiImage.setSrc(this.depthTexture);
+        }
+      } else if (sensorInfo.type === 'image') {
+        if (data) {
+          this.uiImage.setSrc(data);
         } else {
-          subContainer.innerHTML =
-            '<div style="color: #888;">No unoccluded entities visible</div>';
+          this.uiImage.setSrc(undefined);
         }
       }
-
-      // 4. Update Proprioception coordinates
-      if (state) {
-        const head = state.camera;
-        const left = state.leftHand;
-        const right = state.rightHand;
-
-        const q = new THREE.Quaternion(...head.quaternion);
-        const euler = new THREE.Euler().setFromQuaternion(q);
-        const degX = ((euler.x * 180) / Math.PI).toFixed(1);
-        const degY = ((euler.y * 180) / Math.PI).toFixed(1);
-        const degZ = ((euler.z * 180) / Math.PI).toFixed(1);
-
-        document.getElementById('tel-head').innerHTML =
-          `Head Pos: <span>[${head.position.map((n) => n.toFixed(2)).join(', ')}]</span><br/>` +
-          `Head Rot: <span>[P: ${degX}°, Y: ${degY}°, R: ${degZ}°]</span>`;
-
-        document.getElementById('tel-lhand').innerHTML =
-          `Left Hand: <span>[${left.position.map((n) => n.toFixed(2)).join(', ')}]</span> | Vis: <span>${left.visible}</span> | Pinch: <span>${left.selected}</span>`;
-
-        document.getElementById('tel-rhand').innerHTML =
-          `Right Hand: <span>[${right.position.map((n) => n.toFixed(2)).join(', ')}]</span> | Vis: <span>${right.visible}</span> | Pinch: <span>${right.selected}</span>`;
-      }
-
-      // 5. Update Pointer Targeting intersections and normals
-      if (targeting) {
-        const getTargetString = (target) => {
-          if (!target) return 'Inactive';
-          const hitStr =
-            target.hoveredObjectId === null
-              ? 'No intersection'
-              : `Hit Obj ID: <span>${target.hoveredObjectId}</span> | Dist: <span>${target.distanceToHoveredObject?.toFixed(2)}m</span><br/>Pos: <span>[${target.intersectionPoint?.map((n) => n.toFixed(2)).join(', ')}]</span><br/>Normal: <span>[${target.surfaceNormal?.map((n) => n.toFixed(2)).join(', ')}]</span>`;
-
-          const collideStr =
-            target.collidingObjectId === null
-              ? 'None'
-              : `<span>${target.collidingObjectId}</span>`;
-
-          return `${hitStr}<br/>Colliding: ${collideStr}`;
-        };
-
-        document.getElementById('target-left').innerHTML =
-          `Left: ${getTargetString(targeting.leftHand)}`;
-        document.getElementById('target-right').innerHTML =
-          `Right: ${getTargetString(targeting.rightHand)}`;
-      }
-
-      // 6. Render the full structured sensor payload for debugging.
-      const sensorJson = document.getElementById('sensor-json');
-      if (sensorJson) {
-        sensorJson.textContent = JSON.stringify(
-          {
-            state,
-            targeting,
-            visibleObjects,
-            sceneGraph,
-            depth,
-            screenshotCamera: this.describeImageData(screenshotCamera),
-            screenshotXR: this.describeImageData(screenshotXR),
-            screenshotSOM: this.describeImageData(screenshotSOM),
-            sensorErrors,
-          },
-          null,
-          2
-        );
-      }
     } catch (e) {
-      console.error('Sensor Debugger Capture Error:', e);
-      const sensorJson = document.getElementById('sensor-json');
-      if (sensorJson) {
-        sensorJson.textContent =
-          e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+      console.error(`Sensor Debugger Capture Error (${sensorInfo.name}):`, e);
+      if (sensorInfo.type === 'text') {
+        this.uiText.setText(
+          `Capture Error:\n${e instanceof Error ? e.message : String(e)}`
+        );
       }
     } finally {
       this.isCapturing = false;
     }
   }
 
-  describeImageData(dataUrl) {
-    if (typeof dataUrl !== 'string') return null;
-    const match = dataUrl.match(/^data:(image\/[^;]+);base64,/);
-    return {
-      type: match?.[1] ?? 'unknown',
-      length: dataUrl.length,
-      preview: `${dataUrl.slice(0, 64)}...`,
-    };
+  formatProprioception(state) {
+    if (!state) return 'No proprioception data available.';
+    const head = state.camera;
+    const left = state.leftHand;
+    const right = state.rightHand;
+
+    const q = toQuaternion(head.quaternion);
+    const euler = new THREE.Euler().setFromQuaternion(q);
+    const rotDeg = [euler.x, euler.y, euler.z].map((r) =>
+      ((r * 180) / Math.PI).toFixed(1)
+    );
+
+    return [
+      `[Head Position]`,
+      `Pos: ${formatVec3(head.position)}`,
+      `Rot: [Pitch: ${rotDeg[0]}°, Yaw: ${rotDeg[1]}°, Roll: ${rotDeg[2]}°]`,
+      ``,
+      `[Left Hand]`,
+      `Pos: ${formatVec3(left.position)}`,
+      `Visible: ${left.visible}  |  Pinching: ${left.selected}`,
+      ``,
+      `[Right Hand]`,
+      `Pos: ${formatVec3(right.position)}`,
+      `Visible: ${right.visible}  |  Pinching: ${right.selected}`,
+    ].join('\n');
   }
 
-  /** Draws depth grid on a 2D canvas using a smooth blue-to-red color heatmap */
-  drawDepthHeatmap(canvas, depthGrid) {
+  formatSceneGraph(graph) {
+    if (!graph || !Array.isArray(graph) || graph.length === 0) {
+      return 'No scene graph data.';
+    }
+
+    // Build map of ID -> Node for fast O(1) resolution
+    const nodeMap = new Map(graph.map((node) => [node.id, node]));
+    const childIds = new Set(graph.flatMap((node) => node.children || []));
+    // Root nodes are those not referenced as children of any other node
+    const roots = graph.filter((node) => !childIds.has(node.id));
+
+    const formatNode = (node, depth = 0) => {
+      const indent = '  '.repeat(depth);
+      let line = `${indent}• [${node.type}] ${node.name || 'unnamed'}`;
+      if (node.position) {
+        line += ` (pos: ${formatVec3(node.position)})`;
+      }
+      let lines = [line];
+      if (node.children && node.children.length > 0) {
+        if (depth < 3) {
+          node.children.forEach((childId) => {
+            const childNode = nodeMap.get(childId);
+            if (childNode) {
+              lines = lines.concat(formatNode(childNode, depth + 1));
+            }
+          });
+        } else {
+          lines.push(`${indent}  ... (max depth)`);
+        }
+      }
+      return lines;
+    };
+
+    // Format all roots, falling back to first node if roots list is empty
+    const targetRoots = roots.length > 0 ? roots : [graph[0]];
+    const lines = targetRoots
+      .filter((root) => root !== undefined)
+      .flatMap((root) => formatNode(root, 0));
+    return lines.slice(0, 32).join('\n');
+  }
+
+  formatTargeting(targeting) {
+    if (!targeting) return 'No targeting data available.';
+
+    const formatRay = (handName, target) => {
+      if (!target) return `${handName} Ray: Inactive`;
+      if (target.hoveredObjectId === null) {
+        return `${handName} Ray:\n  - No intersection\n  - Colliding: ${target.collidingObjectId !== null ? target.collidingObjectId : 'None'}`;
+      }
+      return [
+        `${handName} Ray:`,
+        `  - Hover Obj ID: ${target.hoveredObjectId}`,
+        `  - Distance: ${target.distanceToHoveredObject.toFixed(2)}m`,
+        `  - Hit Pos: ${formatVec3(target.intersectionPoint)}`,
+        `  - Normal: ${formatVec3(target.surfaceNormal)}`,
+        `  - Colliding: ${target.collidingObjectId !== null ? target.collidingObjectId : 'None'}`,
+      ].join('\n');
+    };
+
+    return [
+      formatRay('Left Hand', targeting.leftHand),
+      ``,
+      formatRay('Right Hand', targeting.rightHand),
+    ].join('\n');
+  }
+
+  formatSemanticMap(visibleObjects) {
+    if (!visibleObjects || visibleObjects.length === 0) {
+      return 'No unoccluded entities visible in Semantic Map.';
+    }
+    return [
+      `[Visible Entities in Viewport]`,
+      // Use objectId (returned by SemanticMapSensor) instead of id
+      ...visibleObjects.map(
+        (obj) => `• [ID ${obj.objectId}] ${obj.description}`
+      ),
+    ].join('\n');
+  }
+
+  drawDepthHeatmap(depthGrid) {
+    const canvas = this.depthCanvas;
     const ctx = canvas.getContext('2d');
     const rows = depthGrid.length;
     const cols = depthGrid[0]?.length || 0;
@@ -480,6 +576,8 @@ class DebuggerScript extends xb.Script {
 
     const cellW = canvas.width / cols;
     const cellH = canvas.height / rows;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     for (let y = 0; y < rows; y++) {
       for (let x = 0; x < cols; x++) {
@@ -500,10 +598,8 @@ class DebuggerScript extends xb.Script {
   }
 }
 
-// 5. Start and initialize the engine
+// 4. Start and initialize the engine
 async function start() {
-  createDebuggerSidebar();
-
   const sensors = new SensorsManager([
     ProprioceptionSensor,
     SceneGraphSensor,
@@ -516,10 +612,9 @@ async function start() {
   ]);
 
   // Register the sensors instance in the dependency injection container
-  // so that DebuggerScript can successfully inject it!
   xb.core.registry.register(sensors);
 
-  // Register the debugging and scenario scripts
+  // Register scripts
   xb.add(new PrototypingScene());
   xb.add(new xb.DragManager());
   xb.add(sensors);
@@ -527,7 +622,7 @@ async function start() {
 
   await xb.init(options);
 
-  // Pre-activate both left and right simulated hands
+  // Pre-activate both left and right simulated hands when running in the simulator
   if (xb.core.simulator) {
     await new Promise((resolve) => requestAnimationFrame(resolve));
     xb.core.simulator.hands.leftController.visible = true;

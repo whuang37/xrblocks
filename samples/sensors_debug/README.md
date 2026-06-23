@@ -1,32 +1,41 @@
-# Sensors Debugger Sample
+# Sensors Spatial Debugger Sample
 
-This sample demonstrates the XR Blocks **Sensors Addon** by building a real-time floating telemetry debugger in the DOM. It showcases the simplified async execution pipeline and provides a visual inspector for all 5 core sensor streams.
+This sample demonstrates the XR Blocks **Sensors Addon** integrated with the **UI Blocks Addon** (`uiblocks`). It replaces standard DOM sidebar panels with a high-fidelity spatial 3D card that floats in the environment. The card features an interactive collapsible dropdown selector, allowing you to select and query any individual sensor dynamically while keeping performance fast.
 
 ![Sensors Debugger](https://fonts.gstatic.com/s/i/short-term/release/materialsymbolsoutlined/sensors/default/48px.svg)
 
 ## Features
 
-- **Set-of-Mark (SOM) Viewport**: Renders real-time camera screenshots annotated with visual IDs for all visible, interactive objects.
-- **Environmental Depth Heatmap**: Visualizes real-time depth-sensing grids by rendering distance measurements (0m to 4m) as a smooth blue-to-red color ramp on a 2D canvas.
-- **Plaintext Subtitles**: Displays a live, unoccluded index of visible entities with descriptions (e.g., `"Green Torus"`, `"Orange Box"`).
-- **Skeletal Proprioception**: Inspects head (camera) and hand tracking coordinates, visibility states, and pinching gestures.
-- **Targeting & Pointer Normals**: Monitors Left, Right, and Gaze targeting rays, indicating hit object IDs, intersection coordinates, and surface normal vectors.
+- **Spatial UI Blocks Panel**: A beautiful, grabbable, and cylindrical-billboarded 3D card layout that floats in front of the user at eye level.
+- **Collapsible Dropdown Selector**: A custom-designed spatial dropdown menu that lists all 8 available sensors. Clicking the dropdown expands the options list; selecting an option updates the active sensor and collapses the menu.
+- **Performant Single-Sensor Queries**: Rather than capturing all 8 sensors constantly, the app runs a throttled capture loop (at 300ms) that queries _only_ the selected sensor.
+- **Depth Heatmap Rendering in XR**: Renders environmental depth-sensing distance grids (0m to 4m) as a blue-to-red color ramp on an offscreen canvas, which is uploaded as a `THREE.CanvasTexture` and displayed dynamically inside a spatial `UIImage` component.
+- **Image & Telemetry Display**:
+  - **Text-based sensors** (`Proprioception`, `Scene Graph`, `Targeting`, `Semantic Map`): Renders formatted, multi-line diagnostic text inside a `UIText` component.
+  - **Screenshot sensors** (`Camera`, `XR`, `SOM`): Renders the captured base64 image streams inside a `UIImage` component.
 
 ## How to Use
 
-1. Serve the repository locally by running `npm run dev`.
-2. Open the browser and navigate to the samples page (`http://127.0.0.1:8080/samples/sensors_debug/`).
-3. You will see a 3D prototyping room containing three draggable, colorful shapes (a green Torus, an orange Box, and a blue Sphere).
-4. The floating **Sensors Debugger** sidebar on the right will update in real-time at 10Hz.
-5. Drag and move the shapes around, look around with the mouse, or use the simulator keys (`Left Shift` to toggle hand modes, `WASD` to move) to watch the targeting intersections, depth heatmaps, and SOM overlays respond instantly.
+1. Serve the repository locally by running:
+   ```bash
+   npm run dev
+   ```
+2. Open your browser and navigate to the sample page:
+   `http://127.0.0.1:8080/samples/sensors_debug/?formFactor=desktop` (this will automatically launch the desktop simulator).
+3. Click the **Enter AR** or **Enter VR** button to enter the spatial experience.
+4. You will see a 3D prototyping room containing three draggable, colorful shapes (a green Torus, an orange Box, and a blue Sphere) along with the **Sensors Debugger** panel floating in front of you.
+5. **Move & Grab the Panel**: Aim your simulated controller/hand ray at the margins of the panel. Pinch/click and drag to move it anywhere in your room. The panel will rotate cylindrically to face you as you move around.
+6. **Toggle Sensors**: Click on the dropdown menu at the top of the panel (displaying "Proprioception" by default). The options menu will expand. Click on any sensor to load its telemetry:
+   - Select **Semantic Map** or **Targeting** and interact with the shapes or look around to see the live intersections and visible object indices update.
+   - Select **Depth Heatmap** to see the live distance ramp.
+   - Select one of the **Screenshot** sensors to inspect viewport frame captures in real-time.
 
 ## Technical Highlights
 
 The sample showcases:
 
-- **Centralized Capture Pipeline**: Using `SensorsManager.capture([...])` to pull multiple high-fidelity telemetry streams concurrently in a single awaited call.
-- **`ProprioceptionSensor`**: Capturing user spatial context, skeletal hand joints, and tracking visibility.
-- **`TargetingSensor`**: Retrieving 3D raycast targeting results for hands and gaze, including collision distances and surface normal vectors.
-- **`DepthSensor`**: Querying environmental distance grids with custom parameterizations (e.g., custom grid sizes).
-- **`ScreenshotSOMSensor` & `SemanticMapSensor`**: Resolving complex, multi-sensor dependencies dynamically at runtime to synthesize annotated screenshots and unoccluded entity visibility lists.
-- **Dependency Injection Integration**: Registering the manager in the registry (`xb.core.registry.register(sensors)`) and injecting it cleanly as a dependency on custom scripts.
+- **`uiblocks` Layout & Styling**: Building structured layouts (`UIPanel`, `UIText`, `UIImage`, `UIIcon`) using flexbox properties and styling tokens (like custom corner rounding, borders, drop shadows, and linear gradients).
+- **Dynamic Interaction Callbacks**: Implementing custom hovering states and click events (`onHoverEnter`, `onHoverExit`, `onClick`) directly in the spatial UI.
+- **Dynamic Layout Toggling**: Using the `display` property (`'flex'` / `'none'`) to hide and show components dynamically (e.g. expanding the dropdown, switching between text and image views).
+- **Offscreen Canvas Textures in XR**: Bridging HTML5 2D canvas drawing with 3D WebGL scenes by rendering dynamic heatmaps to an offscreen canvas, wrapping it in a `THREE.CanvasTexture`, and passing it to a spatial `UIImage`.
+- **Targeted Subsystem Resolution**: Utilizing `sensors.get(SensorClass)` to capture specific telemetry streams on-demand, reducing rendering overhead.

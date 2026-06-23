@@ -22,3 +22,7 @@ export {
   ScreenshotSOMSensor,
 } from './sensors/ScreenshotSensor';
 export {SemanticMapSensor} from './sensors/SemanticMapSensor';
+export {PlaneSensor} from './sensors/PlaneSensor';
+export {WorldObjectsSensor} from './sensors/WorldObjectsSensor';
+export {BodyPoseSensor} from './sensors/BodyPoseSensor';
+export {SoundSensor, type SoundSensorSnapshot} from './sensors/SoundSensor';

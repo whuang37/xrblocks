@@ -35,7 +35,7 @@ export class SceneGraphSensor extends Sensor<SerializableSceneNode[]> {
       object.children.some((child) => (child as {isView?: boolean}).isView);
 
     const isSceneGraphContainer = (object: THREE.Object3D): boolean =>
-      (object as {isView?: boolean}).isView && hasChildView(object);
+      !!(object as {isView?: boolean}).isView && hasChildView(object);
 
     const isSceneGraphNode = (object: THREE.Object3D): boolean => {
       if (object instanceof THREE.Mesh) return true;

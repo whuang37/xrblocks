@@ -146,6 +146,7 @@ export * from './world/planes/DetectedPlane';
 export * from './world/planes/PlaneDetector';
 export * from './world/planes/PlanesOptions';
 export * from './world/planes/SimulatorPlane';
+export * from './world/sounds/DetectedSounds';
 export * from './world/World';
 export * from './world/WorldOptions';
 export * from './world/humans/DetectedBodyPose';

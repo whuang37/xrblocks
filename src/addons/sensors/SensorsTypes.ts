@@ -81,7 +81,6 @@ export interface SerializableSceneNode {
     max: Vec3Tuple;
     size: Vec3Tuple;
   };
-  userData: Record<string, unknown>;
   children: number[]; // Child node IDs
 }
 

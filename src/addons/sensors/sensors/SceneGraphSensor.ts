@@ -21,23 +21,82 @@ export class SceneGraphSensor extends Sensor<SerializableSceneNode[]> {
 
     const nodes: SerializableSceneNode[] = [];
 
-    const getValidChildren = (object: THREE.Object3D): number[] => {
-      const validIds: number[] = [];
-      const visit = (node: THREE.Object3D) => {
-        for (const child of node.children) {
-          if (isInternalHelper(child)) continue;
-          if (
-            child instanceof THREE.Mesh ||
-            (child as {isXRScript?: boolean}).isXRScript
-          ) {
-            validIds.push(child.id);
-          } else {
-            visit(child);
-          }
+    const hasRenderableMesh = (object: THREE.Object3D): boolean => {
+      let hasMesh = false;
+      object.traverse((child) => {
+        if (child instanceof THREE.Mesh && !isInternalHelper(child)) {
+          hasMesh = true;
         }
-      };
-      visit(object);
-      return validIds;
+      });
+      return hasMesh;
+    };
+
+    const hasChildView = (object: THREE.Object3D): boolean =>
+      object.children.some((child) => (child as {isView?: boolean}).isView);
+
+    const isSceneGraphContainer = (object: THREE.Object3D): boolean =>
+      (object as {isView?: boolean}).isView && hasChildView(object);
+
+    const isSceneGraphNode = (object: THREE.Object3D): boolean => {
+      if (object instanceof THREE.Mesh) return true;
+
+      if ((object as {isXRScript?: boolean}).isXRScript) {
+        if ((object as {isView?: boolean}).isView) {
+          return hasRenderableMesh(object) || hasChildView(object);
+        }
+
+        const isGenericContainer =
+          object.type === 'Object3D' || object.type === 'Group';
+        return !isGenericContainer && hasRenderableMesh(object);
+      }
+
+      return false;
+    };
+
+    const selectedObjects: THREE.Object3D[] = [];
+    const selectedObjectSet = new Set<THREE.Object3D>();
+
+    scene.traverse((obj) => {
+      if (isInternalHelper(obj) || obj === scene || !obj.visible) return;
+
+      let selectedAncestor: THREE.Object3D | null = null;
+      let parent = obj.parent;
+      while (parent) {
+        if (selectedObjectSet.has(parent)) {
+          selectedAncestor = parent;
+          break;
+        }
+        parent = parent.parent;
+      }
+
+      if (selectedAncestor) {
+        if (obj instanceof THREE.Mesh) return;
+        if (!isSceneGraphContainer(selectedAncestor)) return;
+      }
+
+      if (!isSceneGraphNode(obj)) return;
+
+      selectedObjects.push(obj);
+      selectedObjectSet.add(obj);
+    });
+
+    const getSelectedChildren = (object: THREE.Object3D): number[] => {
+      const childIds: number[] = [];
+
+      for (const candidate of selectedObjects) {
+        if (candidate === object) continue;
+
+        let parent = candidate.parent;
+        while (parent) {
+          if (selectedObjectSet.has(parent)) {
+            if (parent === object) childIds.push(candidate.id);
+            break;
+          }
+          parent = parent.parent;
+        }
+      }
+
+      return childIds;
     };
 
     const box = new THREE.Box3();
@@ -45,13 +104,7 @@ export class SceneGraphSensor extends Sensor<SerializableSceneNode[]> {
     const worldQuat = new THREE.Quaternion();
     const worldScale = new THREE.Vector3();
 
-    scene.traverse((obj) => {
-      if (isInternalHelper(obj) || obj === scene) return;
-
-      const isValid =
-        obj instanceof THREE.Mesh || (obj as {isXRScript?: boolean}).isXRScript;
-      if (!isValid) return;
-
+    for (const obj of selectedObjects) {
       obj.updateMatrixWorld(true);
       obj.getWorldPosition(worldPos);
       obj.getWorldQuaternion(worldQuat);
@@ -73,10 +126,9 @@ export class SceneGraphSensor extends Sensor<SerializableSceneNode[]> {
           max: box.max.toArray() as [number, number, number],
           size: size.toArray() as [number, number, number],
         },
-        userData: {...obj.userData},
-        children: getValidChildren(obj),
+        children: getSelectedChildren(obj),
       });
-    });
+    }
 
     return nodes;
   }

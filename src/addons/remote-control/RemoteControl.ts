@@ -7,57 +7,60 @@ import {
 import {
   SensorsManager,
   type SensorsOptions,
-  Sensor,
+  type SensorRequest,
   ProprioceptionSensor,
   SceneGraphSensor,
   TargetingSensor,
   DepthSensor,
   VisibilitySensor,
-  ScreenshotCameraSensor,
-  ScreenshotXRSensor,
-  ScreenshotSOMSensor,
-  SemanticMapSensor,
+  DeviceCameraViewSensor,
+  UserViewSensor,
+  SOMViewSensor,
 } from '../sensors';
 
 function getSensorsForKeys(
   keys?: string[],
   options?: SensorsOptions
-): Sensor<unknown>[] {
+): Record<string, SensorRequest<unknown>> {
   if (!keys || keys.length === 0) {
-    return [new ProprioceptionSensor()];
+    return {state: ProprioceptionSensor};
   }
-  return keys
-    .map((k) => {
-      switch (k) {
-        case 'state':
-          return new ProprioceptionSensor();
-        case 'sceneGraph':
-          return new SceneGraphSensor();
-        case 'targeting':
-          return new TargetingSensor();
-        case 'depth':
-          return new DepthSensor({gridSize: options?.depthGridSize as number});
-        case 'screenshotCamera':
-          return new ScreenshotCameraSensor();
-        case 'screenshotXR':
-          return new ScreenshotXRSensor();
-        case 'screenshotSOM': {
-          const visibility = new VisibilitySensor({
-            verifyLineOfSight: options?.verifyLineOfSight as boolean,
-          });
-          return new ScreenshotSOMSensor({visibility});
-        }
-        case 'visibleObjects': {
-          const visibility = new VisibilitySensor({
-            verifyLineOfSight: options?.verifyLineOfSight as boolean,
-          });
-          return new SemanticMapSensor({visibility});
-        }
-        default:
-          return null;
-      }
-    })
-    .filter(Boolean) as Sensor<unknown>[];
+  const sensors: Record<string, SensorRequest<unknown>> = {};
+  for (const key of keys) {
+    switch (key) {
+      case 'state':
+        sensors.state = ProprioceptionSensor;
+        break;
+      case 'sceneGraph':
+        sensors.sceneGraph = SceneGraphSensor;
+        break;
+      case 'targeting':
+        sensors.targeting = TargetingSensor;
+        break;
+      case 'depth':
+        sensors.depth = DepthSensor;
+        break;
+      case 'deviceCameraView':
+        sensors.deviceCameraView = DeviceCameraViewSensor;
+        break;
+      case 'userView':
+        sensors.userView = UserViewSensor;
+        break;
+      case 'somView':
+        sensors.somView = [
+          SOMViewSensor,
+          {verifyLineOfSight: options?.verifyLineOfSight as boolean},
+        ];
+        break;
+      case 'visibleObjects':
+        sensors.visibleObjects = [
+          VisibilitySensor,
+          {verifyLineOfSight: options?.verifyLineOfSight as boolean},
+        ];
+        break;
+    }
+  }
+  return sensors;
 }
 
 import {
@@ -149,24 +152,23 @@ export class RemoteControl extends Script {
   private isRecording = false;
   private localHistory: {
     timestamp: number;
-    values: Map<Sensor<unknown>, unknown>;
+    values: Record<string, unknown>;
   }[] = [];
-  private recordingSensors: Sensor<unknown>[] = [];
+  private recordingSensors: Record<string, SensorRequest<unknown>> = {};
 
   override update(time: number) {
-    if (this.isRecording && this.recordingSensors.length > 0) {
+    if (
+      this.isRecording &&
+      Object.keys(this.recordingSensors).length > 0
+    ) {
       // Capture the sensors on this frame tick asynchronously and buffer the results
       // (forcing 'sync' updateMode to guarantee that every history frame is perfectly aligned)
       this.sensors
-        .capture(this.recordingSensors, {updateMode: 'sync'})
-        .then((results) => {
-          const valuesMap = new Map<Sensor<unknown>, unknown>();
-          this.recordingSensors.forEach((sensor, index) => {
-            valuesMap.set(sensor, results[index]);
-          });
+        .tryCaptureAll(this.recordingSensors, {updateMode: 'sync'})
+        .then(({values}) => {
           this.localHistory.push({
             timestamp: time,
-            values: valuesMap,
+            values,
           });
         });
     }
@@ -256,13 +258,9 @@ export class RemoteControl extends Script {
     if (sensorOpts?.recordHistory) {
       this.isRecording = false;
       history = this.localHistory.map((rec) => {
-        const flatValues: Record<string, unknown> = {};
-        for (const [sensor, val] of rec.values.entries()) {
-          flatValues[sensor.key] = val;
-        }
         return {
           timestamp: rec.timestamp,
-          ...flatValues,
+          ...rec.values,
         };
       });
       this.localHistory = [];
@@ -273,15 +271,13 @@ export class RemoteControl extends Script {
       sensorOpts?.keys,
       sensorOpts?.options
     );
-    const values = await this.sensors.capture(targetSensors, {
+    const {values} = await this.sensors.tryCaptureAll(targetSensors, {
       ...sensorOpts?.options,
       updateMode: 'sync',
     });
 
     const observation: Record<string, unknown> = {};
-    targetSensors.forEach((sensor, idx) => {
-      observation[sensor.key] = values[idx];
-    });
+    Object.assign(observation, values);
 
     if (history) {
       observation.history = history;

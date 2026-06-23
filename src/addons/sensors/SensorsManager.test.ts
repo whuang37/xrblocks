@@ -20,7 +20,6 @@ import {
   DeviceCameraViewSensor,
   UserViewSensor,
   SOMViewSensor,
-  SemanticMapSensor,
   SceneGraphSensor,
   PlaneSensor,
   WorldObjectsSensor,
@@ -216,7 +215,7 @@ describe('SensorsManager & Sensor API integration tests', () => {
     await runner.destroy();
   });
 
-  it('should keep SemanticMapSensor as a compatibility wrapper over visibility', async () => {
+  it('should return visible labeled entities for embodied actions', async () => {
     const button = new TestObjectScript();
 
     const runner = await TestRunner.create({
@@ -231,12 +230,13 @@ describe('SensorsManager & Sensor API integration tests', () => {
 
     await runner.actions.step({durationMs: 100});
 
-    const visibleObjects = await sensors.capture(SemanticMapSensor);
+    const visibleObjects = await sensors.capture(VisibilitySensor);
     const btnRef = visibleObjects.find((ref) => ref.type === 'TextButton');
 
     expect(btnRef).toBeDefined();
     expect(btnRef?.label).toBe('1');
-    expect(btnRef).not.toHaveProperty('object');
+    expect(btnRef?.name).toBe('Trigger System');
+    expect(btnRef?.description).toContain("TextButton 'Trigger System'");
 
     await runner.destroy();
   });
@@ -406,21 +406,40 @@ describe('SensorsManager & Sensor API integration tests', () => {
     await runner.destroy();
   });
 
-  it('should support custom sensor parameters (like DepthSensor gridSize)', async () => {
-    const runner = await TestRunner.create({
-      scripts: [],
-    });
+  it('should return native depth data and skip CPU fallback when depth is unavailable', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const context = {
+      core: {
+        depth: {
+          enabled: true,
+          rawValueToMeters: 0.5,
+          width: 2,
+          height: 2,
+          depthArray: [new Uint16Array([2, 4, 6, 8])],
+        },
+      },
+      camera: new THREE.PerspectiveCamera(),
+      input: {},
+      get: vi.fn(),
+      defer: vi.fn(),
+    } as unknown as SensorContext;
 
-    const grid8 = await sensors.capture(DepthSensor, {gridSize: 8});
-    const grid16 = await sensors.capture(DepthSensor, {gridSize: 16});
+    expect(new DepthSensor().update(context)).toEqual([
+      [1, 2],
+      [3, 4],
+    ]);
+    expect(warnSpy).not.toHaveBeenCalled();
 
-    expect(grid8.length).toBe(8);
-    expect(grid8[0].length).toBe(8);
+    (context.core as unknown as {depth: unknown}).depth = {
+      enabled: false,
+      depthArray: [],
+    };
+    expect(new DepthSensor().update(context)).toEqual([]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      'DepthSensor requires enabled depth data.'
+    );
 
-    expect(grid16.length).toBe(16);
-    expect(grid16[0].length).toBe(16);
-
-    await runner.destroy();
+    warnSpy.mockRestore();
   });
 
   it('should keep behavior option variants separate while sharing runtime cache policy', async () => {

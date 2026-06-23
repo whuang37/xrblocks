@@ -42,7 +42,6 @@ export class ScreenshotSynthesizer {
   private virtualBuffer = new Uint8Array();
   // Smaller resolution render target than the main render target.
   private virtualRenderTarget?: THREE.WebGLRenderTarget;
-  private finalCanvas?: HTMLCanvasElement;
   private virtualRealCanvas?: HTMLCanvasElement;
   private virtualRealBuffer = new Uint8Array();
   private virtualRealRenderTarget?: THREE.WebGLRenderTarget;
@@ -69,13 +68,10 @@ export class ScreenshotSynthesizer {
       );
     }
 
-    const haveVirtualAndRealRequests = this.pendingScreenshotRequests.some(
+    const haveVirtualAndRealReqeusts = this.pendingScreenshotRequests.some(
       (request) => request.overlayOnCamera
     );
-    if (haveVirtualAndRealRequests && deviceCamera?.simulatorCamera) {
-      const finalImageDataUrl = this.createFinalCanvasImageDataURL(renderer);
-      this.resolveVirtualRealRequests(finalImageDataUrl);
-    } else if (haveVirtualAndRealRequests && deviceCamera) {
+    if (haveVirtualAndRealReqeusts && deviceCamera) {
       this.createVirtualRealImageDataURL(
         renderer,
         renderSceneFn,
@@ -85,7 +81,7 @@ export class ScreenshotSynthesizer {
           this.resolveVirtualRealRequests(virtualRealImageDataUrl);
         }
       });
-    } else if (haveVirtualAndRealRequests) {
+    } else if (haveVirtualAndRealReqeusts) {
       throw new Error('No device camera provided');
     }
   }
@@ -94,20 +90,14 @@ export class ScreenshotSynthesizer {
     renderer: THREE.WebGLRenderer,
     renderSceneFn: () => void
   ) {
-    const mainRenderTarget = renderer.getRenderTarget();
+    const mainRenderTarget = renderer.getRenderTarget()!;
     const isRenderingStereo =
       renderer.xr.isPresenting && renderer.xr.getCamera().cameras.length == 2;
-    const mainRenderTargetSize = new THREE.Vector2();
-    if (mainRenderTarget) {
-      mainRenderTargetSize.set(mainRenderTarget.width, mainRenderTarget.height);
-    } else {
-      renderer.getSize(mainRenderTargetSize);
-    }
     const mainRenderTargetSingleViewWidth = isRenderingStereo
-      ? mainRenderTargetSize.x / 2
-      : mainRenderTargetSize.x;
+      ? mainRenderTarget.width / 2
+      : mainRenderTarget.width;
     const scaledHeight = Math.round(
-      mainRenderTargetSize.y *
+      mainRenderTarget.height *
         (this.renderTargetWidth / mainRenderTargetSingleViewWidth)
     );
     if (
@@ -182,33 +172,6 @@ export class ScreenshotSynthesizer {
     this.pendingScreenshotRequests.length = remainingRequests;
   }
 
-  private createFinalCanvasImageDataURL(renderer: THREE.WebGLRenderer) {
-    const source = renderer.domElement;
-    const canvas =
-      this.finalCanvas || (this.finalCanvas = document.createElement('canvas'));
-    const targetHeight = Math.round(
-      source.height * (this.renderTargetWidth / source.width)
-    );
-    canvas.width = this.renderTargetWidth;
-    canvas.height = targetHeight;
-    const context = canvas.getContext('2d');
-    if (!context) {
-      throw new Error('Failed to get 2D context');
-    }
-    context.drawImage(
-      source,
-      0,
-      0,
-      source.width,
-      source.height,
-      0,
-      0,
-      canvas.width,
-      canvas.height
-    );
-    return canvas.toDataURL();
-  }
-
   private async createVirtualRealImageDataURL(
     renderer: THREE.WebGLRenderer,
     renderSceneFn: () => void,
@@ -229,7 +192,7 @@ export class ScreenshotSynthesizer {
     }
     const mainRenderTargetSingleViewWidth = isRenderingStereo
       ? mainRenderTargetSize.x / 2
-      : mainRenderTargetSize.x;
+      : mainRenderTargetSize.y;
     const scaledHeight = Math.round(
       mainRenderTargetSize.y *
         (this.renderTargetWidth / mainRenderTargetSingleViewWidth)

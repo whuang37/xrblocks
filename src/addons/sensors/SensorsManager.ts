@@ -1,15 +1,6 @@
 import * as THREE from 'three';
 import {Core, Input, Script, core, Constructor} from 'xrblocks';
-import {
-  DEFAULT_SENSORS_OPTIONS,
-  type SensorsOptions,
-  type Sensor,
-} from './SensorsTypes';
-
-interface SensorState {
-  lastCompletedValue: unknown;
-  activePromise: Promise<unknown> | null;
-}
+import {type Sensor, type SensorsOptions} from './SensorsTypes';
 
 type SensorValue<T> =
   T extends Sensor<infer S>
@@ -32,34 +23,24 @@ export class SensorsManager extends Script {
   };
 
   editorIcon = 'sensors';
-  private defaultOptions: Required<Pick<SensorsOptions, 'cacheWindowMs'>>;
 
   core!: Core;
   input!: Input;
   camera!: THREE.Camera;
 
   private sensors = new Set<Sensor<unknown>>();
-  private sensorStates = new Map<Sensor<unknown>, SensorState>();
-
-  private activePromises = new Map<Sensor<unknown>, Promise<unknown>>();
-  private results = new Map<Sensor<unknown>, unknown>();
   private lastCaptureErrors: Record<string, string> = {};
-  private lastObservationTime = 0;
-  private cacheWindowMs = 8.0;
+  private defaultOptions: SensorsOptions;
 
   constructor(
     initialSensors: (Sensor<unknown> | Constructor<Sensor<unknown>>)[] = [],
     options: SensorsOptions = {}
   ) {
     super();
-    this.defaultOptions = {
-      cacheWindowMs:
-        options.cacheWindowMs ?? DEFAULT_SENSORS_OPTIONS.cacheWindowMs,
-    };
-    this.cacheWindowMs = this.defaultOptions.cacheWindowMs;
+    this.defaultOptions = {...options};
 
-    for (const s of initialSensors) {
-      this.getOrCreateInstance(s);
+    for (const sensor of initialSensors) {
+      this.getOrCreateInstance(sensor);
     }
   }
 
@@ -77,48 +58,35 @@ export class SensorsManager extends Script {
   }
 
   clearCache() {
-    this.activePromises.clear();
-    this.results.clear();
-    this.lastCaptureErrors = {};
-    this.lastObservationTime = 0;
-  }
-
-  private checkAndClearCache() {
-    const now = performance.now();
-    if (now - this.lastObservationTime >= this.cacheWindowMs) {
-      this.activePromises.clear();
-      this.results.clear();
-      this.lastObservationTime = now;
+    for (const sensor of this.sensors) {
+      sensor.clearCache();
     }
+    this.lastCaptureErrors = {};
   }
 
   getOrCreateInstance<T extends Sensor<unknown>>(
     target: T | Constructor<T>
   ): T {
     if (typeof target === 'function') {
-      for (const s of this.sensors) {
-        if (s.constructor === target) {
-          return s as T;
+      for (const sensor of this.sensors) {
+        if (sensor.constructor === target) {
+          return sensor as T;
         }
       }
+
       const instance = new target();
       this.sensors.add(instance);
-      this.sensorStates.set(instance, {
-        lastCompletedValue: undefined,
-        activePromise: null,
-      });
       return instance;
     }
 
-    if (!this.sensors.has(target)) {
-      this.sensors.add(target);
-      if (!this.sensorStates.has(target)) {
-        this.sensorStates.set(target, {
-          lastCompletedValue: undefined,
-          activePromise: null,
-        });
+    for (const sensor of this.sensors) {
+      if (sensor.constructor === target.constructor) {
+        sensor.mergeOptions(target.options);
+        return sensor as T;
       }
     }
+
+    this.sensors.add(target);
     return target;
   }
 
@@ -126,89 +94,21 @@ export class SensorsManager extends Script {
     target: Sensor<T> | Constructor<Sensor<T>>,
     options?: SensorsOptions
   ): Promise<T> {
-    if (options?.cacheWindowMs !== undefined) {
-      this.cacheWindowMs = options.cacheWindowMs;
-    }
-    this.checkAndClearCache();
     const instance = this.getOrCreateInstance(target);
-    const mode = options?.updateMode ?? instance.options?.updateMode ?? 'sync';
-
-    // Returns lastCompletedValue immediately, runs update in background.
-    if (mode === 'background') {
-      const state = this.sensorStates.get(instance)!;
-      if (!state.activePromise) {
-        state.activePromise = (async () => {
-          try {
-            const val = await instance.update({
-              core: this.core,
-              camera: this.camera,
-              input: this.input,
-              get: (t, opts) => this.get(t, opts ?? options),
-              defer: (fn) => this.defer(fn),
-            });
-            state.lastCompletedValue = val;
-            this.results.set(instance, val);
-            return val;
-          } finally {
-            state.activePromise = null;
-          }
-        })();
-      }
-      const value =
-        state.lastCompletedValue !== undefined
-          ? state.lastCompletedValue
-          : state.activePromise;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return value as any;
-    }
-
-    // Defers execution to requestIdleCallback
-    if (mode === 'idle') {
-      if (this.results.has(instance)) {
-        return this.results.get(instance) as T;
-      }
-      if (this.activePromises.has(instance)) {
-        return this.activePromises.get(instance) as Promise<T>;
-      }
-
-      const promise = this.defer(async () => {
-        const val = await instance.update({
-          core: this.core,
-          camera: this.camera,
-          input: this.input,
-          get: (t, opts) => this.get(t, opts ?? options),
-          defer: (fn) => this.defer(fn),
-        });
-        this.results.set(instance, val);
-        return val;
-      });
-
-      this.activePromises.set(instance, promise);
-      return promise;
-    }
-
-    // Executes inline on the frame tick
-    if (this.results.has(instance)) {
-      return this.results.get(instance) as T;
-    }
-    if (this.activePromises.has(instance)) {
-      return this.activePromises.get(instance) as Promise<T>;
-    }
-
-    const promise = (async () => {
-      const val = await instance.update({
+    const effectiveOptions = {
+      ...this.defaultOptions,
+      ...options,
+    };
+    return instance.get(
+      {
         core: this.core,
         camera: this.camera,
         input: this.input,
-        get: (t, opts) => this.get(t, opts ?? options),
+        get: (sensor, opts) => this.get(sensor, opts ?? effectiveOptions),
         defer: (fn) => this.defer(fn),
-      });
-      this.results.set(instance, val);
-      return val;
-    })();
-
-    this.activePromises.set(instance, promise);
-    return promise;
+      },
+      effectiveOptions
+    );
   }
 
   defer<R>(fn: () => Promise<R> | R): Promise<R> {
@@ -270,9 +170,13 @@ export class SensorsManager extends Script {
           : never)
     | undefined {
     const instance = this.getOrCreateInstance(target);
-    const state = this.sensorStates.get(instance);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return state ? (state.lastCompletedValue as any) : undefined;
+    return instance.getLatest() as
+      | (T extends Sensor<infer S>
+          ? S
+          : T extends Constructor<Sensor<infer S>>
+            ? S
+            : never)
+      | undefined;
   }
 
   // --- Static Helpers ---

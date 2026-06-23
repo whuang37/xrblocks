@@ -36,6 +36,21 @@ export class SoundSensor extends Sensor<SoundSensorSnapshot> {
     super(options);
   }
 
+  override mergeOptions(options?: SoundSensorOptions): void {
+    const currentHistorySize =
+      (this.options as SoundSensorOptions | undefined)?.historySize ?? 5;
+    const nextHistorySize = options?.historySize;
+
+    super.mergeOptions(options);
+
+    if (nextHistorySize !== undefined) {
+      (this.options as SoundSensorOptions).historySize = Math.max(
+        currentHistorySize,
+        nextHistorySize
+      );
+    }
+  }
+
   async update(context: SensorContext): Promise<SoundSensorSnapshot> {
     const detector = context.core.world.sounds as SoundDetectorLike | undefined;
     if (!detector) {

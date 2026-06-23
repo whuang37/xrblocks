@@ -8,6 +8,8 @@ import {
   SceneGraphSensor,
   TargetingSensor,
   DepthSensor,
+  ScreenshotCameraSensor,
+  ScreenshotXRSensor,
   ScreenshotSOMSensor,
   SemanticMapSensor,
 } from 'xrblocks/addons/sensors/index.js';
@@ -81,6 +83,23 @@ function createDebuggerSidebar() {
       flex-direction: column;
       gap: 12px;
     }
+    .camera-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+    .camera-card {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .camera-card h3 {
+      margin: 0;
+      color: #b9e6ff;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
     .preview-box {
       width: 100%;
       background: rgba(255, 255, 255, 0.04);
@@ -134,6 +153,21 @@ function createDebuggerSidebar() {
       color: #ffc857;
       font-weight: bold;
     }
+    .debug-json {
+      max-height: 360px;
+      overflow: auto;
+      margin: 0;
+      padding: 10px;
+      border-radius: 6px;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: #d8f3dc;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 10px;
+      line-height: 1.35;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
   `;
   document.head.appendChild(style);
 
@@ -143,10 +177,25 @@ function createDebuggerSidebar() {
     <h1>Sensors Debugger</h1>
     
     <section>
-      <h2>Set-of-Mark Viewport (Screenshot)</h2>
-      <div class="preview-container">
-        <div class="preview-box">
-          <img id="som-image" alt="Waiting for screenshot..." src="" />
+      <h2>Camera & Screenshot Sensors</h2>
+      <div class="camera-grid">
+        <div class="camera-card">
+          <h3>screenshotCamera</h3>
+          <div class="preview-box">
+            <img id="camera-image" alt="Waiting for raw camera screenshot..." src="" />
+          </div>
+        </div>
+        <div class="camera-card">
+          <h3>screenshotXR</h3>
+          <div class="preview-box">
+            <img id="xr-image" alt="Waiting for XR screenshot..." src="" />
+          </div>
+        </div>
+        <div class="camera-card">
+          <h3>screenshotSOM</h3>
+          <div class="preview-box">
+            <img id="som-image" alt="Waiting for set-of-mark screenshot..." src="" />
+          </div>
         </div>
       </div>
     </section>
@@ -183,6 +232,11 @@ function createDebuggerSidebar() {
         <div class="telemetry-item" id="target-right">Right Ray: <span>-</span></div>
         <div class="telemetry-item" id="target-gaze">Gaze Ray: <span>-</span></div>
       </div>
+    </section>
+
+    <section>
+      <h2>All Sensor Data</h2>
+      <pre id="sensor-json" class="debug-json">Waiting for sensor capture...</pre>
     </section>
   `;
   document.body.appendChild(sidebar);
@@ -263,20 +317,22 @@ class DebuggerScript extends xb.Script {
 
   sensors = null;
   lastCaptureTime = 0;
+  isCapturing = false;
 
   init(dependencies) {
     this.sensors = dependencies.sensors;
   }
 
   update(time) {
-    // Throttle capture to 100ms (10Hz) to keep DOM updates extremely smooth
-    if (time - this.lastCaptureTime < 100) return;
+    // Throttle capture to 250ms and avoid overlapping screenshot captures.
+    if (this.isCapturing || time - this.lastCaptureTime < 250) return;
     this.lastCaptureTime = time;
 
     this.updateDebuggerUI();
   }
 
   async updateDebuggerUI() {
+    this.isCapturing = true;
     try {
       // Capture the full, high-fidelity observation from all telemetry streams by reference
       const [
@@ -284,6 +340,8 @@ class DebuggerScript extends xb.Script {
         sceneGraph,
         targeting,
         depth,
+        screenshotCamera,
+        screenshotXR,
         screenshotSOM,
         visibleObjects,
       ] = await this.sensors.capture([
@@ -291,11 +349,23 @@ class DebuggerScript extends xb.Script {
         SceneGraphSensor,
         TargetingSensor,
         DepthSensor,
+        ScreenshotCameraSensor,
+        ScreenshotXRSensor,
         ScreenshotSOMSensor,
         SemanticMapSensor,
       ]);
 
-      // 1. Update Set-of-Mark annotated screenshot
+      // 1. Update all screenshot sensors
+      const cameraImg = document.getElementById('camera-image');
+      if (cameraImg && screenshotCamera) {
+        cameraImg.src = screenshotCamera;
+      }
+
+      const xrImg = document.getElementById('xr-image');
+      if (xrImg && screenshotXR) {
+        xrImg.src = screenshotXR;
+      }
+
       const somImg = document.getElementById('som-image');
       if (somImg && screenshotSOM) {
         somImg.src = screenshotSOM;
@@ -367,9 +437,45 @@ class DebuggerScript extends xb.Script {
         document.getElementById('target-gaze').innerHTML =
           `Gaze: ${getTargetString(targeting.gaze)}`;
       }
+
+      // 6. Render the full structured sensor payload for debugging.
+      const sensorJson = document.getElementById('sensor-json');
+      if (sensorJson) {
+        sensorJson.textContent = JSON.stringify(
+          {
+            state,
+            targeting,
+            visibleObjects,
+            sceneGraph,
+            depth,
+            screenshotCamera: this.describeImageData(screenshotCamera),
+            screenshotXR: this.describeImageData(screenshotXR),
+            screenshotSOM: this.describeImageData(screenshotSOM),
+          },
+          null,
+          2
+        );
+      }
     } catch (e) {
       console.error('Sensor Debugger Capture Error:', e);
+      const sensorJson = document.getElementById('sensor-json');
+      if (sensorJson) {
+        sensorJson.textContent =
+          e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+      }
+    } finally {
+      this.isCapturing = false;
     }
+  }
+
+  describeImageData(dataUrl) {
+    if (typeof dataUrl !== 'string') return null;
+    const match = dataUrl.match(/^data:(image\/[^;]+);base64,/);
+    return {
+      type: match?.[1] ?? 'unknown',
+      length: dataUrl.length,
+      preview: `${dataUrl.slice(0, 64)}...`,
+    };
   }
 
   /** Draws depth grid on a 2D canvas using a smooth blue-to-red color heatmap */
@@ -410,6 +516,8 @@ async function start() {
     SceneGraphSensor,
     TargetingSensor,
     DepthSensor,
+    ScreenshotCameraSensor,
+    ScreenshotXRSensor,
     ScreenshotSOMSensor,
     SemanticMapSensor,
   ]);

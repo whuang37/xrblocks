@@ -334,7 +334,6 @@ class DebuggerScript extends xb.Script {
   async updateDebuggerUI() {
     this.isCapturing = true;
     try {
-      // Capture the full, high-fidelity observation from all telemetry streams by reference
       const [
         state,
         sceneGraph,
@@ -354,6 +353,7 @@ class DebuggerScript extends xb.Script {
         ScreenshotSOMSensor,
         SemanticMapSensor,
       ]);
+      const sensorErrors = this.sensors.getLastCaptureErrors();
 
       // 1. Update all screenshot sensors
       const cameraImg = document.getElementById('camera-image');
@@ -451,6 +451,7 @@ class DebuggerScript extends xb.Script {
             screenshotCamera: this.describeImageData(screenshotCamera),
             screenshotXR: this.describeImageData(screenshotXR),
             screenshotSOM: this.describeImageData(screenshotSOM),
+            sensorErrors,
           },
           null,
           2

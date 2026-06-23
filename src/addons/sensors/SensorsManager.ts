@@ -11,6 +11,19 @@ interface SensorState {
   activePromise: Promise<unknown> | null;
 }
 
+type SensorValue<T> =
+  T extends Sensor<infer S>
+    ? S
+    : T extends Constructor<Sensor<infer S>>
+      ? S
+      : never;
+
+type NullableSensorValues<
+  T extends (Sensor<unknown> | Constructor<Sensor<unknown>>)[],
+> = {
+  [K in keyof T]: SensorValue<T[K]> | null;
+};
+
 export class SensorsManager extends Script {
   static dependencies = {
     core: Core,
@@ -30,6 +43,7 @@ export class SensorsManager extends Script {
 
   private activePromises = new Map<Sensor<unknown>, Promise<unknown>>();
   private results = new Map<Sensor<unknown>, unknown>();
+  private lastCaptureErrors: Record<string, string> = {};
   private lastObservationTime = 0;
   private cacheWindowMs = 8.0;
 
@@ -65,6 +79,7 @@ export class SensorsManager extends Script {
   clearCache() {
     this.activePromises.clear();
     this.results.clear();
+    this.lastCaptureErrors = {};
     this.lastObservationTime = 0;
   }
 
@@ -219,17 +234,30 @@ export class SensorsManager extends Script {
   async capture<T extends (Sensor<unknown> | Constructor<Sensor<unknown>>)[]>(
     targets: [...T],
     options?: SensorsOptions
-  ): Promise<{
-    [K in keyof T]: T[K] extends Sensor<infer S>
-      ? S
-      : T[K] extends Constructor<Sensor<infer S>>
-        ? S
-        : never;
-  }> {
-    const promises = targets.map((t) => this.get(t, options));
-    const results = await Promise.all(promises);
+  ): Promise<NullableSensorValues<T>> {
+    const instances = targets.map((target) => this.getOrCreateInstance(target));
+    const results = await Promise.allSettled(
+      instances.map((instance) => this.get(instance, options))
+    );
+    this.lastCaptureErrors = {};
+    const values = results.map((result, index) => {
+      if (result.status === 'fulfilled') {
+        return result.value;
+      }
+
+      const sensor = instances[index];
+      this.lastCaptureErrors[sensor.key] =
+        result.reason instanceof Error
+          ? result.reason.message
+          : String(result.reason);
+      return null;
+    });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return results as any;
+    return values as any;
+  }
+
+  getLastCaptureErrors() {
+    return {...this.lastCaptureErrors};
   }
 
   getLatest<T extends Sensor<unknown> | Constructor<Sensor<unknown>>>(
@@ -254,13 +282,7 @@ export class SensorsManager extends Script {
   >(
     sensors: [...T],
     options?: SensorsOptions
-  ): Promise<{
-    [K in keyof T]: T[K] extends Sensor<infer S>
-      ? S
-      : T[K] extends Constructor<Sensor<infer S>>
-        ? S
-        : never;
-  }> {
+  ): Promise<NullableSensorValues<T>> {
     const manager = await SensorsManager.resolve();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return manager.capture(sensors, options) as any;

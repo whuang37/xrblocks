@@ -21,11 +21,6 @@ options.xrButton.enabled = false;
 options.enableHands();
 options.enableCamera();
 
-// Enable direct 3D visual hand rendering in the simulator/WebGL view
-options.hands.visualization = true;
-options.hands.visualizeJoints = true;
-options.hands.visualizeMeshes = true;
-
 // Enable core environmental depth mapping
 options.depth = new xb.DepthOptions();
 options.depth.enabled = true;

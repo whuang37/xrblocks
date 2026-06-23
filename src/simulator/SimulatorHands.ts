@@ -135,6 +135,7 @@ export class SimulatorHands {
     this.loadMeshes();
     this.simulatorScene.add(this.leftController);
     this.simulatorScene.add(this.rightController);
+    this.hideInputHandVisuals();
   }
 
   loadMeshes() {
@@ -447,19 +448,24 @@ export class SimulatorHands {
   showHands() {
     this.leftController.visible = true;
     this.rightController.visible = true;
-    for (let i = 0; i < this.input.hands.length; i++) {
-      this.input.hands[i].visible = true;
-    }
+    this.hideInputHandVisuals();
     this.updateHandPosePanel();
   }
 
   hideHands() {
     this.leftController.visible = false;
     this.rightController.visible = false;
+    this.hideInputHandVisuals();
+    this.updateHandPosePanel();
+  }
+
+  private hideInputHandVisuals() {
     for (let i = 0; i < this.input.hands.length; i++) {
+      // SimulatorHands renders the visible GLB hands in the simulator scene.
+      // Keep XRHandSpace available for joint data, but don't render
+      // XRHandModelFactory children as a second hand pair in simulator mode.
       this.input.hands[i].visible = false;
     }
-    this.updateHandPosePanel();
   }
 
   updateHandPosePanel() {

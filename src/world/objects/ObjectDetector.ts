@@ -75,6 +75,12 @@ export class ObjectDetector extends Script {
   private camera!: THREE.PerspectiveCamera;
   private renderer!: THREE.WebGLRenderer;
 
+  /**
+   * Target device profile used to look up RGB camera intrinsics and pose
+   * for converting detection bounding boxes into world space. Defaults to
+   * `'galaxyxr'`; auto-overridden to `'quest3'` in {@link init} when the
+   * Meta Quest browser is detected. Can be overridden manually before init.
+   */
   targetDevice = 'galaxyxr';
 
   /**
@@ -105,6 +111,14 @@ export class ObjectDetector extends Script {
     this.depth = depth;
     this.camera = camera;
     this.renderer = renderer;
+
+    if (
+      this.targetDevice === 'galaxyxr' &&
+      typeof navigator !== 'undefined' &&
+      /OculusBrowser|Quest/i.test(navigator.userAgent)
+    ) {
+      this.targetDevice = 'quest3';
+    }
 
     if (this.options.objects.showDebugVisualizations) {
       this._debugVisualsGroup = new THREE.Group();

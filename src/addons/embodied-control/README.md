@@ -6,7 +6,7 @@ Programmatic embodied-user control for [xrblocks](https://github.com/google/xrbl
 scene through the same high-level surfaces a user has: locomotion, head/camera
 rotation, left hand pose, right hand pose, and WebXR-like select gestures. It is
 designed to work locally without networking, and to serve as the action
-executor behind the `remote-control` WebSocket addon.
+executor behind the externally injected `user-agent-bridge` addon.
 
 The addon follows the normal XR Blocks script lifecycle: construct it, add it to
 the scene before `xb.init()`, and let dependency injection provide `Core`,

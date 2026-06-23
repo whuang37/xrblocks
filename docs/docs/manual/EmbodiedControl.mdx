@@ -11,8 +11,9 @@ The `embodied-control` addon provides a programmatic user simulator for XR
 Blocks scenes. It can drive camera locomotion, left and right hand motion, hand
 poses, and WebXR-like select gestures through a single step API.
 
-Use it directly for local tests and samples. Pair it with `remote-control` when
-an external runner needs to control the browser over WebSocket.
+Use it directly for local tests and samples. External tooling should inject
+`user-agent-bridge` when a runner needs to inspect or control an arbitrary
+XR Blocks page without changing app code.
 
 ---
 
@@ -131,37 +132,13 @@ screenshot, and does not return an observation.
 
 ---
 
-## WebSocket Remote Control
+## External User Agent Bridge
 
-The `remote-control` addon forwards JSON `STEP` messages to embodied-control.
-
-```javascript
-import {RemoteControl} from 'xrblocks/addons/remote-control/index.js';
-
-xb.add(
-  new RemoteControl({
-    url: 'ws://127.0.0.1:8765',
-    reconnect: true,
-    embodiedOptions: {includeScreenshot: true},
-  })
-);
-```
-
-Example incoming message:
-
-```json
-{
-  "type": "STEP",
-  "id": "step-1",
-  "durationMs": 250,
-  "control": {
-    "locomotion": {"move": [0, 0, -0.25]},
-    "rightHand": {"selectStart": true}
-  }
-}
-```
-
-The browser responds with `STEP_COMPLETED`, `ACTION_REJECTED`, or `ERROR`.
+The `user-agent-bridge` addon is injected by external tooling after a normal
+XR Blocks page has loaded. It creates `EmbodiedControl` and `SensorsManager`
+inside the active runtime, exposes `window.userAgentBridge`, and lets runners
+call `observe()`, `step()`, `command()`, and `inspect()` through browser
+automation APIs such as Playwright.
 
 ---
 
@@ -176,4 +153,4 @@ through `EmbodiedControl`.
 For source-level details, see
 
 <CodeSearchLink path="src/addons/embodied-control/README.md" /> and
-<CodeSearchLink path="src/addons/remote-control/README.md" />.
+<CodeSearchLink path="src/addons/user-agent-bridge/UserAgentBridge.ts" />.

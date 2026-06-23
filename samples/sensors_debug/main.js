@@ -18,11 +18,11 @@ import {
   ProprioceptionSensor,
   SceneGraphSensor,
   TargetingSensor,
+  VisibilitySensor,
   DepthSensor,
   DeviceCameraViewSensor,
   UserViewSensor,
   SOMViewSensor,
-  SemanticMapSensor,
 } from 'xrblocks/addons/sensors/index.js';
 
 // --- Safe Formatting Helpers ---
@@ -76,7 +76,7 @@ const SENSOR_LIST = [
   {name: 'Proprioception', sensorClass: ProprioceptionSensor, type: 'text'},
   {name: 'Scene Graph', sensorClass: SceneGraphSensor, type: 'text'},
   {name: 'Targeting / Raycasts', sensorClass: TargetingSensor, type: 'text'},
-  {name: 'Semantic Map', sensorClass: SemanticMapSensor, type: 'text'},
+  {name: 'Visibility', sensorClass: VisibilitySensor, type: 'text'},
   {name: 'Depth Heatmap', sensorClass: DepthSensor, type: 'depth'},
   {
     name: 'Device Camera View',
@@ -422,8 +422,8 @@ class DebuggerScript extends xb.Script {
           case TargetingSensor:
             formattedText = this.formatTargeting(data);
             break;
-          case SemanticMapSensor:
-            formattedText = this.formatSemanticMap(data);
+          case VisibilitySensor:
+            formattedText = this.formatVisibility(data);
             break;
           default:
             formattedText = JSON.stringify(data, null, 2);
@@ -547,15 +547,15 @@ class DebuggerScript extends xb.Script {
     ].join('\n');
   }
 
-  formatSemanticMap(visibleObjects) {
+  formatVisibility(visibleObjects) {
     if (!visibleObjects || visibleObjects.length === 0) {
-      return 'No unoccluded entities visible in Semantic Map.';
+      return 'No visible labeled entities.';
     }
     return [
       `[Visible Entities in Viewport]`,
-      // Use objectId (returned by SemanticMapSensor) instead of id
       ...visibleObjects.map(
-        (obj) => `• [ID ${obj.objectId}] ${obj.description}`
+        (obj) =>
+          `• ${obj.label}: ${obj.name || obj.type || 'unnamed'} [ID ${obj.objectId}]\n  ${obj.description}`
       ),
     ].join('\n');
   }

@@ -21,7 +21,6 @@ export {
   UserViewSensor,
   SOMViewSensor,
 } from './sensors/CameraSensor';
-export {SemanticMapSensor} from './sensors/SemanticMapSensor';
 export {PlaneSensor} from './sensors/PlaneSensor';
 export {WorldObjectsSensor} from './sensors/WorldObjectsSensor';
 export {BodyPoseSensor} from './sensors/BodyPoseSensor';

@@ -8,6 +8,8 @@ import {
   ScreenshotSynthesizer,
   HAND_JOINT_NAMES,
   Input,
+  SpatialPanel,
+  TextButton,
 } from 'xrblocks';
 import {TestRunner} from '../testing/TestRunner';
 import {
@@ -19,6 +21,11 @@ import {
   ScreenshotXRSensor,
   ScreenshotSOMSensor,
   SemanticMapSensor,
+  SceneGraphSensor,
+  PlaneSensor,
+  WorldObjectsSensor,
+  BodyPoseSensor,
+  SoundSensor,
   Sensor,
   type SensorContext,
 } from './index';
@@ -265,6 +272,82 @@ describe('SensorsManager & Sensor API integration tests', () => {
     await runner.destroy();
   });
 
+  it('should serialize scene graph nodes without internal userData payloads', async () => {
+    const runner = await TestRunner.create({scripts: []});
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
+    mesh.name = 'Public Object';
+    mesh.userData = {
+      selected: true,
+      connected: true,
+      nestedInternalState: {veryLarge: ['payload']},
+    };
+    runner.core.scene.add(mesh);
+
+    const graph = await new SceneGraphSensor().capture();
+    const node = graph.find((entry) => entry.id === mesh.id);
+
+    expect(node).toBeDefined();
+    expect(node).toMatchObject({
+      id: mesh.id,
+      name: 'Public Object',
+      type: 'Mesh',
+    });
+    expect(node).not.toHaveProperty('userData');
+
+    await runner.destroy();
+  });
+
+  it('should cull internal mesh descendants from scene graph output', async () => {
+    class CompositeScript extends Script {
+      constructor() {
+        super();
+        this.name = 'Composite';
+        this.type = 'CompositeWidget';
+        for (let i = 0; i < 8; i++) {
+          const child = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1));
+          child.name = `InternalMesh${i}`;
+          this.add(child);
+        }
+      }
+    }
+
+    const composite = new CompositeScript();
+    const runner = await TestRunner.create({scripts: [composite]});
+
+    const graph = await new SceneGraphSensor().capture();
+
+    expect(graph).toHaveLength(1);
+    expect(graph[0]).toMatchObject({
+      id: composite.id,
+      name: 'Composite',
+      type: 'CompositeWidget',
+      children: [],
+    });
+
+    await runner.destroy();
+  });
+
+  it('should keep semantic UI children when culling scene graph internals', async () => {
+    const panel = new SpatialPanel();
+    panel.name = 'Actions Panel';
+    const button = new TextButton({text: 'Launch'});
+    button.name = 'Launch Button';
+    panel.add(button);
+
+    const runner = await TestRunner.create({scripts: [panel]});
+
+    const graph = await new SceneGraphSensor().capture();
+    const panelNode = graph.find((entry) => entry.id === panel.id);
+    const buttonNode = graph.find((entry) => entry.id === button.id);
+
+    expect(panelNode).toBeDefined();
+    expect(buttonNode).toBeDefined();
+    expect(panelNode?.children).toContain(button.id);
+    expect(graph.some((entry) => entry.name === 'Launch Button')).toBe(true);
+
+    await runner.destroy();
+  });
+
   it('should support custom sensor parameters (like DepthSensor gridSize)', async () => {
     const depth8 = new DepthSensor({gridSize: 8});
     const depth16 = new DepthSensor({gridSize: 16});
@@ -322,15 +405,15 @@ describe('SensorsManager & Sensor API integration tests', () => {
     const proprioceptionSpy = vi.spyOn(proprioception, 'update');
     const depthSpy = vi.spyOn(depth, 'update');
 
-    const val1 = await proprioception.capture();
+    const val1 = await proprioception.capture({cacheWindowMs: 20});
     expect(val1).toBeDefined();
     expect(proprioceptionSpy).toHaveBeenCalledTimes(1);
     expect(depthSpy).toHaveBeenCalledTimes(0);
 
-    const [val1_again, val2] = await SensorsManager.capture([
-      proprioception,
-      depth,
-    ]);
+    const [val1_again, val2] = await SensorsManager.capture(
+      [proprioception, depth],
+      {cacheWindowMs: 20}
+    );
 
     expect(val1_again).toBe(val1);
     expect(val2).toBeDefined();
@@ -341,6 +424,235 @@ describe('SensorsManager & Sensor API integration tests', () => {
     proprioceptionSpy.mockRestore();
     depthSpy.mockRestore();
     await runner.destroy();
+  });
+
+  it('should return null for failed sensors during batch capture', async () => {
+    class FailingSensor extends Sensor<string> {
+      readonly key = 'failing';
+      update() {
+        throw new Error('Intentional sensor failure');
+      }
+    }
+
+    const proprioception = new ProprioceptionSensor();
+    const failing = new FailingSensor();
+    const sensors = new SensorsManager([proprioception, failing]);
+    const runner = await TestRunner.create({
+      scripts: [sensors],
+    });
+
+    const [state, failed] = await sensors.capture([proprioception, failing]);
+
+    expect(state).toBeDefined();
+    expect(failed).toBeNull();
+    expect(sensors.getLastCaptureErrors()).toEqual({
+      failing: 'Intentional sensor failure',
+    });
+    await expect(sensors.get(failing)).rejects.toThrow(
+      'Intentional sensor failure'
+    );
+
+    await runner.destroy();
+  });
+
+  it('should return empty world perception observations when subsystems are missing', async () => {
+    const context = {
+      core: {world: {}},
+      camera: new THREE.PerspectiveCamera(),
+      input: {},
+      get: vi.fn(),
+      defer: vi.fn(),
+    } as unknown as SensorContext;
+
+    expect(new PlaneSensor().update(context)).toEqual([]);
+    await expect(new WorldObjectsSensor().update(context)).resolves.toEqual([]);
+    await expect(new BodyPoseSensor().update(context)).resolves.toEqual([]);
+    await expect(new SoundSensor().update(context)).resolves.toEqual({
+      isListening: false,
+      latest: null,
+      history: [],
+    });
+  });
+
+  it('should return native detected planes from the current world state', () => {
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(2, 3));
+    plane.position.set(1, 2, 3);
+    plane.scale.set(1, 2, 1);
+    Object.assign(plane, {
+      label: 'floor',
+      orientation: 'Horizontal',
+    });
+
+    const context = {
+      core: {
+        world: {
+          planes: {
+            get: vi.fn().mockReturnValue([plane]),
+          },
+        },
+      },
+      camera: new THREE.PerspectiveCamera(),
+      input: {},
+      get: vi.fn(),
+      defer: vi.fn(),
+    } as unknown as SensorContext;
+
+    const observations = new PlaneSensor().update(context);
+
+    expect(observations).toBe(
+      (context.core.world.planes as {get(): unknown[]}).get()
+    );
+    expect(observations[0]).toBe(plane);
+  });
+
+  it('should run object detection and return native detected objects', async () => {
+    const object = new THREE.Object3D() as THREE.Object3D & {
+      label: string;
+      detection2DBoundingBox: THREE.Box2;
+      data: Record<string, unknown>;
+    };
+    object.position.set(1, 2, 3);
+    object.label = 'cup';
+    object.detection2DBoundingBox = new THREE.Box2(
+      new THREE.Vector2(0.1, 0.2),
+      new THREE.Vector2(0.4, 0.6)
+    );
+    object.data = {color: 'white'};
+
+    const runDetection = vi.fn().mockResolvedValue([object]);
+    const context = {
+      core: {
+        world: {
+          objects: {runDetection},
+        },
+      },
+      camera: new THREE.PerspectiveCamera(),
+      input: {},
+      get: vi.fn(),
+      defer: vi.fn(),
+    } as unknown as SensorContext;
+
+    const observations = await new WorldObjectsSensor().update(context);
+
+    expect(runDetection).toHaveBeenCalledTimes(1);
+    expect(observations).toEqual([object]);
+    expect(observations[0]).toBe(object);
+  });
+
+  it('should run body pose detection and return native detected poses', async () => {
+    const pose = new THREE.Object3D() as THREE.Object3D & {
+      poseId: number;
+      detection2DBoundingBox: THREE.Box2;
+      landmarks: {
+        x: number;
+        y: number;
+        z: number;
+        visibility?: number;
+        worldPosition?: THREE.Vector3;
+      }[];
+    };
+    pose.poseId = 7;
+    pose.position.set(0.5, 1, -2);
+    pose.detection2DBoundingBox = new THREE.Box2(
+      new THREE.Vector2(0.2, 0.3),
+      new THREE.Vector2(0.8, 0.9)
+    );
+    pose.landmarks = [
+      {
+        x: 0.25,
+        y: 0.35,
+        z: -0.1,
+        visibility: 0.95,
+        worldPosition: new THREE.Vector3(1, 2, 3),
+      },
+    ];
+
+    const runDetection = vi.fn().mockResolvedValue([pose]);
+    const context = {
+      core: {
+        world: {
+          humans: {runDetection},
+        },
+      },
+      camera: new THREE.PerspectiveCamera(),
+      input: {},
+      get: vi.fn(),
+      defer: vi.fn(),
+    } as unknown as SensorContext;
+
+    const observations = await new BodyPoseSensor().update(context);
+
+    expect(runDetection).toHaveBeenCalledTimes(1);
+    expect(observations).toEqual([pose]);
+    expect(observations[0]).toBe(pose);
+  });
+
+  it('should start sound listening once and return latest sound history', async () => {
+    let soundListener:
+      | ((event: {
+          audioClassifierResult: {
+            items: {
+              classifications: {
+                categories: {categoryName: string; score: number}[];
+              }[];
+            }[];
+          };
+        }) => void)
+      | undefined;
+    const soundDetector = {
+      isListening: false,
+      startListening: vi.fn().mockImplementation(async () => {
+        soundDetector.isListening = true;
+      }),
+      addEventListener: vi.fn().mockImplementation((_type, listener) => {
+        soundListener = listener;
+      }),
+    };
+    const context = {
+      core: {
+        world: {
+          sounds: soundDetector,
+        },
+      },
+      camera: new THREE.PerspectiveCamera(),
+      input: {},
+      get: vi.fn(),
+      defer: vi.fn(),
+    } as unknown as SensorContext;
+
+    const sensor = new SoundSensor();
+    const initial = await sensor.update(context);
+
+    expect(soundDetector.startListening).toHaveBeenCalledTimes(1);
+    expect(soundDetector.addEventListener).toHaveBeenCalledTimes(1);
+    expect(initial).toEqual({
+      isListening: true,
+      latest: null,
+      history: [],
+    });
+
+    const result = {
+      items: [
+        {
+          classifications: [
+            {
+              categories: [{categoryName: 'Speech', score: 0.9}],
+            },
+          ],
+        },
+      ],
+    };
+    soundListener?.({audioClassifierResult: result});
+
+    const next = await sensor.update(context);
+
+    expect(soundDetector.startListening).toHaveBeenCalledTimes(1);
+    expect(soundDetector.addEventListener).toHaveBeenCalledTimes(1);
+    expect(next).toEqual({
+      isListening: true,
+      latest: result,
+      history: [result],
+    });
   });
 
   it('should protect slow async sensors with the Single-Flight Concurrency Guard', async () => {
@@ -370,6 +682,124 @@ describe('SensorsManager & Sensor API integration tests', () => {
     expect(cam1).toBe(mockCameraSnapshot);
     expect(cam2).toBe(cam1);
     expect(snapshotCount).toBe(1);
+
+    await runner.destroy();
+  });
+
+  it('should bypass completed cache when forceRefresh is set', async () => {
+    let count = 0;
+    class CountingSensor extends Sensor<number> {
+      readonly key = 'counting';
+      update() {
+        count++;
+        return count;
+      }
+    }
+    const sensor = new CountingSensor({cacheWindowMs: 1000});
+    const runner = await TestRunner.create({scripts: []});
+
+    const first = await sensor.capture();
+    const cached = await sensor.capture();
+    const refreshed = await sensor.capture({forceRefresh: true});
+
+    expect(first).toBe(1);
+    expect(cached).toBe(1);
+    expect(refreshed).toBe(2);
+    expect(count).toBe(2);
+
+    await runner.destroy();
+  });
+
+  it('should apply forceRefresh to every sensor in batch capture', async () => {
+    const counts = {a: 0, b: 0};
+    class SensorA extends Sensor<number> {
+      readonly key = 'a';
+      update() {
+        counts.a++;
+        return counts.a;
+      }
+    }
+    class SensorB extends Sensor<number> {
+      readonly key = 'b';
+      update() {
+        counts.b++;
+        return counts.b;
+      }
+    }
+
+    const sensorA = new SensorA({cacheWindowMs: 1000});
+    const sensorB = new SensorB({cacheWindowMs: 1000});
+    const manager = new SensorsManager([sensorA, sensorB]);
+    const runner = await TestRunner.create({scripts: [manager]});
+
+    expect(await manager.capture([sensorA, sensorB])).toEqual([1, 1]);
+    expect(await manager.capture([sensorA, sensorB])).toEqual([1, 1]);
+    expect(
+      await manager.capture([sensorA, sensorB], {forceRefresh: true})
+    ).toEqual([2, 2]);
+
+    expect(counts).toEqual({a: 2, b: 2});
+
+    await runner.destroy();
+  });
+
+  it('should expose sensor cache info and clear cache through the manager', async () => {
+    class CountingSensor extends Sensor<number> {
+      readonly key = 'counting';
+      update() {
+        return 1;
+      }
+    }
+    const sensor = new CountingSensor({cacheWindowMs: 1000});
+    const manager = new SensorsManager([sensor]);
+    const runner = await TestRunner.create({scripts: [manager]});
+
+    expect(sensor.getCacheInfo()).toMatchObject({
+      hasValue: false,
+      capturedAt: null,
+      ageMs: null,
+      active: false,
+    });
+
+    await manager.get(sensor);
+
+    const info = sensor.getCacheInfo();
+    expect(info.hasValue).toBe(true);
+    expect(info.capturedAt).toEqual(expect.any(Number));
+    expect(info.ageMs).toEqual(expect.any(Number));
+    expect(info.active).toBe(false);
+    expect(manager.getLatest(sensor)).toBe(1);
+
+    manager.clearCache();
+
+    expect(sensor.getLatest()).toBeUndefined();
+    expect(sensor.getCacheInfo()).toMatchObject({
+      hasValue: false,
+      capturedAt: null,
+      ageMs: null,
+      active: false,
+    });
+
+    await runner.destroy();
+  });
+
+  it('should merge duplicate sensor registrations using stricter cache policy', async () => {
+    class CountingSensor extends Sensor<number> {
+      readonly key = 'counting';
+      update() {
+        return 1;
+      }
+    }
+
+    const loose = new CountingSensor({cacheWindowMs: 1000});
+    const strict = new CountingSensor({cacheWindowMs: 10});
+    const manager = new SensorsManager([loose, strict]);
+    const runner = await TestRunner.create({scripts: [manager]});
+
+    const canonical = manager.getOrCreateInstance(CountingSensor);
+
+    expect(canonical).toBe(loose);
+    expect(canonical.options.cacheWindowMs).toBe(10);
 
     await runner.destroy();
   });
@@ -404,19 +834,16 @@ describe('SensorsManager & Sensor API integration tests', () => {
 
     // First call triggers background run, registers the sensor and sets up its state
     const p1 = manager.get(slow);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const state = (manager as any).sensorStates.get(slow);
-    expect(state).toBeDefined();
-    const activeP1 = state.activePromise;
-    expect(activeP1).toBeDefined();
+    expect(slow.getCacheInfo().active).toBe(true);
 
-    // Immediate second call returns the same active promise (deduplication)
+    // Immediate second call reuses the same active work (deduplication)
     const _p2 = manager.get(slow);
-    const activeP2 = state.activePromise;
-    expect(activeP2).toBe(activeP1);
+    expect(count).toBe(1);
+    expect(slow.getCacheInfo().active).toBe(true);
 
     const val = await p1;
     expect(val).toBe(1);
+    expect(slow.getCacheInfo().active).toBe(false);
 
     // Now that p1 has completed, a third call will instantly return 1 (synchronously!)
     // and kick off a new background update for count = 2 in the background

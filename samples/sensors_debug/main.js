@@ -14,14 +14,14 @@ import {
   raycastSortFunction,
 } from 'uiblocks';
 import {
-  SensorsManager,
+  sensors,
   ProprioceptionSensor,
   SceneGraphSensor,
   TargetingSensor,
   DepthSensor,
-  DeviceCameraSensor,
-  XRCameraSensor,
-  SOMCameraSensor,
+  DeviceCameraViewSensor,
+  UserViewSensor,
+  SOMViewSensor,
   SemanticMapSensor,
 } from 'xrblocks/addons/sensors/index.js';
 
@@ -79,12 +79,12 @@ const SENSOR_LIST = [
   {name: 'Semantic Map', sensorClass: SemanticMapSensor, type: 'text'},
   {name: 'Depth Heatmap', sensorClass: DepthSensor, type: 'depth'},
   {
-    name: 'Device Camera',
-    sensorClass: DeviceCameraSensor,
+    name: 'Device Camera View',
+    sensorClass: DeviceCameraViewSensor,
     type: 'image',
   },
-  {name: 'XR Camera', sensorClass: XRCameraSensor, type: 'image'},
-  {name: 'SOM Camera', sensorClass: SOMCameraSensor, type: 'image'},
+  {name: 'User View', sensorClass: UserViewSensor, type: 'image'},
+  {name: 'SOM View', sensorClass: SOMViewSensor, type: 'image'},
 ];
 
 // 2. Define the main prototyping scene containing testable entities (same as original)
@@ -150,16 +150,11 @@ class PrototypingScene extends xb.Script {
 
 // 3. Custom Script to manage the spatial UI blocks panel and query the selected sensor
 class DebuggerScript extends xb.Script {
-  static dependencies = {
-    sensors: SensorsManager,
-  };
-
   constructor() {
     super();
     this.uiCore = new UICore(this);
   }
 
-  sensors = null;
   lastCaptureTime = 0;
   isCapturing = false;
 
@@ -178,9 +173,7 @@ class DebuggerScript extends xb.Script {
   dropdownArrow = null;
   optionsContainer = null;
 
-  init(dependencies) {
-    this.sensors = dependencies.sensors;
-
+  init() {
     // Set sort function for raycasting against uiblocks
     if (xb.core.input.raycaster) {
       xb.core.input.raycaster.sortFunction = raycastSortFunction;
@@ -410,7 +403,7 @@ class DebuggerScript extends xb.Script {
     const sensorInfo = SENSOR_LIST[this.activeSensorIndex];
     try {
       // Perform dynamic single-sensor query
-      const data = await this.sensors.get(sensorInfo.sensorClass);
+      const data = await sensors.capture(sensorInfo.sensorClass);
 
       if (this.activeSensorIndex !== SENSOR_LIST.indexOf(sensorInfo)) {
         // Selected sensor changed during the async capture, ignore result
@@ -600,24 +593,9 @@ class DebuggerScript extends xb.Script {
 
 // 4. Start and initialize the engine
 async function start() {
-  const sensors = new SensorsManager([
-    ProprioceptionSensor,
-    SceneGraphSensor,
-    TargetingSensor,
-    DepthSensor,
-    DeviceCameraSensor,
-    XRCameraSensor,
-    SOMCameraSensor,
-    SemanticMapSensor,
-  ]);
-
-  // Register the sensors instance in the dependency injection container
-  xb.core.registry.register(sensors);
-
   // Register scripts
   xb.add(new PrototypingScene());
   xb.add(new xb.DragManager());
-  xb.add(sensors);
   xb.add(new DebuggerScript());
 
   await xb.init(options);

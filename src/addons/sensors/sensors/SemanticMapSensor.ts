@@ -9,19 +9,13 @@ import {VisibilitySensor, type VisibilityItem} from './VisibilitySensor';
 export class SemanticMapSensor extends Sensor<VisibleObjectReference[]> {
   readonly key = 'visibleObjects';
 
-  constructor(
-    private deps: {
-      visibility?: VisibilitySensor;
-    } = {},
-    options?: SensorsOptions
-  ) {
+  constructor(options?: SensorsOptions) {
     super(options);
   }
 
   async update(context: SensorContext): Promise<VisibleObjectReference[]> {
-    const visibilitySensor = this.deps.visibility ?? VisibilitySensor;
     const visibleObjects = (await context.get(
-      visibilitySensor
+      VisibilitySensor
     )) as VisibilityItem[];
 
     if (!visibleObjects) return [];

@@ -12,13 +12,14 @@ import {
 import {TestRunner} from '../testing/TestRunner';
 import {
   SensorsManager,
+  sensors,
   ProprioceptionSensor,
   DepthSensor,
   TargetingSensor,
   VisibilitySensor,
-  DeviceCameraSensor,
-  XRCameraSensor,
-  SOMCameraSensor,
+  DeviceCameraViewSensor,
+  UserViewSensor,
+  SOMViewSensor,
   SemanticMapSensor,
   SceneGraphSensor,
   PlaneSensor,
@@ -34,10 +35,10 @@ vi.mock('./sensors/CameraSensor', async (importOriginal) => {
   return {
     ...actual,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    SOMCameraSensor: class extends (actual.SOMCameraSensor as any) {
+    SOMViewSensor: class extends (actual.SOMViewSensor as any) {
       override async update(context: SensorContext) {
-        const xr = await context.get(XRCameraSensor);
-        return `annotated:${xr || 'mock-xr-screenshot'}`;
+        const userView = await context.get(UserViewSensor);
+        return `annotated:${userView || 'mock-user-view'}`;
       }
     },
   };
@@ -61,8 +62,7 @@ describe('SensorsManager & Sensor API integration tests', () => {
       'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
     );
 
-  it('should support direct sensor capture with automatic lazy self-bootstrapping', async () => {
-    const proprioception = new ProprioceptionSensor();
+  it('should support facade capture with automatic lazy self-bootstrapping', async () => {
     const options = new Options();
     options.hands.enabled = true;
 
@@ -81,7 +81,7 @@ describe('SensorsManager & Sensor API integration tests', () => {
       }
     }
 
-    const state = await proprioception.capture();
+    const state = await sensors.capture(ProprioceptionSensor);
 
     expect(state).toBeDefined();
     expect(state.camera.position).toBeDefined();
@@ -95,14 +95,13 @@ describe('SensorsManager & Sensor API integration tests', () => {
   });
 
   it('should support retrieving from the central SensorsManager using class constructors', async () => {
-    const proprioception = new ProprioceptionSensor();
-    const sensors = new SensorsManager([proprioception]);
+    const manager = new SensorsManager([ProprioceptionSensor]);
 
     const runner = await TestRunner.create({
-      scripts: [sensors],
+      scripts: [manager],
     });
 
-    const state = await sensors.get(ProprioceptionSensor);
+    const state = await manager.capture(ProprioceptionSensor);
     expect(state).toBeDefined();
     expect(state.camera.position).toBeDefined();
 
@@ -110,7 +109,6 @@ describe('SensorsManager & Sensor API integration tests', () => {
   });
 
   it('should perform 3D raycast targeting and return surface intersection metrics', async () => {
-    const targetingSensor = new TargetingSensor();
     const targetScript = new Script();
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5));
     targetScript.add(mesh);
@@ -124,7 +122,7 @@ describe('SensorsManager & Sensor API integration tests', () => {
     await runner.actions.pointTo(1, targetScript);
     await runner.actions.step({durationMs: 100});
 
-    const targeting = await targetingSensor.capture();
+    const targeting = await sensors.capture(TargetingSensor);
 
     const rightHandTargeting = targeting.rightHand;
     expect(rightHandTargeting).toBeDefined();
@@ -184,8 +182,6 @@ describe('SensorsManager & Sensor API integration tests', () => {
   });
 
   it('should resolve sensor dependencies and capture Set-of-Mark camera overlays', async () => {
-    const somSensor = new SOMCameraSensor();
-    const visibilitySensor = new VisibilitySensor();
     const button = new TestObjectScript();
 
     const runner = await TestRunner.create({
@@ -200,10 +196,10 @@ describe('SensorsManager & Sensor API integration tests', () => {
 
     await runner.actions.step({durationMs: 100});
 
-    const [somCamera, visibleObjects] = await SensorsManager.capture([
-      somSensor,
-      visibilitySensor,
-    ]);
+    const {somCamera, visibleObjects} = await sensors.captureAll({
+      somCamera: SOMViewSensor,
+      visibleObjects: VisibilitySensor,
+    });
 
     expect(somCamera).toBeDefined();
     expect(typeof somCamera).toBe('string');
@@ -221,7 +217,6 @@ describe('SensorsManager & Sensor API integration tests', () => {
   });
 
   it('should keep SemanticMapSensor as a compatibility wrapper over visibility', async () => {
-    const semanticSensor = new SemanticMapSensor();
     const button = new TestObjectScript();
 
     const runner = await TestRunner.create({
@@ -236,7 +231,7 @@ describe('SensorsManager & Sensor API integration tests', () => {
 
     await runner.actions.step({durationMs: 100});
 
-    const visibleObjects = await semanticSensor.capture();
+    const visibleObjects = await sensors.capture(SemanticMapSensor);
     const btnRef = visibleObjects.find((ref) => ref.type === 'TextButton');
 
     expect(btnRef).toBeDefined();
@@ -246,55 +241,87 @@ describe('SensorsManager & Sensor API integration tests', () => {
     await runner.destroy();
   });
 
-  it('should capture XR camera images without camera overlay when no device camera is loaded', async () => {
+  it('should capture user view images with camera overlay by default', async () => {
     getScreenshotSpy.mockClear();
     const runner = await TestRunner.create({scripts: []});
-    const xrCamera = await new XRCameraSensor().capture();
+    const userView = await sensors.capture(UserViewSensor);
 
-    expect(xrCamera).toContain('data:image/png;base64');
-    expect(getScreenshotSpy).toHaveBeenCalledWith(false);
-
-    await runner.destroy();
-  });
-
-  it('should capture XR camera images with camera overlay when a device camera is loaded', async () => {
-    getScreenshotSpy.mockClear();
-    const runner = await TestRunner.create({scripts: []});
-    (runner.core as unknown as {deviceCamera: unknown}).deviceCamera = {
-      loaded: true,
-    };
-    const xrCamera = await new XRCameraSensor().capture();
-
-    expect(xrCamera).toContain('data:image/png;base64');
+    expect(userView).toContain('data:image/png;base64');
     expect(getScreenshotSpy).toHaveBeenCalledWith(true);
 
     await runner.destroy();
   });
 
-  it('should let XR camera callers override camera overlay behavior', async () => {
+  it('should let user view callers disable camera overlay behavior', async () => {
     getScreenshotSpy.mockClear();
     const runner = await TestRunner.create({scripts: []});
 
-    await new XRCameraSensor({overlayOnCamera: true}).capture();
-    await new XRCameraSensor({overlayOnCamera: false}).capture();
+    await sensors.capture(UserViewSensor, {overlayOnCamera: false});
 
-    expect(getScreenshotSpy).toHaveBeenNthCalledWith(1, true);
-    expect(getScreenshotSpy).toHaveBeenNthCalledWith(2, false);
+    expect(getScreenshotSpy).toHaveBeenCalledWith(false);
 
     await runner.destroy();
   });
 
-  it('should return blank raw camera data when the device camera is unavailable', async () => {
+  it('should throw when raw device camera data is unavailable', async () => {
     const runner = await TestRunner.create({scripts: []});
     (runner.core as unknown as {deviceCamera: unknown}).deviceCamera =
       undefined;
 
-    await expect(new DeviceCameraSensor().capture()).resolves.toBe('');
-    await expect(
-      new DeviceCameraSensor({strict: true}).capture()
-    ).rejects.toThrow(
-      'DeviceCameraSensor requires an initialized XRDeviceCamera.'
+    await expect(sensors.capture(DeviceCameraViewSensor)).rejects.toThrow(
+      'DeviceCameraViewSensor requires an initialized XRDeviceCamera.'
     );
+
+    (runner.core as unknown as {deviceCamera: unknown}).deviceCamera = {
+      loaded: false,
+    };
+    await expect(sensors.capture(DeviceCameraViewSensor)).rejects.toThrow(
+      'DeviceCameraViewSensor requires an initialized XRDeviceCamera.'
+    );
+
+    (runner.core as unknown as {deviceCamera: unknown}).deviceCamera = {
+      loaded: true,
+      getSnapshot: vi.fn().mockResolvedValue(null),
+    };
+    await expect(sensors.capture(DeviceCameraViewSensor)).rejects.toThrow(
+      'DeviceCameraViewSensor failed to capture a frame.'
+    );
+
+    await runner.destroy();
+  });
+
+  it('should capture raw device camera data with Gemini-equivalent defaults and overrides', async () => {
+    const runner = await TestRunner.create({scripts: []});
+    const mockCameraSnapshot = 'data:image/jpeg;base64,cameraSnapshotData';
+    const getSnapshot = vi.fn().mockResolvedValue(mockCameraSnapshot);
+    (runner.core as unknown as {deviceCamera: unknown}).deviceCamera = {
+      loaded: true,
+      getSnapshot,
+    };
+
+    const defaultSnapshot = await sensors.capture(DeviceCameraViewSensor);
+    expect(defaultSnapshot).toBe(mockCameraSnapshot);
+    expect(getSnapshot).toHaveBeenCalledWith({
+      outputFormat: 'base64',
+      mimeType: 'image/jpeg',
+      quality: 0.8,
+    });
+
+    getSnapshot.mockClear();
+    await sensors.capture(DeviceCameraViewSensor, {
+      mimeType: 'image/png',
+      quality: 0.5,
+      width: 320,
+      height: 180,
+    });
+    expect(getSnapshot).toHaveBeenCalledWith({
+      outputFormat: 'base64',
+      mimeType: 'image/png',
+      quality: 0.5,
+      width: 320,
+      height: 180,
+    });
+
     await runner.destroy();
   });
 
@@ -309,7 +336,7 @@ describe('SensorsManager & Sensor API integration tests', () => {
     };
     runner.core.scene.add(mesh);
 
-    const graph = await new SceneGraphSensor().capture();
+    const graph = await sensors.capture(SceneGraphSensor);
     const node = graph.find((entry) => entry.id === mesh.id);
 
     expect(node).toBeDefined();
@@ -340,7 +367,7 @@ describe('SensorsManager & Sensor API integration tests', () => {
     const composite = new CompositeScript();
     const runner = await TestRunner.create({scripts: [composite]});
 
-    const graph = await new SceneGraphSensor().capture();
+    const graph = await sensors.capture(SceneGraphSensor);
 
     expect(graph).toHaveLength(1);
     expect(graph[0]).toMatchObject({
@@ -367,7 +394,7 @@ describe('SensorsManager & Sensor API integration tests', () => {
 
     const runner = await TestRunner.create({scripts: [panel]});
 
-    const graph = await new SceneGraphSensor().capture();
+    const graph = await sensors.capture(SceneGraphSensor);
     const panelNode = graph.find((entry) => entry.id === panel.id);
     const buttonNode = graph.find((entry) => entry.id === button.id);
 
@@ -380,15 +407,12 @@ describe('SensorsManager & Sensor API integration tests', () => {
   });
 
   it('should support custom sensor parameters (like DepthSensor gridSize)', async () => {
-    const depth8 = new DepthSensor({gridSize: 8});
-    const depth16 = new DepthSensor({gridSize: 16});
-
     const runner = await TestRunner.create({
       scripts: [],
     });
 
-    const grid8 = await depth8.capture();
-    const grid16 = await depth16.capture();
+    const grid8 = await sensors.capture(DepthSensor, {gridSize: 8});
+    const grid16 = await sensors.capture(DepthSensor, {gridSize: 16});
 
     expect(grid8.length).toBe(8);
     expect(grid8[0].length).toBe(8);
@@ -399,65 +423,109 @@ describe('SensorsManager & Sensor API integration tests', () => {
     await runner.destroy();
   });
 
+  it('should keep behavior option variants separate while sharing runtime cache policy', async () => {
+    const counts: Record<string, number> = {};
+    class VariantSensor extends Sensor<{variant: string; count: number}> {
+      static readonly optionKeys = ['variant'];
+      readonly key = 'variant';
+      update() {
+        const variant =
+          (this.options as {variant?: string}).variant ?? 'default';
+        counts[variant] = (counts[variant] ?? 0) + 1;
+        return {variant, count: counts[variant]};
+      }
+    }
+
+    const runner = await TestRunner.create({scripts: []});
+
+    const firstA = await sensors.capture(VariantSensor, {
+      variant: 'a',
+      cacheWindowMs: 1000,
+    });
+    const secondA = await sensors.capture(VariantSensor, {
+      variant: 'a',
+      cacheWindowMs: 500,
+    });
+    const firstB = await sensors.capture(VariantSensor, {
+      variant: 'b',
+      cacheWindowMs: 1000,
+    });
+
+    expect(firstA).toEqual({variant: 'a', count: 1});
+    expect(secondA).toBe(firstA);
+    expect(firstB).toEqual({variant: 'b', count: 1});
+    expect(counts).toEqual({a: 1, b: 1});
+
+    await runner.destroy();
+  });
+
   it('should cache observations requested within the cacheWindowMs and invalidate them afterwards', async () => {
-    const proprioception = new ProprioceptionSensor();
+    let count = 0;
+    class CountingSensor extends Sensor<number> {
+      readonly key = 'counting';
+      update() {
+        count++;
+        return count;
+      }
+    }
+
     const runner = await TestRunner.create({
       scripts: [],
     });
 
-    const updateSpy = vi.spyOn(proprioception, 'update');
-
-    const val1 = await proprioception.capture({cacheWindowMs: 20});
+    const val1 = await sensors.capture(CountingSensor, {cacheWindowMs: 20});
     expect(val1).toBeDefined();
-    expect(updateSpy).toHaveBeenCalledTimes(1);
+    expect(count).toBe(1);
 
-    const val2 = await proprioception.capture({cacheWindowMs: 20});
+    const val2 = await sensors.capture(CountingSensor, {cacheWindowMs: 20});
     expect(val2).toBe(val1);
-    expect(updateSpy).toHaveBeenCalledTimes(1);
+    expect(count).toBe(1);
 
     await new Promise((resolve) => setTimeout(resolve, 25));
 
-    const val3 = await proprioception.capture({cacheWindowMs: 20});
+    const val3 = await sensors.capture(CountingSensor, {cacheWindowMs: 20});
     expect(val3).toBeDefined();
     expect(val3).not.toBe(val1);
-    expect(updateSpy).toHaveBeenCalledTimes(2);
+    expect(count).toBe(2);
 
-    updateSpy.mockRestore();
     await runner.destroy();
   });
 
   it('should support progressive enrichment of cached observations on the same frame', async () => {
-    const proprioception = new ProprioceptionSensor();
-    const depth = new DepthSensor();
+    let count = 0;
+    class CountingSensor extends Sensor<number> {
+      readonly key = 'counting';
+      update() {
+        count++;
+        return count;
+      }
+    }
+
     const runner = await TestRunner.create({
       scripts: [],
     });
 
-    const proprioceptionSpy = vi.spyOn(proprioception, 'update');
-    const depthSpy = vi.spyOn(depth, 'update');
-
-    const val1 = await proprioception.capture({cacheWindowMs: 20});
+    const val1 = await sensors.capture(CountingSensor, {cacheWindowMs: 20});
     expect(val1).toBeDefined();
-    expect(proprioceptionSpy).toHaveBeenCalledTimes(1);
-    expect(depthSpy).toHaveBeenCalledTimes(0);
+    expect(count).toBe(1);
 
-    const [val1_again, val2] = await SensorsManager.capture(
-      [proprioception, depth],
+    const {counting, depth} = await sensors.captureAll(
+      {
+        counting: CountingSensor,
+        depth: DepthSensor,
+      },
       {cacheWindowMs: 20}
     );
 
-    expect(val1_again).toBe(val1);
-    expect(val2).toBeDefined();
+    expect(counting).toBe(val1);
+    expect(depth).toBeDefined();
 
-    expect(proprioceptionSpy).toHaveBeenCalledTimes(1);
-    expect(depthSpy).toHaveBeenCalledTimes(1);
+    expect(count).toBe(1);
 
-    proprioceptionSpy.mockRestore();
-    depthSpy.mockRestore();
     await runner.destroy();
   });
 
-  it('should return null for failed sensors during batch capture', async () => {
+  it('should throw from captureAll and return null for failed sensors during tryCaptureAll', async () => {
     class FailingSensor extends Sensor<string> {
       readonly key = 'failing';
       update() {
@@ -465,23 +533,31 @@ describe('SensorsManager & Sensor API integration tests', () => {
       }
     }
 
-    const proprioception = new ProprioceptionSensor();
-    const failing = new FailingSensor();
-    const sensors = new SensorsManager([proprioception, failing]);
+    const manager = new SensorsManager();
     const runner = await TestRunner.create({
-      scripts: [sensors],
+      scripts: [manager],
     });
 
-    const [state, failed] = await sensors.capture([proprioception, failing]);
+    await expect(
+      manager.captureAll({
+        state: ProprioceptionSensor,
+        failed: FailingSensor,
+      })
+    ).rejects.toThrow('Intentional sensor failure');
 
-    expect(state).toBeDefined();
-    expect(failed).toBeNull();
-    expect(sensors.getLastCaptureErrors()).toEqual({
+    const {values, errors} = await manager.tryCaptureAll({
+      state: ProprioceptionSensor,
+      failed: FailingSensor,
+    });
+
+    expect(values.state).toBeDefined();
+    expect(values.failed).toBeNull();
+    expect(errors).toEqual({
+      failed: 'Intentional sensor failure',
+    });
+    expect(manager.getLastCaptureErrors()).toEqual({
       failing: 'Intentional sensor failure',
     });
-    await expect(sensors.get(failing)).rejects.toThrow(
-      'Intentional sensor failure'
-    );
 
     await runner.destroy();
   });
@@ -687,7 +763,6 @@ describe('SensorsManager & Sensor API integration tests', () => {
   });
 
   it('should protect slow async sensors with the Single-Flight Concurrency Guard', async () => {
-    const cameraSensor = new DeviceCameraSensor({strict: true});
     const runner = await TestRunner.create({
       scripts: [],
     });
@@ -706,8 +781,8 @@ describe('SensorsManager & Sensor API integration tests', () => {
       mockCamera;
 
     const [cam1, cam2] = await Promise.all([
-      cameraSensor.capture(),
-      cameraSensor.capture(),
+      sensors.capture(DeviceCameraViewSensor),
+      sensors.capture(DeviceCameraViewSensor),
     ]);
 
     expect(cam1).toBe(mockCameraSnapshot);
@@ -726,12 +801,14 @@ describe('SensorsManager & Sensor API integration tests', () => {
         return count;
       }
     }
-    const sensor = new CountingSensor({cacheWindowMs: 1000});
     const runner = await TestRunner.create({scripts: []});
 
-    const first = await sensor.capture();
-    const cached = await sensor.capture();
-    const refreshed = await sensor.capture({forceRefresh: true});
+    const first = await sensors.capture(CountingSensor, {cacheWindowMs: 1000});
+    const cached = await sensors.capture(CountingSensor, {cacheWindowMs: 1000});
+    const refreshed = await sensors.capture(CountingSensor, {
+      cacheWindowMs: 1000,
+      forceRefresh: true,
+    });
 
     expect(first).toBe(1);
     expect(cached).toBe(1);
@@ -758,16 +835,36 @@ describe('SensorsManager & Sensor API integration tests', () => {
       }
     }
 
-    const sensorA = new SensorA({cacheWindowMs: 1000});
-    const sensorB = new SensorB({cacheWindowMs: 1000});
-    const manager = new SensorsManager([sensorA, sensorB]);
+    const manager = new SensorsManager();
     const runner = await TestRunner.create({scripts: [manager]});
 
-    expect(await manager.capture([sensorA, sensorB])).toEqual([1, 1]);
-    expect(await manager.capture([sensorA, sensorB])).toEqual([1, 1]);
     expect(
-      await manager.capture([sensorA, sensorB], {forceRefresh: true})
-    ).toEqual([2, 2]);
+      await manager.captureAll(
+        {
+          a: SensorA,
+          b: SensorB,
+        },
+        {cacheWindowMs: 1000}
+      )
+    ).toEqual({a: 1, b: 1});
+    expect(
+      await manager.captureAll(
+        {
+          a: SensorA,
+          b: SensorB,
+        },
+        {cacheWindowMs: 1000}
+      )
+    ).toEqual({a: 1, b: 1});
+    expect(
+      await manager.captureAll(
+        {
+          a: SensorA,
+          b: SensorB,
+        },
+        {cacheWindowMs: 1000, forceRefresh: true}
+      )
+    ).toEqual({a: 2, b: 2});
 
     expect(counts).toEqual({a: 2, b: 2});
 
@@ -781,9 +878,11 @@ describe('SensorsManager & Sensor API integration tests', () => {
         return 1;
       }
     }
-    const sensor = new CountingSensor({cacheWindowMs: 1000});
-    const manager = new SensorsManager([sensor]);
+    const manager = new SensorsManager([[CountingSensor, {cacheWindowMs: 1000}]]);
     const runner = await TestRunner.create({scripts: [manager]});
+    const sensor = manager.getOrCreateInstance(CountingSensor, {
+      cacheWindowMs: 1000,
+    });
 
     expect(sensor.getCacheInfo()).toMatchObject({
       hasValue: false,
@@ -792,14 +891,14 @@ describe('SensorsManager & Sensor API integration tests', () => {
       active: false,
     });
 
-    await manager.get(sensor);
+    await manager.capture(CountingSensor, {cacheWindowMs: 1000});
 
     const info = sensor.getCacheInfo();
     expect(info.hasValue).toBe(true);
     expect(info.capturedAt).toEqual(expect.any(Number));
     expect(info.ageMs).toEqual(expect.any(Number));
     expect(info.active).toBe(false);
-    expect(manager.getLatest(sensor)).toBe(1);
+    expect(manager.getLatest(CountingSensor, {cacheWindowMs: 1000})).toBe(1);
 
     manager.clearCache();
 
@@ -822,29 +921,29 @@ describe('SensorsManager & Sensor API integration tests', () => {
       }
     }
 
-    const loose = new CountingSensor({cacheWindowMs: 1000});
-    const strict = new CountingSensor({cacheWindowMs: 10});
-    const manager = new SensorsManager([loose, strict]);
+    const manager = new SensorsManager([
+      [CountingSensor, {cacheWindowMs: 1000}],
+      [CountingSensor, {cacheWindowMs: 4}],
+    ]);
     const runner = await TestRunner.create({scripts: [manager]});
 
     const canonical = manager.getOrCreateInstance(CountingSensor);
 
-    expect(canonical).toBe(loose);
-    expect(canonical.options.cacheWindowMs).toBe(10);
+    expect(canonical.options.cacheWindowMs).toBe(4);
 
     await runner.destroy();
   });
 
   it('should support sync, background, and idle update modes', async () => {
-    const proprio = new ProprioceptionSensor({updateMode: 'sync'});
-    const val1 = await proprio.capture();
+    const val1 = await sensors.capture(ProprioceptionSensor, {
+      updateMode: 'sync',
+    });
     expect(val1).toBeDefined();
 
-    const depth = new DepthSensor({updateMode: 'idle'});
     const runner = await TestRunner.create({
       scripts: [],
     });
-    const depthVal = await depth.capture();
+    const depthVal = await sensors.capture(DepthSensor, {updateMode: 'idle'});
     expect(depthVal).toBeDefined();
 
     const manager = runner.core.registry.get(SensorsManager)!;
@@ -861,14 +960,14 @@ describe('SensorsManager & Sensor API integration tests', () => {
         return count;
       }
     }
-    const slow = new SlowBackgroundSensor();
+    const slow = manager.getOrCreateInstance(SlowBackgroundSensor);
 
     // First call triggers background run, registers the sensor and sets up its state
-    const p1 = manager.get(slow);
+    const p1 = manager.capture(SlowBackgroundSensor);
     expect(slow.getCacheInfo().active).toBe(true);
 
     // Immediate second call reuses the same active work (deduplication)
-    const _p2 = manager.get(slow);
+    const _p2 = manager.capture(SlowBackgroundSensor);
     expect(count).toBe(1);
     expect(slow.getCacheInfo().active).toBe(true);
 
@@ -878,14 +977,14 @@ describe('SensorsManager & Sensor API integration tests', () => {
 
     // Now that p1 has completed, a third call will instantly return 1 (synchronously!)
     // and kick off a new background update for count = 2 in the background
-    const valImmediate = await slow.capture();
+    const valImmediate = await manager.capture(SlowBackgroundSensor);
     expect(valImmediate).toBe(1);
 
     // Wait for the background update to finish
     await new Promise((r) => setTimeout(r, 30));
 
     // The next call will return the new completed value (2)
-    const valNext = await slow.capture();
+    const valNext = await manager.capture(SlowBackgroundSensor);
     expect(valNext).toBe(2);
 
     await runner.destroy();

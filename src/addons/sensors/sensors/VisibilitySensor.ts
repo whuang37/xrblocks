@@ -7,6 +7,7 @@ import {
 export type VisibilityItem = VisualObjectReference;
 
 export class VisibilitySensor extends Sensor<VisibilityItem[]> {
+  static readonly optionKeys = ['verifyLineOfSight'];
   readonly key = 'visibility';
 
   constructor(options?: SensorsOptions) {

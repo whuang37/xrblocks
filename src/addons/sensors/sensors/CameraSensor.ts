@@ -2,12 +2,20 @@ import * as THREE from 'three';
 import {Sensor, type SensorContext, type SensorsOptions} from '../SensorsTypes';
 import {VisibilitySensor, type VisibilityItem} from './VisibilitySensor';
 
-export type XRCameraOverlayMode = boolean | 'auto';
+export type UserViewOverlayMode = boolean;
 
-export class DeviceCameraSensor extends Sensor<string> {
-  readonly key: string = 'deviceCamera';
+export type DeviceCameraViewSensorOptions = SensorsOptions & {
+  mimeType?: string;
+  quality?: number;
+  width?: number;
+  height?: number;
+};
 
-  constructor(options: SensorsOptions = {}) {
+export class DeviceCameraViewSensor extends Sensor<string> {
+  static readonly optionKeys = ['mimeType', 'quality', 'width', 'height'];
+  readonly key: string = 'deviceCameraView';
+
+  constructor(options: DeviceCameraViewSensorOptions = {}) {
     super({updateMode: 'background', ...options});
   }
 
@@ -15,60 +23,57 @@ export class DeviceCameraSensor extends Sensor<string> {
     const {core} = context;
     const deviceCamera = core.deviceCamera;
     if (!deviceCamera?.loaded) {
-      if (this.options.strict) {
-        throw new Error(
-          'DeviceCameraSensor requires an initialized XRDeviceCamera.'
-        );
-      }
-      return '';
+      throw new Error(
+        'DeviceCameraViewSensor requires an initialized XRDeviceCamera.'
+      );
     }
-    return (
-      (await deviceCamera.getSnapshot({
-        outputFormat: 'base64',
-      })) || ''
-    );
+
+    const options = this.options as DeviceCameraViewSensorOptions;
+    const snapshot = await deviceCamera.getSnapshot({
+      outputFormat: 'base64',
+      mimeType: options.mimeType ?? 'image/jpeg',
+      quality: options.quality ?? 0.8,
+      ...(options.width ? {width: options.width} : {}),
+      ...(options.height ? {height: options.height} : {}),
+    });
+    if (!snapshot) {
+      throw new Error('DeviceCameraViewSensor failed to capture a frame.');
+    }
+    return snapshot;
   }
 }
 
-export class XRCameraSensor extends Sensor<string> {
-  readonly key: string = 'xrCamera';
+export class UserViewSensor extends Sensor<string> {
+  static readonly optionKeys = ['overlayOnCamera'];
+  readonly key: string = 'userView';
 
   constructor(
-    options: SensorsOptions & {overlayOnCamera?: XRCameraOverlayMode} = {}
+    options: SensorsOptions & {overlayOnCamera?: UserViewOverlayMode} = {}
   ) {
-    super({updateMode: 'background', overlayOnCamera: 'auto', ...options});
+    super({updateMode: 'background', overlayOnCamera: true, ...options});
   }
 
   async update(context: SensorContext): Promise<string> {
     const {core} = context;
     const synth = core.screenshotSynthesizer;
     if (synth) {
-      return (
-        (await synth.getScreenshot(this.resolveOverlayOnCamera(core))) || ''
-      );
+      return (await synth.getScreenshot(this.resolveOverlayOnCamera())) || '';
     }
     return '';
   }
 
-  private resolveOverlayOnCamera(core: SensorContext['core']): boolean {
+  private resolveOverlayOnCamera(): boolean {
     const mode =
-      (this.options as {overlayOnCamera?: XRCameraOverlayMode})
-        ?.overlayOnCamera ?? 'auto';
-    if (mode !== 'auto') return mode;
-    return !!core.deviceCamera?.loaded;
+      (this.options as {overlayOnCamera?: UserViewOverlayMode})
+        ?.overlayOnCamera ?? true;
+    return mode;
   }
 }
 
-export class SOMCameraSensor extends Sensor<string> {
-  readonly key: string = 'somCamera';
+export class SOMViewSensor extends Sensor<string> {
+  readonly key: string = 'somView';
 
-  constructor(
-    private deps: {
-      xr?: XRCameraSensor;
-      visibility?: VisibilitySensor;
-    } = {},
-    options?: SensorsOptions
-  ) {
+  constructor(options?: SensorsOptions) {
     super({updateMode: 'background', ...options});
   }
 
@@ -78,22 +83,19 @@ export class SOMCameraSensor extends Sensor<string> {
     const projectionMatrix = camera.projectionMatrix.clone();
     const matrixWorldInverse = camera.matrixWorldInverse.clone();
 
-    const xrSensor = this.deps.xr ?? XRCameraSensor;
-    const visibilitySensor = this.deps.visibility ?? VisibilitySensor;
-
-    const [xr, visibleObjects] = await Promise.all([
-      context.get(xrSensor, {updateMode: 'sync'}) as Promise<string>,
-      context.get(visibilitySensor, {updateMode: 'sync'}) as Promise<
+    const [userView, visibleObjects] = await Promise.all([
+      context.get(UserViewSensor, {updateMode: 'sync'}) as Promise<string>,
+      context.get(VisibilitySensor, {updateMode: 'sync'}) as Promise<
         VisibilityItem[]
       >,
     ]);
 
-    if (!xr || !visibleObjects) return xr || '';
+    if (!userView || !visibleObjects) return userView || '';
 
     return renderAnnotatedScreenshot(
       projectionMatrix,
       matrixWorldInverse,
-      xr,
+      userView,
       visibleObjects
     );
   }

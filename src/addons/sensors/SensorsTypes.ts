@@ -38,11 +38,15 @@ export interface SensorContext {
   camera: THREE.Camera;
   input: Input;
   get<S>(
-    sensor: Sensor<S> | Constructor<Sensor<S>>,
+    sensor: SensorConstructor<S>,
     options?: SensorsOptions
   ): Promise<S>;
   defer<R>(fn: () => Promise<R> | R): Promise<R>;
 }
+
+export type SensorConstructor<T = unknown> = Constructor<Sensor<T>> & {
+  readonly optionKeys?: readonly string[];
+};
 
 export abstract class Sensor<T = unknown> {
   /** Internal unique key used for debugging and logging */
@@ -65,44 +69,6 @@ export abstract class Sensor<T = unknown> {
    * Primary execution endpoint for the sensor.
    */
   abstract update(context: SensorContext): Promise<T> | T;
-
-  /**
-   * Backwards-compatible direct execution path. New code should prefer
-   * SensorsManager.get(), which owns cache orchestration for shared captures.
-   */
-  async get(context: SensorContext, options?: SensorsOptions): Promise<T> {
-    const effectiveOptions = this.getEffectiveOptions(options);
-    const cacheWindowMs = effectiveOptions.cacheWindowMs ?? 0.0;
-    const forceRefresh = effectiveOptions.forceRefresh === true;
-    const updateMode = effectiveOptions.updateMode ?? 'sync';
-
-    if (!forceRefresh && this.hasFreshCache(cacheWindowMs)) {
-      return this.cachedValue!;
-    }
-
-    if (this.activePromise) {
-      return this.activePromise;
-    }
-
-    if (updateMode === 'background') {
-      const promise = this.runUpdate(context);
-      // Background callers may receive cached values while this refresh runs;
-      // attach a rejection handler so an unobserved refresh cannot produce an
-      // unhandled rejection.
-      promise.catch(() => {});
-
-      if (!forceRefresh && this.cachedValue !== undefined) {
-        return this.cachedValue;
-      }
-      return promise;
-    }
-
-    if (updateMode === 'idle') {
-      return this.runIdleUpdate(context);
-    }
-
-    return this.runUpdate(context);
-  }
 
   getLatest(): T | undefined {
     return this.cachedValue;
@@ -156,15 +122,6 @@ export abstract class Sensor<T = unknown> {
     delete this.options.forceRefresh;
   }
 
-  /**
-   * Direct, strongly-typed capture. Self-bootstraps SensorsManager if needed.
-   */
-  async capture(options?: SensorsOptions): Promise<T> {
-    const {SensorsManager} = await import('./SensorsManager');
-    const manager = await SensorsManager.resolve();
-    return manager.get(this, options);
-  }
-
   getEffectiveOptions(options?: SensorsOptions): SensorsOptions {
     return {
       ...this.options,
@@ -196,33 +153,6 @@ export abstract class Sensor<T = unknown> {
       cacheWindowMs > 0 &&
       performance.now() - this.capturedAt < cacheWindowMs
     );
-  }
-
-  private runUpdate(context: SensorContext): Promise<T> {
-    this.activePromise = Promise.resolve(this.update(context))
-      .then((value) => {
-        this.cachedValue = value;
-        this.capturedAt = performance.now();
-        return value;
-      })
-      .finally(() => {
-        this.activePromise = null;
-      });
-    return this.activePromise;
-  }
-
-  private runIdleUpdate(context: SensorContext): Promise<T> {
-    this.activePromise = context
-      .defer(() => this.update(context))
-      .then((value) => {
-        this.cachedValue = value;
-        this.capturedAt = performance.now();
-        return value;
-      });
-    this.activePromise = this.activePromise.finally(() => {
-      this.activePromise = null;
-    });
-    return this.activePromise;
   }
 
   private static fresherUpdateMode(

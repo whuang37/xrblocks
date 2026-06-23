@@ -12,7 +12,7 @@ This sample demonstrates the XR Blocks **Sensors Addon** integrated with the **U
 - **Depth Heatmap Rendering in XR**: Renders environmental depth-sensing distance grids (0m to 4m) as a blue-to-red color ramp on an offscreen canvas, which is uploaded as a `THREE.CanvasTexture` and displayed dynamically inside a spatial `UIImage` component.
 - **Image & Telemetry Display**:
   - **Text-based sensors** (`Proprioception`, `Scene Graph`, `Targeting`, `Semantic Map`): Renders formatted, multi-line diagnostic text inside a `UIText` component.
-  - **Screenshot sensors** (`Camera`, `XR`, `SOM`): Renders the captured base64 image streams inside a `UIImage` component.
+  - **View sensors** (`Device Camera View`, `User View`, `SOM View`): Renders the captured base64 image streams inside a `UIImage` component.
 
 ## How to Use
 
@@ -28,7 +28,7 @@ This sample demonstrates the XR Blocks **Sensors Addon** integrated with the **U
 6. **Toggle Sensors**: Click on the dropdown menu at the top of the panel (displaying "Proprioception" by default). The options menu will expand. Click on any sensor to load its telemetry:
    - Select **Semantic Map** or **Targeting** and interact with the shapes or look around to see the live intersections and visible object indices update.
    - Select **Depth Heatmap** to see the live distance ramp.
-   - Select one of the **Screenshot** sensors to inspect viewport frame captures in real-time.
+   - Select one of the **View** sensors to inspect viewport frame captures in real-time.
 
 ## Technical Highlights
 
@@ -38,4 +38,4 @@ The sample showcases:
 - **Dynamic Interaction Callbacks**: Implementing custom hovering states and click events (`onHoverEnter`, `onHoverExit`, `onClick`) directly in the spatial UI.
 - **Dynamic Layout Toggling**: Using the `display` property (`'flex'` / `'none'`) to hide and show components dynamically (e.g. expanding the dropdown, switching between text and image views).
 - **Offscreen Canvas Textures in XR**: Bridging HTML5 2D canvas drawing with 3D WebGL scenes by rendering dynamic heatmaps to an offscreen canvas, wrapping it in a `THREE.CanvasTexture`, and passing it to a spatial `UIImage`.
-- **Targeted Subsystem Resolution**: Utilizing `sensors.get(SensorClass)` to capture specific telemetry streams on-demand, reducing rendering overhead.
+- **Targeted Subsystem Resolution**: Utilizing `sensors.capture(SensorClass)` to capture specific telemetry streams on-demand, reducing rendering overhead.

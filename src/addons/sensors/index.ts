@@ -17,9 +17,9 @@ export {
   type VisibilityItem,
 } from './sensors/VisibilitySensor';
 export {
-  DeviceCameraSensor,
-  XRCameraSensor,
-  SOMCameraSensor,
+  DeviceCameraViewSensor,
+  UserViewSensor,
+  SOMViewSensor,
 } from './sensors/CameraSensor';
 export {SemanticMapSensor} from './sensors/SemanticMapSensor';
 export {PlaneSensor} from './sensors/PlaneSensor';

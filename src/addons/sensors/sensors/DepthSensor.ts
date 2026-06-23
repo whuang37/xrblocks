@@ -3,6 +3,7 @@ import {Sensor, type SensorContext, type SensorsOptions} from '../SensorsTypes';
 import {isInternalHelper} from '../utils/SensorsUtils';
 
 export class DepthSensor extends Sensor<number[][]> {
+  static readonly optionKeys = ['gridSize'];
   readonly key = 'depth';
 
   constructor(options: SensorsOptions & {gridSize?: number} = {}) {
@@ -14,7 +15,7 @@ export class DepthSensor extends Sensor<number[][]> {
     const depthSubsystem = core.depth;
     const gridSize = (this.options as {gridSize?: number})?.gridSize ?? 16;
 
-    // 1. Hardware-level depth sensing
+    // Hardware-level depth sensing
     if (
       depthSubsystem &&
       depthSubsystem.enabled &&
@@ -37,7 +38,7 @@ export class DepthSensor extends Sensor<number[][]> {
       return depthGrid;
     }
 
-    // 2. CPU-based scene graph raycasting fallback
+    // CPU-based scene graph raycasting fallback
     const scene = core.scene;
     const depthGrid: number[][] = [];
     if (!scene || !camera) return depthGrid;

@@ -225,7 +225,6 @@ function createDebuggerSidebar() {
       <div class="telemetry-grid">
         <div class="telemetry-item" id="target-left">Left Ray: <span>-</span></div>
         <div class="telemetry-item" id="target-right">Right Ray: <span>-</span></div>
-        <div class="telemetry-item" id="target-gaze">Gaze Ray: <span>-</span></div>
       </div>
     </section>
 
@@ -429,8 +428,6 @@ class DebuggerScript extends xb.Script {
           `Left: ${getTargetString(targeting.leftHand)}`;
         document.getElementById('target-right').innerHTML =
           `Right: ${getTargetString(targeting.rightHand)}`;
-        document.getElementById('target-gaze').innerHTML =
-          `Gaze: ${getTargetString(targeting.gaze)}`;
       }
 
       // 6. Render the full structured sensor payload for debugging.

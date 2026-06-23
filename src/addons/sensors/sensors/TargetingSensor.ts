@@ -13,7 +13,6 @@ const HAND_COLLISION_RADIUS = 0.08; // 8cm bounding radius around the knuckle
 export interface TargetingSnapshot {
   leftHand?: TargetingMetrics;
   rightHand?: TargetingMetrics;
-  gaze?: TargetingMetrics;
 }
 
 export class TargetingSensor extends Sensor<TargetingSnapshot> {
@@ -98,7 +97,6 @@ export class TargetingSensor extends Sensor<TargetingSnapshot> {
       rightHand: input.rightController
         ? getTargetingForController(input.rightController)
         : undefined,
-      gaze: getTargetingForController(input.gazeController),
     };
   }
 }

@@ -45,6 +45,15 @@ import {User} from './User';
 import {PermissionsManager} from './components/PermissionsManager';
 import {XRSystems} from './components/XRSystems';
 
+const XR_BLOCKS_VERSION = '0.16.0';
+
+export type XRBlocksRuntimeHandle = {
+  version: string;
+  core: Core;
+  ready: Promise<Core>;
+  simulatorReady: Promise<Core>;
+};
+
 /**
  * Core is the central engine of the XR Blocks framework, acting as a
  * singleton manager for all XR subsystems. Its primary goal is to abstract
@@ -141,6 +150,14 @@ export class Core {
   ) => void;
   webXRSessionManager?: WebXRSessionManager;
   permissionsManager = new PermissionsManager();
+  private resolveRuntimeReady?: (core: Core) => void;
+  private resolveSimulatorRuntimeReady?: (core: Core) => void;
+  private runtimeReady = new Promise<Core>((resolve) => {
+    this.resolveRuntimeReady = resolve;
+  });
+  private simulatorRuntimeReady = new Promise<Core>((resolve) => {
+    this.resolveSimulatorRuntimeReady = resolve;
+  });
 
   /**
    * The WebGL renderer, created during {@link Core.init}. Reading it before
@@ -201,6 +218,7 @@ export class Core {
       return Core.instance;
     }
     Core.instance = this;
+    this.installRuntimeHandle();
 
     this.scene.name = 'XR Blocks Scene';
 
@@ -480,6 +498,8 @@ export class Core {
     if (!loadingSpinnerManager.isLoading) {
       loadingSpinnerManager.hideSpinner();
     }
+
+    this.resolveRuntimeReady?.(this);
   }
 
   /**
@@ -546,14 +566,14 @@ export class Core {
     this.scriptsManager.update(time, frame);
 
     this.renderSimulatorAndScene();
+    if (this.simulatorRunning) {
+      this.simulator.renderSimulatorScene();
+    }
     this.screenshotSynthesizer.onAfterRender(
       this.renderer,
       this.renderSceneCallback,
       this.deviceCamera
     );
-    if (this.simulatorRunning) {
-      this.simulator.renderSimulatorScene();
-    }
   };
 
   /**
@@ -606,6 +626,18 @@ export class Core {
     if (this.lighting) {
       this.lighting.simulatorRunning = true;
     }
+    this.resolveSimulatorRuntimeReady?.(this);
+  }
+
+  private installRuntimeHandle() {
+    (
+      globalThis as unknown as {__XRBLOCKS__?: XRBlocksRuntimeHandle}
+    ).__XRBLOCKS__ = {
+      version: XR_BLOCKS_VERSION,
+      core: this,
+      ready: this.runtimeReady,
+      simulatorReady: this.simulatorRuntimeReady,
+    };
   }
 
   /**

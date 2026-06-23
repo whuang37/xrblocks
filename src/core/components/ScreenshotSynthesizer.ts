@@ -69,13 +69,13 @@ export class ScreenshotSynthesizer {
       );
     }
 
-    const haveVirtualAndRealReqeusts = this.pendingScreenshotRequests.some(
+    const haveVirtualAndRealRequests = this.pendingScreenshotRequests.some(
       (request) => request.overlayOnCamera
     );
-    if (haveVirtualAndRealReqeusts && deviceCamera?.simulatorCamera) {
+    if (haveVirtualAndRealRequests && deviceCamera?.simulatorCamera) {
       const finalImageDataUrl = this.createFinalCanvasImageDataURL(renderer);
       this.resolveVirtualRealRequests(finalImageDataUrl);
-    } else if (haveVirtualAndRealReqeusts && deviceCamera) {
+    } else if (haveVirtualAndRealRequests && deviceCamera) {
       this.createVirtualRealImageDataURL(
         renderer,
         renderSceneFn,
@@ -85,7 +85,7 @@ export class ScreenshotSynthesizer {
           this.resolveVirtualRealRequests(virtualRealImageDataUrl);
         }
       });
-    } else if (haveVirtualAndRealReqeusts) {
+    } else if (haveVirtualAndRealRequests) {
       throw new Error('No device camera provided');
     }
   }

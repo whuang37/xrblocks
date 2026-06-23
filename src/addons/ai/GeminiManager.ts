@@ -2,11 +2,6 @@ import type * as GoogleGenAITypes from '@google/genai';
 import * as THREE from 'three';
 import * as xb from 'xrblocks';
 import {AUDIO_CAPTURE_PROCESSOR_CODE} from './AudioCaptureProcessorCode';
-import {
-  SensorsManager,
-  SensorsOptions,
-  ScreenshotCameraSensor,
-} from '../sensors/index.js';
 
 const DEFAULT_SCHEDULE_AHEAD_TIME = 1.0;
 
@@ -18,15 +13,9 @@ export interface GeminiManagerEventMap extends THREE.Object3DEventMap {
 }
 
 export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
-  // Declare Sensors as a mandatory dependency.
-  // Injected automatically by the core Registry!
-  static dependencies = {
-    sensors: SensorsManager,
-  };
-
   // Core components
+  xrDeviceCamera?: xb.XRDeviceCamera;
   ai!: xb.AI;
-  sensors!: SensorsManager;
 
   // Audio setup
   audioStream: MediaStream | null = null;
@@ -37,7 +26,6 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
 
   // AI state
   isAIRunning: boolean = false;
-  sensorsOptions?: SensorsOptions;
 
   // Audio playback setup
   audioQueue: AudioBuffer[] = [];
@@ -62,24 +50,21 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
   }
 
   init() {
+    this.xrDeviceCamera = xb.core.deviceCamera;
     this.ai = xb.core.ai!;
   }
 
   async startGeminiLive({
     liveParams,
     model,
-    sensorsOptions,
   }: {
     liveParams?: GoogleGenAITypes.LiveConnectConfig;
     model?: string;
-    sensorsOptions?: SensorsOptions;
   } = {}) {
     if (this.isAIRunning || !this.ai) {
       console.warn('AI already running or not available');
       return;
     }
-
-    this.sensorsOptions = sensorsOptions;
 
     liveParams = liveParams || {};
     liveParams.tools = liveParams.tools || [];
@@ -192,18 +177,16 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
 
   async captureAndSendScreenshot() {
     try {
-      // 1. Query the Sensory Cortex (Sensors Addon) for the raw camera screenshot by reference
-      const screenshot = await this.sensors.get(
-        ScreenshotCameraSensor,
-        this.sensorsOptions
-      );
-
-      // 2. Stream the raw camera screenshot to the Gemini Live session
-      if (screenshot) {
+      const base64Image = await this.xrDeviceCamera!.getSnapshot({
+        outputFormat: 'base64',
+        mimeType: this.cameraMimeType,
+        quality: this.cameraQuality,
+      });
+      if (typeof base64Image == 'string') {
         // Strip the data URL prefix if present
-        const base64Data = screenshot.startsWith('data:')
-          ? screenshot.split(',')[1]
-          : screenshot;
+        const base64Data = base64Image.startsWith('data:')
+          ? base64Image.split(',')[1]
+          : base64Image;
         this.sendVideoFrame(base64Data);
       }
     } catch (error) {

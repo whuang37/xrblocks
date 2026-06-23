@@ -246,28 +246,6 @@ describe('Core and ScriptsManager exception handling via EventDispatcher', () =>
       ]);
     });
 
-    it('should synthesize screenshots after simulator composition', () => {
-      const order: string[] = [];
-      core.simulatorRunning = true;
-      core.simulator.simulatorUpdate = vi.fn();
-      core.simulator.renderScene = vi.fn(() => order.push('virtual-scene'));
-      core.simulator.renderSimulatorScene = vi.fn(() =>
-        order.push('simulator-composite')
-      );
-      core.screenshotSynthesizer.onAfterRender = vi.fn(() =>
-        order.push('screenshot')
-      );
-
-      (
-        core as unknown as {update: (time: number, frame: XRFrame) => void}
-      ).update(1000, {} as XRFrame);
-
-      expect(order).toEqual([
-        'virtual-scene',
-        'simulator-composite',
-        'screenshot',
-      ]);
-    });
   });
 
   describe('event callbacks robustness', () => {

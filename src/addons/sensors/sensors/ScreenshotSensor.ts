@@ -3,6 +3,8 @@ import {Sensor, type SensorContext, type SensorsOptions} from '../SensorsTypes';
 import {VisibilitySensor, type VisibilityItem} from './VisibilitySensor';
 import {SensorsManager} from '../SensorsManager';
 
+export type ScreenshotXROverlayMode = boolean | 'auto';
+
 export class ScreenshotCameraSensor extends Sensor<string> {
   readonly key = 'screenshotCamera';
 
@@ -14,37 +16,51 @@ export class ScreenshotCameraSensor extends Sensor<string> {
   async update(context: SensorContext): Promise<string> {
     const {core} = context;
     const deviceCamera = core.deviceCamera;
-    if (deviceCamera) {
-      const cacheWindowMs = core.registry
-        .get(SensorsManager)
-        ?.getLatest(ScreenshotCameraSensor)
-        ? 8.0
-        : 0.0;
-      return (
-        (await deviceCamera.getSnapshot({
-          outputFormat: 'base64',
-          cacheWindowMs,
-        })) || ''
+    if (!deviceCamera?.loaded) {
+      throw new Error(
+        'ScreenshotCameraSensor requires an initialized XRDeviceCamera.'
       );
     }
-    return '';
+    const cacheWindowMs = core.registry
+      .get(SensorsManager)
+      ?.getLatest(ScreenshotCameraSensor)
+      ? 8.0
+      : 0.0;
+    return (
+      (await deviceCamera.getSnapshot({
+        outputFormat: 'base64',
+        cacheWindowMs,
+      })) || ''
+    );
   }
 }
 
 export class ScreenshotXRSensor extends Sensor<string> {
   readonly key = 'screenshotXR';
 
-  constructor(options: SensorsOptions = {}) {
-    super({updateMode: 'background', ...options});
+  constructor(
+    options: SensorsOptions & {overlayOnCamera?: ScreenshotXROverlayMode} = {}
+  ) {
+    super({updateMode: 'background', overlayOnCamera: 'auto', ...options});
   }
 
   async update(context: SensorContext): Promise<string> {
     const {core} = context;
     const synth = core.screenshotSynthesizer;
     if (synth) {
-      return (await synth.getScreenshot(true)) || '';
+      return (
+        (await synth.getScreenshot(this.resolveOverlayOnCamera(core))) || ''
+      );
     }
     return '';
+  }
+
+  private resolveOverlayOnCamera(core: SensorContext['core']): boolean {
+    const mode =
+      (this.options as {overlayOnCamera?: ScreenshotXROverlayMode})
+        ?.overlayOnCamera ?? 'auto';
+    if (mode !== 'auto') return mode;
+    return !!core.deviceCamera?.loaded;
   }
 }
 

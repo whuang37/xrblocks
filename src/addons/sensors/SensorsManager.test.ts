@@ -50,9 +50,11 @@ class TestObjectScript extends Script {
 }
 
 describe('SensorsManager & Sensor API integration tests', () => {
-  vi.spyOn(ScreenshotSynthesizer.prototype, 'getScreenshot').mockResolvedValue(
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
-  );
+  const getScreenshotSpy = vi
+    .spyOn(ScreenshotSynthesizer.prototype, 'getScreenshot')
+    .mockResolvedValue(
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
+    );
 
   it('should support direct sensor capture with automatic lazy self-bootstrapping', async () => {
     const proprioception = new ProprioceptionSensor();
@@ -213,6 +215,56 @@ describe('SensorsManager & Sensor API integration tests', () => {
     await runner.destroy();
   });
 
+  it('should capture XR screenshots without camera overlay when no device camera is loaded', async () => {
+    getScreenshotSpy.mockClear();
+    const runner = await TestRunner.create({scripts: []});
+    const screenshot = await new ScreenshotXRSensor().capture();
+
+    expect(screenshot).toContain('data:image/png;base64');
+    expect(getScreenshotSpy).toHaveBeenCalledWith(false);
+
+    await runner.destroy();
+  });
+
+  it('should capture XR screenshots with camera overlay when a device camera is loaded', async () => {
+    getScreenshotSpy.mockClear();
+    const runner = await TestRunner.create({scripts: []});
+    (runner.core as unknown as {deviceCamera: unknown}).deviceCamera = {
+      loaded: true,
+    };
+    const screenshot = await new ScreenshotXRSensor().capture();
+
+    expect(screenshot).toContain('data:image/png;base64');
+    expect(getScreenshotSpy).toHaveBeenCalledWith(true);
+
+    await runner.destroy();
+  });
+
+  it('should let XR screenshot callers override camera overlay behavior', async () => {
+    getScreenshotSpy.mockClear();
+    const runner = await TestRunner.create({scripts: []});
+
+    await new ScreenshotXRSensor({overlayOnCamera: true}).capture();
+    await new ScreenshotXRSensor({overlayOnCamera: false}).capture();
+
+    expect(getScreenshotSpy).toHaveBeenNthCalledWith(1, true);
+    expect(getScreenshotSpy).toHaveBeenNthCalledWith(2, false);
+
+    await runner.destroy();
+  });
+
+  it('should throw a clear error when camera screenshots are requested without an active camera', async () => {
+    const runner = await TestRunner.create({scripts: []});
+    (runner.core as unknown as {deviceCamera: unknown}).deviceCamera =
+      undefined;
+
+    await expect(new ScreenshotCameraSensor().capture()).rejects.toThrow(
+      'ScreenshotCameraSensor requires an initialized XRDeviceCamera.'
+    );
+
+    await runner.destroy();
+  });
+
   it('should support custom sensor parameters (like DepthSensor gridSize)', async () => {
     const depth8 = new DepthSensor({gridSize: 8});
     const depth16 = new DepthSensor({gridSize: 16});
@@ -300,6 +352,7 @@ describe('SensorsManager & Sensor API integration tests', () => {
     const mockCameraSnapshot = 'data:image/jpeg;base64,cameraSnapshotData';
     let snapshotCount = 0;
     const mockCamera = {
+      loaded: true,
       getSnapshot: vi.fn().mockImplementation(async () => {
         snapshotCount++;
         await new Promise((resolve) => setTimeout(resolve, 50));

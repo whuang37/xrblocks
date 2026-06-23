@@ -2,13 +2,12 @@ import * as THREE from 'three';
 import {Sensor, type SensorContext, type SensorsOptions} from '../SensorsTypes';
 import {VisibilitySensor, type VisibilityItem} from './VisibilitySensor';
 
-export type ScreenshotXROverlayMode = boolean | 'auto';
+export type XRCameraOverlayMode = boolean | 'auto';
 
-export class ScreenshotCameraSensor extends Sensor<string> {
-  readonly key = 'screenshotCamera';
+export class DeviceCameraSensor extends Sensor<string> {
+  readonly key: string = 'deviceCamera';
 
   constructor(options: SensorsOptions = {}) {
-    // Default to background update mode for slow screenshot captures
     super({updateMode: 'background', ...options});
   }
 
@@ -16,24 +15,26 @@ export class ScreenshotCameraSensor extends Sensor<string> {
     const {core} = context;
     const deviceCamera = core.deviceCamera;
     if (!deviceCamera?.loaded) {
-      throw new Error(
-        'ScreenshotCameraSensor requires an initialized XRDeviceCamera.'
-      );
+      if (this.options.strict) {
+        throw new Error(
+          'DeviceCameraSensor requires an initialized XRDeviceCamera.'
+        );
+      }
+      return '';
     }
     return (
       (await deviceCamera.getSnapshot({
         outputFormat: 'base64',
-        cacheWindowMs: 0.0,
       })) || ''
     );
   }
 }
 
-export class ScreenshotXRSensor extends Sensor<string> {
-  readonly key = 'screenshotXR';
+export class XRCameraSensor extends Sensor<string> {
+  readonly key: string = 'xrCamera';
 
   constructor(
-    options: SensorsOptions & {overlayOnCamera?: ScreenshotXROverlayMode} = {}
+    options: SensorsOptions & {overlayOnCamera?: XRCameraOverlayMode} = {}
   ) {
     super({updateMode: 'background', overlayOnCamera: 'auto', ...options});
   }
@@ -51,19 +52,19 @@ export class ScreenshotXRSensor extends Sensor<string> {
 
   private resolveOverlayOnCamera(core: SensorContext['core']): boolean {
     const mode =
-      (this.options as {overlayOnCamera?: ScreenshotXROverlayMode})
+      (this.options as {overlayOnCamera?: XRCameraOverlayMode})
         ?.overlayOnCamera ?? 'auto';
     if (mode !== 'auto') return mode;
     return !!core.deviceCamera?.loaded;
   }
 }
 
-export class ScreenshotSOMSensor extends Sensor<string> {
-  readonly key = 'screenshotSOM';
+export class SOMCameraSensor extends Sensor<string> {
+  readonly key: string = 'somCamera';
 
   constructor(
     private deps: {
-      xr?: ScreenshotXRSensor;
+      xr?: XRCameraSensor;
       visibility?: VisibilitySensor;
     } = {},
     options?: SensorsOptions
@@ -74,12 +75,10 @@ export class ScreenshotSOMSensor extends Sensor<string> {
   async update(context: SensorContext): Promise<string> {
     const {camera} = context;
 
-    // Freeze camera matrices synchronously at the start of the frame tick to prevent temporal drift
     const projectionMatrix = camera.projectionMatrix.clone();
     const matrixWorldInverse = camera.matrixWorldInverse.clone();
 
-    // Fetch dependencies concurrently
-    const xrSensor = this.deps.xr ?? ScreenshotXRSensor;
+    const xrSensor = this.deps.xr ?? XRCameraSensor;
     const visibilitySensor = this.deps.visibility ?? VisibilitySensor;
 
     const [xr, visibleObjects] = await Promise.all([
@@ -91,7 +90,6 @@ export class ScreenshotSOMSensor extends Sensor<string> {
 
     if (!xr || !visibleObjects) return xr || '';
 
-    // Render the annotated screenshot using the frozen camera matrices
     return renderAnnotatedScreenshot(
       projectionMatrix,
       matrixWorldInverse,
@@ -117,11 +115,8 @@ async function renderAnnotatedScreenshot(
   const ctx = canvas.getContext('2d')!;
   ctx.drawImage(img, 0, 0);
 
-  let labelCounter = 1;
-
-  for (const {worldPosition} of visibleObjects) {
-    // Project using frozen matrices
-    const screenPos = worldPosition
+  for (const item of visibleObjects) {
+    const screenPos = item.worldPosition
       .clone()
       .applyMatrix4(matrixWorldInverse)
       .applyMatrix4(projectionMatrix);
@@ -141,9 +136,7 @@ async function renderAnnotatedScreenshot(
     ctx.font = 'bold 16px Arial';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(labelCounter.toString(), x, y);
-
-    labelCounter++;
+    ctx.fillText(item.label, x, y);
   }
 
   return canvas.toDataURL('image/png');

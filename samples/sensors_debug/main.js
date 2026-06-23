@@ -19,9 +19,9 @@ import {
   SceneGraphSensor,
   TargetingSensor,
   DepthSensor,
-  ScreenshotCameraSensor,
-  ScreenshotXRSensor,
-  ScreenshotSOMSensor,
+  DeviceCameraSensor,
+  XRCameraSensor,
+  SOMCameraSensor,
   SemanticMapSensor,
 } from 'xrblocks/addons/sensors/index.js';
 
@@ -79,12 +79,12 @@ const SENSOR_LIST = [
   {name: 'Semantic Map', sensorClass: SemanticMapSensor, type: 'text'},
   {name: 'Depth Heatmap', sensorClass: DepthSensor, type: 'depth'},
   {
-    name: 'Screenshot (Camera)',
-    sensorClass: ScreenshotCameraSensor,
+    name: 'Device Camera',
+    sensorClass: DeviceCameraSensor,
     type: 'image',
   },
-  {name: 'Screenshot (XR)', sensorClass: ScreenshotXRSensor, type: 'image'},
-  {name: 'Screenshot (SOM)', sensorClass: ScreenshotSOMSensor, type: 'image'},
+  {name: 'XR Camera', sensorClass: XRCameraSensor, type: 'image'},
+  {name: 'SOM Camera', sensorClass: SOMCameraSensor, type: 'image'},
 ];
 
 // 2. Define the main prototyping scene containing testable entities (same as original)
@@ -605,9 +605,9 @@ async function start() {
     SceneGraphSensor,
     TargetingSensor,
     DepthSensor,
-    ScreenshotCameraSensor,
-    ScreenshotXRSensor,
-    ScreenshotSOMSensor,
+    DeviceCameraSensor,
+    XRCameraSensor,
+    SOMCameraSensor,
     SemanticMapSensor,
   ]);
 

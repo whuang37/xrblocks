@@ -26,27 +26,23 @@ export class SemanticMapSensor extends Sensor<VisibleObjectReference[]> {
 
     if (!visibleObjects) return [];
 
-    const refs: VisibleObjectReference[] = [];
-    let labelCounter = 1;
-
-    for (const {object, distance} of visibleObjects) {
-      const label = labelCounter.toString();
-      const textLabel =
-        (object as {text?: string}).text || object.name || object.type;
-      const description = `[${label}]: ${object.type} '${textLabel}' ${distance.toFixed(2)}m away`;
-
-      refs.push({
+    return visibleObjects.map(
+      ({
         label,
-        objectId: object.id,
-        name: object.name || `${object.type}_${object.id}`,
-        type: object.type,
-        distanceToCamera: distance,
+        objectId,
+        object,
+        name,
+        type,
+        distanceToCamera,
         description,
-      });
-
-      labelCounter++;
-    }
-
-    return refs;
+      }) => ({
+        label,
+        objectId,
+        name,
+        type: type || object.type,
+        distanceToCamera,
+        description,
+      })
+    );
   }
 }

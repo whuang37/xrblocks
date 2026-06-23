@@ -8,8 +8,6 @@ import {
   ScreenshotSynthesizer,
   HAND_JOINT_NAMES,
   Input,
-  SpatialPanel,
-  TextButton,
 } from 'xrblocks';
 import {TestRunner} from '../testing/TestRunner';
 import {
@@ -17,9 +15,10 @@ import {
   ProprioceptionSensor,
   DepthSensor,
   TargetingSensor,
-  ScreenshotCameraSensor,
-  ScreenshotXRSensor,
-  ScreenshotSOMSensor,
+  VisibilitySensor,
+  DeviceCameraSensor,
+  XRCameraSensor,
+  SOMCameraSensor,
   SemanticMapSensor,
   SceneGraphSensor,
   PlaneSensor,
@@ -30,15 +29,14 @@ import {
   type SensorContext,
 } from './index';
 
-vi.mock('./sensors/ScreenshotSensor', async (importOriginal) => {
+vi.mock('./sensors/CameraSensor', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ScreenshotSOMSensor: class extends (actual.ScreenshotSOMSensor as any) {
+    SOMCameraSensor: class extends (actual.SOMCameraSensor as any) {
       override async update(context: SensorContext) {
-        // Resolve the XR screenshot dependency using the new context.get() API
-        const xr = await context.get(ScreenshotXRSensor);
+        const xr = await context.get(XRCameraSensor);
         return `annotated:${xr || 'mock-xr-screenshot'}`;
       }
     },
@@ -185,8 +183,44 @@ describe('SensorsManager & Sensor API integration tests', () => {
     expect(targeting2.rightHand?.collidingObjectId).toBeNull();
   });
 
-  it('should resolve sensor dependencies and capture Set-of-Mark visual screenshot overlays', async () => {
-    const somSensor = new ScreenshotSOMSensor();
+  it('should resolve sensor dependencies and capture Set-of-Mark camera overlays', async () => {
+    const somSensor = new SOMCameraSensor();
+    const visibilitySensor = new VisibilitySensor();
+    const button = new TestObjectScript();
+
+    const runner = await TestRunner.create({
+      scripts: [button],
+    });
+
+    runner.camera.aspect = 1.0;
+    runner.camera.position.set(0, 1.6, 0);
+    runner.camera.lookAt(0, 1.6, -1);
+    runner.camera.updateMatrixWorld(true);
+    runner.camera.matrixWorldInverse.copy(runner.camera.matrixWorld).invert();
+
+    await runner.actions.step({durationMs: 100});
+
+    const [somCamera, visibleObjects] = await SensorsManager.capture([
+      somSensor,
+      visibilitySensor,
+    ]);
+
+    expect(somCamera).toBeDefined();
+    expect(typeof somCamera).toBe('string');
+    expect(somCamera.startsWith('annotated:')).toBe(true);
+
+    expect(visibleObjects).toBeDefined();
+    expect(visibleObjects.length).toBeGreaterThan(0);
+
+    const btnRef = visibleObjects.find((ref) => ref.type === 'TextButton');
+    expect(btnRef).toBeDefined();
+    expect(btnRef?.label).toBe('1');
+    expect(btnRef?.description).toContain("TextButton 'Trigger System'");
+
+    await runner.destroy();
+  });
+
+  it('should keep SemanticMapSensor as a compatibility wrapper over visibility', async () => {
     const semanticSensor = new SemanticMapSensor();
     const button = new TestObjectScript();
 
@@ -202,57 +236,47 @@ describe('SensorsManager & Sensor API integration tests', () => {
 
     await runner.actions.step({durationMs: 100});
 
-    const [screenshotSOM, visibleObjects] = await SensorsManager.capture([
-      somSensor,
-      semanticSensor,
-    ]);
-
-    expect(screenshotSOM).toBeDefined();
-    expect(typeof screenshotSOM).toBe('string');
-    expect(screenshotSOM.startsWith('annotated:')).toBe(true);
-
-    expect(visibleObjects).toBeDefined();
-    expect(visibleObjects.length).toBeGreaterThan(0);
-
+    const visibleObjects = await semanticSensor.capture();
     const btnRef = visibleObjects.find((ref) => ref.type === 'TextButton');
+
     expect(btnRef).toBeDefined();
     expect(btnRef?.label).toBe('1');
-    expect(btnRef?.description).toContain("TextButton 'Trigger System'");
+    expect(btnRef).not.toHaveProperty('object');
 
     await runner.destroy();
   });
 
-  it('should capture XR screenshots without camera overlay when no device camera is loaded', async () => {
+  it('should capture XR camera images without camera overlay when no device camera is loaded', async () => {
     getScreenshotSpy.mockClear();
     const runner = await TestRunner.create({scripts: []});
-    const screenshot = await new ScreenshotXRSensor().capture();
+    const xrCamera = await new XRCameraSensor().capture();
 
-    expect(screenshot).toContain('data:image/png;base64');
+    expect(xrCamera).toContain('data:image/png;base64');
     expect(getScreenshotSpy).toHaveBeenCalledWith(false);
 
     await runner.destroy();
   });
 
-  it('should capture XR screenshots with camera overlay when a device camera is loaded', async () => {
+  it('should capture XR camera images with camera overlay when a device camera is loaded', async () => {
     getScreenshotSpy.mockClear();
     const runner = await TestRunner.create({scripts: []});
     (runner.core as unknown as {deviceCamera: unknown}).deviceCamera = {
       loaded: true,
     };
-    const screenshot = await new ScreenshotXRSensor().capture();
+    const xrCamera = await new XRCameraSensor().capture();
 
-    expect(screenshot).toContain('data:image/png;base64');
+    expect(xrCamera).toContain('data:image/png;base64');
     expect(getScreenshotSpy).toHaveBeenCalledWith(true);
 
     await runner.destroy();
   });
 
-  it('should let XR screenshot callers override camera overlay behavior', async () => {
+  it('should let XR camera callers override camera overlay behavior', async () => {
     getScreenshotSpy.mockClear();
     const runner = await TestRunner.create({scripts: []});
 
-    await new ScreenshotXRSensor({overlayOnCamera: true}).capture();
-    await new ScreenshotXRSensor({overlayOnCamera: false}).capture();
+    await new XRCameraSensor({overlayOnCamera: true}).capture();
+    await new XRCameraSensor({overlayOnCamera: false}).capture();
 
     expect(getScreenshotSpy).toHaveBeenNthCalledWith(1, true);
     expect(getScreenshotSpy).toHaveBeenNthCalledWith(2, false);
@@ -260,15 +284,17 @@ describe('SensorsManager & Sensor API integration tests', () => {
     await runner.destroy();
   });
 
-  it('should throw a clear error when camera screenshots are requested without an active camera', async () => {
+  it('should return blank raw camera data when the device camera is unavailable', async () => {
     const runner = await TestRunner.create({scripts: []});
     (runner.core as unknown as {deviceCamera: unknown}).deviceCamera =
       undefined;
 
-    await expect(new ScreenshotCameraSensor().capture()).rejects.toThrow(
-      'ScreenshotCameraSensor requires an initialized XRDeviceCamera.'
+    await expect(new DeviceCameraSensor().capture()).resolves.toBe('');
+    await expect(
+      new DeviceCameraSensor({strict: true}).capture()
+    ).rejects.toThrow(
+      'DeviceCameraSensor requires an initialized XRDeviceCamera.'
     );
-
     await runner.destroy();
   });
 
@@ -328,10 +354,15 @@ describe('SensorsManager & Sensor API integration tests', () => {
   });
 
   it('should keep semantic UI children when culling scene graph internals', async () => {
-    const panel = new SpatialPanel();
+    const panel = new Script();
     panel.name = 'Actions Panel';
-    const button = new TextButton({text: 'Launch'});
+    (panel as unknown as {isView: boolean}).isView = true;
+
+    const button = new Script();
     button.name = 'Launch Button';
+    button.type = 'TextButton';
+    (button as unknown as {isView: boolean}).isView = true;
+    button.add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1)));
     panel.add(button);
 
     const runner = await TestRunner.create({scripts: [panel]});
@@ -656,7 +687,7 @@ describe('SensorsManager & Sensor API integration tests', () => {
   });
 
   it('should protect slow async sensors with the Single-Flight Concurrency Guard', async () => {
-    const cameraSensor = new ScreenshotCameraSensor();
+    const cameraSensor = new DeviceCameraSensor({strict: true});
     const runner = await TestRunner.create({
       scripts: [],
     });

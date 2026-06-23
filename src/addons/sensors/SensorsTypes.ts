@@ -1,6 +1,5 @@
 import * as THREE from 'three';
-import {Core, Input, core, Constructor} from 'xrblocks';
-import type {SensorsManager} from './SensorsManager';
+import {Core, Input, Constructor} from 'xrblocks';
 
 export type Vec3Tuple = [number, number, number];
 export type QuatTuple = [number, number, number, number];
@@ -14,6 +13,8 @@ export interface SensorsOptions {
   updateMode?: SensorUpdateMode;
   /** Bypass completed cache for this call. Active in-flight updates are still reused. */
   forceRefresh?: boolean;
+  /** Throw when a sensor cannot read from an optional subsystem. */
+  strict?: boolean;
   /** Allow arbitrary sensor-specific options */
   [key: string]: unknown;
 }
@@ -65,6 +66,10 @@ export abstract class Sensor<T = unknown> {
    */
   abstract update(context: SensorContext): Promise<T> | T;
 
+  /**
+   * Backwards-compatible direct execution path. New code should prefer
+   * SensorsManager.get(), which owns cache orchestration for shared captures.
+   */
   async get(context: SensorContext, options?: SensorsOptions): Promise<T> {
     const effectiveOptions = this.getEffectiveOptions(options);
     const cacheWindowMs = effectiveOptions.cacheWindowMs ?? 0.0;
@@ -116,6 +121,7 @@ export abstract class Sensor<T = unknown> {
   clearCache(): void {
     this.cachedValue = undefined;
     this.capturedAt = null;
+    this.activePromise = null;
   }
 
   mergeOptions(options?: SensorsOptions): void {
@@ -154,15 +160,33 @@ export abstract class Sensor<T = unknown> {
    * Direct, strongly-typed capture. Self-bootstraps SensorsManager if needed.
    */
   async capture(options?: SensorsOptions): Promise<T> {
-    const manager = await Sensor.resolveManager();
+    const {SensorsManager} = await import('./SensorsManager');
+    const manager = await SensorsManager.resolve();
     return manager.get(this, options);
   }
 
-  private getEffectiveOptions(options?: SensorsOptions): SensorsOptions {
+  getEffectiveOptions(options?: SensorsOptions): SensorsOptions {
     return {
       ...this.options,
       ...options,
     };
+  }
+
+  getFreshCachedValue(cacheWindowMs: number): T | undefined {
+    return this.hasFreshCache(cacheWindowMs) ? this.cachedValue : undefined;
+  }
+
+  getActivePromise(): Promise<T> | null {
+    return this.activePromise;
+  }
+
+  setActivePromise(promise: Promise<T> | null): void {
+    this.activePromise = promise;
+  }
+
+  cacheValue(value: T): void {
+    this.cachedValue = value;
+    this.capturedAt = performance.now();
   }
 
   private hasFreshCache(cacheWindowMs: number): boolean {
@@ -213,18 +237,6 @@ export abstract class Sensor<T = unknown> {
     const first = a ?? DEFAULT_SENSORS_OPTIONS.updateMode;
     const second = b ?? DEFAULT_SENSORS_OPTIONS.updateMode;
     return rank[first] >= rank[second] ? first : second;
-  }
-
-  private static async resolveManager(): Promise<SensorsManager> {
-    const {SensorsManager} = await import('./SensorsManager');
-    let manager = core.registry.get(SensorsManager);
-    if (!manager) {
-      manager = new SensorsManager();
-      core.registry.register(manager, SensorsManager);
-      core.scene.add(manager);
-      await core.scriptsManager.initScript(manager);
-    }
-    return manager;
   }
 }
 

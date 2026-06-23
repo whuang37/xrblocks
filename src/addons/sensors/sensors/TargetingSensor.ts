@@ -5,11 +5,11 @@ import {
   type SensorContext,
   type SensorsOptions,
 } from '../SensorsTypes';
+import {isInternalHelper} from '../utils/SensorsUtils';
 import {
-  isInternalHelper,
-  getUIBoundingBox,
-  isUIInteractable,
-} from '../utils/SensorsUtils';
+  getSensorObjectBox,
+  resolveSensorObject,
+} from '../utils/VisualObjectResolver';
 
 const HAND_COLLISION_OFFSET = 0.12; // 12cm forward from wrist to middle-finger MCP knuckle
 const HAND_COLLISION_RADIUS = 0.08; // 8cm bounding radius around the knuckle
@@ -42,34 +42,10 @@ export class TargetingSensor extends Sensor<TargetingSnapshot> {
 
       const intersections =
         input.intersectionsForController.get(controller) || [];
-      // Map raycast hits on low-level UI child meshes to their closest high-level interactable UI ancestor
-      const resolvedIntersections = intersections.map((i) => {
-        let current: THREE.Object3D | null = i.object;
-        let isPartOfUI = false;
-        let interactableUI: THREE.Object3D | null = null;
-
-        while (current) {
-          if ((current as {isUI?: boolean}).isUI === true) {
-            isPartOfUI = true;
-            if (isUIInteractable(current)) {
-              interactableUI = current;
-              break;
-            }
-          }
-          current = current.parent;
-        }
-
-        if (isPartOfUI) {
-          if (interactableUI) {
-            return {
-              ...i,
-              object: interactableUI,
-            };
-          }
-          return i;
-        }
-        return i;
-      });
+      const resolvedIntersections = intersections.map((i) => ({
+        ...i,
+        object: resolveSensorObject(i.object),
+      }));
 
       const firstHit = resolvedIntersections.find(
         (i) => !isInternalHelper(i.object)
@@ -91,32 +67,21 @@ export class TargetingSensor extends Sensor<TargetingSnapshot> {
 
         context.core.scene.traverse((obj) => {
           if (isInternalHelper(obj) || obj === context.core.scene) return;
-          let isValid = false;
-          if (obj instanceof THREE.Mesh && !isInternalHelper(obj)) {
-            isValid = true;
-          } else if (isUIInteractable(obj)) {
-            isValid = true;
-          }
+          if (!obj.visible) return;
 
-          if (!isValid || !obj.visible) return;
+          const resolved = resolveSensorObject(obj);
+          if (resolved !== obj && collidingObjectId === resolved.id) {
+            return;
+          }
+          const resolvedBox = getSensorObjectBox(resolved, box);
+          if (!resolvedBox) return;
 
-          let isValidBox = false;
-          if ((obj as {isUI?: boolean}).isUI === true) {
-            isValidBox = getUIBoundingBox(obj, box);
-          }
-          if (!isValidBox) {
-            try {
-              box.setFromObject(obj);
-            } catch (_err) {
-              return;
-            }
-          }
           if (box.intersectsSphere(handSphere)) {
             box.getSize(size);
             const volume = size.x * size.y * size.z;
             if (volume < minVolume) {
               minVolume = volume;
-              collidingObjectId = obj.id;
+              collidingObjectId = resolved.id;
             }
           }
         });

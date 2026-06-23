@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import {Core, Input, Script, core, Constructor} from 'xrblocks';
-import {type Sensor, type SensorsOptions} from './SensorsTypes';
+import {
+  DEFAULT_SENSORS_OPTIONS,
+  type Sensor,
+  type SensorsOptions,
+} from './SensorsTypes';
 
 type SensorValue<T> =
   T extends Sensor<infer S>
@@ -53,7 +57,6 @@ export class SensorsManager extends Script {
     this.input = dependencies.input;
     this.camera = dependencies.camera;
 
-    // Self-register in the core registry
     this.core.registry.register(this, SensorsManager);
   }
 
@@ -80,7 +83,11 @@ export class SensorsManager extends Script {
     }
 
     for (const sensor of this.sensors) {
-      if (sensor.constructor === target.constructor) {
+      if (
+        sensor.constructor === target.constructor &&
+        sensorOptionsSignature(sensor.options) ===
+          sensorOptionsSignature(target.options)
+      ) {
         sensor.mergeOptions(target.options);
         return sensor as T;
       }
@@ -96,19 +103,78 @@ export class SensorsManager extends Script {
   ): Promise<T> {
     const instance = this.getOrCreateInstance(target);
     const effectiveOptions = {
+      ...DEFAULT_SENSORS_OPTIONS,
+      ...instance.options,
       ...this.defaultOptions,
       ...options,
     };
-    return instance.get(
-      {
-        core: this.core,
-        camera: this.camera,
-        input: this.input,
-        get: (sensor, opts) => this.get(sensor, opts ?? effectiveOptions),
-        defer: (fn) => this.defer(fn),
-      },
-      effectiveOptions
-    );
+    const cacheWindowMs = effectiveOptions.cacheWindowMs ?? 0.0;
+    const forceRefresh = effectiveOptions.forceRefresh === true;
+    const updateMode = effectiveOptions.updateMode ?? 'sync';
+
+    const activePromise = instance.getActivePromise();
+    if (activePromise) {
+      return activePromise;
+    }
+
+    if (updateMode === 'background') {
+      const latest = instance.getLatest();
+      if (!forceRefresh && !effectiveOptions.strict && latest !== undefined) {
+        const promise = Promise.resolve(
+          instance.update(contextFor(this, effectiveOptions))
+        ).then((value) => {
+          instance.cacheValue(value);
+          return value;
+        });
+        instance.setActivePromise(
+          promise.finally(() => {
+            instance.setActivePromise(null);
+          })
+        );
+        promise.catch(() => {});
+        return latest;
+      }
+    }
+
+    if (!forceRefresh) {
+      const cached = instance.getFreshCachedValue(cacheWindowMs);
+      if (cached !== undefined) {
+        return cached;
+      }
+    }
+
+    const context = contextFor(this, effectiveOptions);
+
+    const runUpdate = () =>
+      Promise.resolve(instance.update(context)).then((value) => {
+        instance.cacheValue(value);
+        return value;
+      });
+
+    if (updateMode === 'background') {
+      const promise = runUpdate().finally(() => {
+        instance.setActivePromise(null);
+      });
+      instance.setActivePromise(promise);
+      promise.catch(() => {});
+
+      const latest = instance.getLatest();
+      if (!forceRefresh && latest !== undefined) {
+        return latest;
+      }
+      return promise;
+    }
+
+    const promise =
+      updateMode === 'idle'
+        ? this.defer(runUpdate).finally(() => {
+            instance.setActivePromise(null);
+          })
+        : runUpdate().finally(() => {
+            instance.setActivePromise(null);
+          });
+    instance.setActivePromise(promise);
+    return promise;
   }
 
   defer<R>(fn: () => Promise<R> | R): Promise<R> {
@@ -192,14 +258,50 @@ export class SensorsManager extends Script {
     return manager.capture(sensors, options) as any;
   }
 
-  private static async resolve(): Promise<SensorsManager> {
-    let manager = core.registry.get(SensorsManager);
+  static async get<T>(
+    sensor: Sensor<T> | Constructor<Sensor<T>>,
+    options?: SensorsOptions
+  ): Promise<T> {
+    const manager = await SensorsManager.resolve();
+    return manager.get(sensor, options);
+  }
+
+  static async resolve(targetCore: Core = core): Promise<SensorsManager> {
+    let manager = targetCore.registry.get(SensorsManager);
     if (!manager) {
       manager = new SensorsManager();
-      core.registry.register(manager, SensorsManager);
-      core.scene.add(manager);
-      await core.scriptsManager.initScript(manager);
+      targetCore.registry.register(manager, SensorsManager);
+      targetCore.scene.add(manager);
+      await targetCore.scriptsManager.initScript(manager);
     }
     return manager;
   }
+}
+
+function contextFor(
+  manager: SensorsManager,
+  effectiveOptions?: SensorsOptions
+) {
+  return {
+    core: manager.core,
+    camera: manager.camera,
+    input: manager.input,
+    get: <S>(
+      sensor: Sensor<S> | Constructor<Sensor<S>>,
+      opts?: SensorsOptions
+    ) => manager.get(sensor, opts ?? effectiveOptions),
+    defer: <R>(fn: () => Promise<R> | R) => manager.defer(fn),
+  };
+}
+
+function sensorOptionsSignature(options: SensorsOptions): string {
+  const entries = Object.entries(options)
+    .filter(
+      ([key]) =>
+        key !== 'cacheWindowMs' &&
+        key !== 'updateMode' &&
+        key !== 'forceRefresh'
+    )
+    .sort(([a], [b]) => a.localeCompare(b));
+  return JSON.stringify(entries);
 }

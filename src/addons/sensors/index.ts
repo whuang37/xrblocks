@@ -17,10 +17,10 @@ export {
   type VisibilityItem,
 } from './sensors/VisibilitySensor';
 export {
-  ScreenshotCameraSensor,
-  ScreenshotXRSensor,
-  ScreenshotSOMSensor,
-} from './sensors/ScreenshotSensor';
+  DeviceCameraSensor,
+  XRCameraSensor,
+  SOMCameraSensor,
+} from './sensors/CameraSensor';
 export {SemanticMapSensor} from './sensors/SemanticMapSensor';
 export {PlaneSensor} from './sensors/PlaneSensor';
 export {WorldObjectsSensor} from './sensors/WorldObjectsSensor';

@@ -560,21 +560,25 @@ class DebuggerScript extends xb.Script {
     ].join('\n');
   }
 
-  drawDepthHeatmap(depthGrid) {
+  drawDepthHeatmap(depthSnapshot) {
     const canvas = this.depthCanvas;
     const ctx = canvas.getContext('2d');
-    const rows = depthGrid.length;
-    const cols = depthGrid[0]?.length || 0;
-    if (!rows || !cols) return;
+    const view = depthSnapshot?.views?.[0];
+    if (!view) return;
+
+    const rows = view.height;
+    const cols = view.width;
+    if (!rows || !cols || !view.data) return;
 
     const cellW = canvas.width / cols;
     const cellH = canvas.height / rows;
+    const scale = view.rawValueToMeters;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     for (let y = 0; y < rows; y++) {
       for (let x = 0; x < cols; x++) {
-        const distance = depthGrid[y][x];
+        const distance = view.data[y * cols + x] * scale;
 
         // Map distance in meters (0m to 4m) to a normalized value [0, 1]
         const t = Math.min(distance / 4.0, 1.0);

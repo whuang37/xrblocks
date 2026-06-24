@@ -408,6 +408,17 @@ describe('SensorsManager & Sensor API integration tests', () => {
 
   it('should return native depth data and skip CPU fallback when depth is unavailable', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const depthData = new Uint16Array([2, 4, 6, 8]);
+    const projectionMatrix = new THREE.Matrix4().makeScale(2, 3, 4);
+    const projectionInverseMatrix = projectionMatrix.clone().invert();
+    const viewMatrix = new THREE.Matrix4().makeTranslation(1, 2, 3);
+    const viewProjectionMatrix = new THREE.Matrix4().multiplyMatrices(
+      projectionMatrix,
+      viewMatrix
+    );
+    const normDepthBufferFromNormView = new THREE.Matrix4().makeRotationZ(0.5);
+    const cameraPosition = new THREE.Vector3(1, 2, 3);
+    const cameraQuaternion = new THREE.Quaternion(0.1, 0.2, 0.3, 0.4);
     const context = {
       core: {
         depth: {
@@ -415,7 +426,16 @@ describe('SensorsManager & Sensor API integration tests', () => {
           rawValueToMeters: 0.5,
           width: 2,
           height: 2,
-          depthArray: [new Uint16Array([2, 4, 6, 8])],
+          depthDataFormat: 'luminance-alpha',
+          depthArray: [depthData],
+          gpuDepthData: [],
+          depthProjectionMatrices: [projectionMatrix],
+          depthProjectionInverseMatrices: [projectionInverseMatrix],
+          depthViewMatrices: [viewMatrix],
+          depthViewProjectionMatrices: [viewProjectionMatrix],
+          normDepthBufferFromNormViewMatrices: [normDepthBufferFromNormView],
+          depthCameraPositions: [cameraPosition],
+          depthCameraRotations: [cameraQuaternion],
         },
       },
       camera: new THREE.PerspectiveCamera(),
@@ -424,17 +444,41 @@ describe('SensorsManager & Sensor API integration tests', () => {
       defer: vi.fn(),
     } as unknown as SensorContext;
 
-    expect(new DepthSensor().update(context)).toEqual([
-      [1, 2],
-      [3, 4],
-    ]);
+    const snapshot = new DepthSensor().update(context);
+    expect(snapshot.views).toHaveLength(1);
+    expect(snapshot.views[0]).toMatchObject({
+      viewId: 0,
+      width: 2,
+      height: 2,
+      rawValueToMeters: 0.5,
+      depthDataFormat: 'luminance-alpha',
+      source: 'cpu',
+    });
+    expect(snapshot.views[0].data).toBe(depthData);
+    expect(snapshot.views[0].projectionMatrix).toEqual(
+      projectionMatrix.toArray()
+    );
+    expect(snapshot.views[0].projectionInverseMatrix).toEqual(
+      projectionInverseMatrix.toArray()
+    );
+    expect(snapshot.views[0].viewMatrix).toEqual(viewMatrix.toArray());
+    expect(snapshot.views[0].viewProjectionMatrix).toEqual(
+      viewProjectionMatrix.toArray()
+    );
+    expect(snapshot.views[0].normDepthBufferFromNormView).toEqual(
+      normDepthBufferFromNormView.toArray()
+    );
+    expect(snapshot.views[0].cameraPosition).toEqual(cameraPosition.toArray());
+    expect(snapshot.views[0].cameraQuaternion).toEqual(
+      cameraQuaternion.toArray()
+    );
     expect(warnSpy).not.toHaveBeenCalled();
 
     (context.core as unknown as {depth: unknown}).depth = {
       enabled: false,
       depthArray: [],
     };
-    expect(new DepthSensor().update(context)).toEqual([]);
+    expect(new DepthSensor().update(context)).toEqual({views: []});
     expect(warnSpy).toHaveBeenCalledWith(
       'DepthSensor requires enabled depth data.'
     );

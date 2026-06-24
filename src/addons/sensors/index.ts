@@ -11,7 +11,7 @@ export {
   TargetingSensor,
   type TargetingSnapshot,
 } from './sensors/TargetingSensor';
-export {DepthSensor} from './sensors/DepthSensor';
+export {DepthSensor, type DepthSensorSnapshot} from './sensors/DepthSensor';
 export {
   VisibilitySensor,
   type VisibilityItem,

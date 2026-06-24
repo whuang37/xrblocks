@@ -308,7 +308,7 @@ export class SimulatorHands {
     if (this.leftHandPose === SimulatorHandPose.PINCHING) {
       this.input.dispatchEvent({
         type: 'selectend',
-        target: this.input.controllers[1],
+        target: this.input.controllers[0],
         data: {
           handedness: 'left',
         },

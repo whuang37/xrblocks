@@ -113,8 +113,7 @@ export class SensorsManager extends Script {
     options?: SensorsOptions
   ): Promise<CaptureAllValues<T>> {
     const preparedEntries = Object.entries(requests).map(
-      ([key, request]) =>
-        [key, this.prepare(request, options)] as const
+      ([key, request]) => [key, this.prepare(request, options)] as const
     );
     const results = await Promise.all(
       preparedEntries.map(([, prepared]) => this.capturePrepared(prepared))
@@ -132,8 +131,7 @@ export class SensorsManager extends Script {
     options?: SensorsOptions
   ): Promise<TryCaptureAllResult<T>> {
     const preparedEntries = Object.entries(requests).map(
-      ([key, request]) =>
-        [key, this.prepare(request, options)] as const
+      ([key, request]) => [key, this.prepare(request, options)] as const
     );
     const results = await Promise.allSettled(
       preparedEntries.map(([, prepared]) => this.capturePrepared(prepared))
@@ -351,10 +349,8 @@ function contextFor(
     core: manager.core,
     camera: manager.camera,
     input: manager.input,
-    get: <S>(
-      sensor: SensorConstructor<S>,
-      opts?: SensorsOptions
-    ) => manager.capture(sensor, {...effectiveOptions, ...opts}),
+    get: <S>(sensor: SensorConstructor<S>, opts?: SensorsOptions) =>
+      manager.capture(sensor, {...effectiveOptions, ...opts}),
     defer: <R>(fn: () => Promise<R> | R) => manager.defer(fn),
   };
 }

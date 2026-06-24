@@ -157,10 +157,7 @@ export class RemoteControl extends Script {
   private recordingSensors: Record<string, SensorRequest<unknown>> = {};
 
   override update(time: number) {
-    if (
-      this.isRecording &&
-      Object.keys(this.recordingSensors).length > 0
-    ) {
+    if (this.isRecording && Object.keys(this.recordingSensors).length > 0) {
       // Capture the sensors on this frame tick asynchronously and buffer the results
       // (forcing 'sync' updateMode to guarantee that every history frame is perfectly aligned)
       this.sensors

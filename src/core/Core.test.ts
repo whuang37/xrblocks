@@ -245,7 +245,6 @@ describe('Core and ScriptsManager exception handling via EventDispatcher', () =>
         'onSqueezing',
       ]);
     });
-
   });
 
   describe('event callbacks robustness', () => {

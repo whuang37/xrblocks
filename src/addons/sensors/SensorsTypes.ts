@@ -37,10 +37,7 @@ export interface SensorContext {
   core: Core;
   camera: THREE.Camera;
   input: Input;
-  get<S>(
-    sensor: SensorConstructor<S>,
-    options?: SensorsOptions
-  ): Promise<S>;
+  get<S>(sensor: SensorConstructor<S>, options?: SensorsOptions): Promise<S>;
   defer<R>(fn: () => Promise<R> | R): Promise<R>;
 }
 

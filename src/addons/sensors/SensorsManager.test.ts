@@ -897,7 +897,9 @@ describe('SensorsManager & Sensor API integration tests', () => {
         return 1;
       }
     }
-    const manager = new SensorsManager([[CountingSensor, {cacheWindowMs: 1000}]]);
+    const manager = new SensorsManager([
+      [CountingSensor, {cacheWindowMs: 1000}],
+    ]);
     const runner = await TestRunner.create({scripts: [manager]});
     const sensor = manager.getOrCreateInstance(CountingSensor, {
       cacheWindowMs: 1000,

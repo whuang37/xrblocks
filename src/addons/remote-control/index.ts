@@ -8,13 +8,16 @@ export {
 } from './RemoteControlBuiltInTools';
 export type {
   RemoteControlApplyControlToolArgs,
+  RemoteControlActionToolDependencies,
   RemoteControlBuiltInTool,
+  RemoteControlBuiltInToolDependencies,
   RemoteControlCameraToolArgs,
   RemoteControlCameraToolResult,
   RemoteControlClickToolArgs,
   RemoteControlHandObservation,
   RemoteControlHandsToolResult,
   RemoteControlLookAtTargetToolArgs,
+  RemoteControlObservationToolDependencies,
   RemoteControlPointToToolArgs,
   RemoteControlPoseObservation,
   RemoteControlReachToToolArgs,
@@ -24,8 +27,6 @@ export type {
   RemoteControlTargetResolver,
   RemoteControlTeleportToToolArgs,
 } from './RemoteControlBuiltInTools';
-export {RemoteControlObserver} from './RemoteControlObserver';
-export type {RemoteControlObserverDependencies} from './RemoteControlObserver';
 export {
   REMOTE_CONTROL_CLIENT_NAME,
   REMOTE_CONTROL_PROTOCOL_VERSION,

@@ -17,7 +17,6 @@ import {
   createRemoteControlBuiltInTools,
   type RemoteControlTarget,
 } from './RemoteControlBuiltInTools';
-import {RemoteControlObserver} from './RemoteControlObserver';
 import {
   type RemoteControlCallToolRequest,
   type RemoteControlRequest,
@@ -51,7 +50,6 @@ export class RemoteControl extends Script {
 
   editorIcon = 'settings_remote';
   embodiedControl: EmbodiedControl;
-  observer?: RemoteControlObserver;
   transport?: WebSocketRemoteControlTransport;
 
   dependencies!: {
@@ -98,7 +96,6 @@ export class RemoteControl extends Script {
       this.embodiedControl.init(dependencies);
     }
 
-    this.observer = new RemoteControlObserver(dependencies);
     this.registerBuiltInTools();
     this.transport = new WebSocketRemoteControlTransport(
       {
@@ -184,9 +181,8 @@ export class RemoteControl extends Script {
   }
 
   private registerBuiltInTools() {
-    if (!this.observer) return;
     for (const tool of createRemoteControlBuiltInTools({
-      observer: this.observer,
+      ...this.dependencies,
       embodiedControl: this.embodiedControl,
       resolveTarget: (target) => this.resolveTarget(target),
     })) {

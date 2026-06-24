@@ -27,8 +27,6 @@ type VideoStreamGetSnapshotImageDataOptionsBase = {
   width?: number;
   /** The target height, defaults to the video height. */
   height?: number;
-  /** The time window in milliseconds to cache the snapshot (default: 8.0). Set to 0 to disable caching. */
-  cacheWindowMs?: number;
 };
 
 export type VideoStreamGetSnapshotImageDataOptions =
@@ -75,11 +73,6 @@ function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-export type SnapshotResult =
-  | THREE.Texture
-  | ImageData
-  | Promise<string | Blob | null>;
-
 /**
  * The base class for handling video streams (from camera or file), managing
  * the underlying <video> element, streaming state, and snapshot logic.
@@ -104,10 +97,6 @@ export class VideoStream<
   private frozenTexture_: THREE.Texture | null = null;
   private canvas_: HTMLCanvasElement | null = null;
   private context_: CanvasRenderingContext2D | null = null;
-
-  // High-performance per-frame caching properties
-  private lastCaptureTime_ = 0;
-  private snapshotCache_ = new Map<string, SnapshotResult>();
 
   /**
    * @param options - The configuration options.
@@ -205,7 +194,6 @@ export class VideoStream<
     width = this.width,
     height = this.height,
     outputFormat = 'texture',
-    cacheWindowMs = 8.0,
     ...rest
   }: VideoStreamGetSnapshotOptions = {}) {
     if (
@@ -217,28 +205,6 @@ export class VideoStream<
       return null;
     }
 
-    const now = performance.now();
-    const mimeType =
-      ('mimeType' in rest ? rest.mimeType : undefined) ?? 'image/jpeg';
-    const quality = ('quality' in rest ? rest.quality : undefined) ?? 0.9;
-
-    // Generate a unique cache key for this format, resolution, and quality
-    const cacheKey = `${outputFormat}_${width}_${height}_${mimeType}_${quality}`;
-
-    // 1. Return cached snapshot if requested within the same frame tick (configurable window)
-    if (
-      now - this.lastCaptureTime_ < cacheWindowMs &&
-      this.snapshotCache_.has(cacheKey)
-    ) {
-      return this.snapshotCache_.get(cacheKey) as SnapshotResult;
-    }
-
-    // 2. Invalidate and clear cache if time has advanced to a new frame
-    if (now - this.lastCaptureTime_ >= cacheWindowMs) {
-      this.snapshotCache_.clear();
-      this.lastCaptureTime_ = now;
-    }
-
     if (width > this.width! || height > this.height!) {
       console.warn(
         `The requested snapshot width (${width}px x ${
@@ -248,6 +214,10 @@ export class VideoStream<
         }px). The snapshot will be upscaled.`
       );
     }
+
+    const mimeType =
+      ('mimeType' in rest ? rest.mimeType : undefined) ?? 'image/jpeg';
+    const quality = ('quality' in rest ? rest.quality : undefined) ?? 0.9;
 
     try {
       // Re-initialize canvas only if dimensions have changed.
@@ -265,36 +235,26 @@ export class VideoStream<
       }
 
       this.context_!.drawImage(this.video_, 0, 0, width, height);
-      let result: SnapshotResult;
-
       switch (outputFormat) {
         case 'imageData':
-          result = this.context_!.getImageData(0, 0, width, height);
-          break;
+          return this.context_!.getImageData(0, 0, width, height);
         case 'base64':
-          result = new Promise<Blob | null>((resolve) =>
+          return new Promise<Blob | null>((resolve) =>
             this.canvas_!.toBlob(resolve, mimeType, quality)
           ).then((blob) => (blob ? blobToBase64(blob) : null));
-          break;
         case 'blob':
-          result = new Promise<Blob | null>((resolve) =>
+          return new Promise<Blob | null>((resolve) =>
             this.canvas_!.toBlob(resolve, mimeType, quality)
           );
-          break;
         case 'texture':
         default: {
           const frozenTexture = new THREE.Texture(this.canvas_);
           frozenTexture.needsUpdate = true;
           frozenTexture.colorSpace = THREE.SRGBColorSpace;
           this.frozenTexture_ = frozenTexture;
-          result = this.frozenTexture_;
-          break;
+          return this.frozenTexture_;
         }
       }
-
-      // Cache the result for subsequent calls on this frame
-      this.snapshotCache_.set(cacheKey, result);
-      return result;
     } catch (error) {
       console.error('Error capturing snapshot:', error);
       return null;

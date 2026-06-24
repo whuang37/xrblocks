@@ -6,17 +6,16 @@ import {
   type XRCompoundControl,
 } from '../embodied-control/index.js';
 import {
+  DeviceCameraViewSensor,
   DepthSensor,
   ProprioceptionSensor,
   SceneGraphSensor,
-  ScreenshotSOMSensor,
-  ScreenshotCameraSensor,
-  ScreenshotXRSensor,
-  SemanticMapSensor,
   SensorsManager,
+  SOMViewSensor,
   TargetingSensor,
+  UserViewSensor,
   VisibilitySensor,
-  type Sensor,
+  type SensorRequest,
   type SensorsOptions,
 } from '../sensors/index.js';
 
@@ -24,7 +23,11 @@ export type UserAgentSensorKey =
   | 'state'
   | 'targeting'
   | 'visibleObjects'
+  | 'visibility'
   | 'sceneGraph'
+  | 'deviceCameraView'
+  | 'userView'
+  | 'somView'
   | 'screenshotCamera'
   | 'screenshotXR'
   | 'screenshotSOM'
@@ -36,7 +39,6 @@ export type UserAgentBridgeConfig = {
   sensorTimeoutMs?: number;
   sensors?: UserAgentSensorKey[];
   sensorOptions?: SensorsOptions & {
-    depthGridSize?: number;
     verifyLineOfSight?: boolean;
   };
   embodiedOptions?: EmbodiedControlOptions;
@@ -137,13 +139,7 @@ export async function installUserAgentBridge(
     core.registry.register(embodiedControl, EmbodiedControl);
   }
 
-  let sensors = core.registry.get(SensorsManager);
-  if (!sensors) {
-    sensors = new SensorsManager(undefined, config.sensorOptions);
-    core.scene.add(sensors);
-    await core.scriptsManager.initScript(sensors);
-    core.registry.register(sensors, SensorsManager);
-  }
+  const sensorsManager = await SensorsManager.resolve(core);
 
   if (config.autoPause ?? true) {
     core.pause();
@@ -152,7 +148,7 @@ export async function installUserAgentBridge(
   const bridge = new UserAgentBridgeImpl(
     core,
     embodiedControl,
-    sensors,
+    sensorsManager,
     config
   );
   (
@@ -259,27 +255,28 @@ class UserAgentBridgeImpl implements UserAgentBridge {
       ...options.sensorOptions,
       updateMode: 'sync' as const,
     };
-    const instances = getSensorsForKeys(
+    const requests = getSensorRequestsForKeys(
       options.sensors ?? this.config.sensors ?? DEFAULT_SENSORS,
       sensorOptions
     );
     const sensorTimeoutMs = this.config.sensorTimeoutMs ?? 2000;
-    const promises = instances.map((sensor) =>
-      withTimeout(this.sensors.get(sensor, sensorOptions), sensorTimeoutMs)
+    const entries = Object.entries(requests);
+    const promises = entries.map(([, request]) =>
+      withTimeout(this.sensors.capture(request, sensorOptions), sensorTimeoutMs)
     );
-    if (instances.some((sensor) => isScreenshotSensorKey(sensor.key))) {
+    if (entries.some(([key]) => isScreenshotSensorKey(key))) {
       this.core.stepFrame(this.config.dtMs ?? 50);
     }
     const results = await Promise.all(promises);
     const observation: Record<string, unknown> = {};
     const sensorErrors: Record<string, string> = {};
-    instances.forEach((sensor, index) => {
+    entries.forEach(([key], index) => {
       const result = results[index];
       if (result.ok) {
-        observation[sensor.key] = result.value;
+        observation[key] = result.value;
       } else {
-        observation[sensor.key] = null;
-        sensorErrors[sensor.key] = result.error;
+        observation[key] = null;
+        sensorErrors[key] = result.error;
       }
     });
     if (Object.keys(sensorErrors).length > 0) {
@@ -346,44 +343,58 @@ function handToIndex(hand: UserAgentHand = 'right'): number {
   return hand ?? 1;
 }
 
-function getSensorsForKeys(
+function getSensorRequestsForKeys(
   keys: UserAgentSensorKey[],
   options?: UserAgentBridgeConfig['sensorOptions']
-): Sensor<unknown>[] {
-  return keys.map((key) => {
+): Record<string, SensorRequest<unknown>> {
+  const requests: Record<string, SensorRequest<unknown>> = {};
+
+  for (const key of keys) {
     switch (key) {
       case 'state':
-        return new ProprioceptionSensor();
+        requests[key] = ProprioceptionSensor;
+        break;
       case 'targeting':
-        return new TargetingSensor();
+        requests[key] = TargetingSensor;
+        break;
       case 'visibleObjects':
-        return new SemanticMapSensor({
-          visibility: new VisibilitySensor({
-            verifyLineOfSight: options?.verifyLineOfSight,
-          }),
-        });
+      case 'visibility':
+        requests[key] = [
+          VisibilitySensor,
+          {verifyLineOfSight: options?.verifyLineOfSight},
+        ];
+        break;
       case 'sceneGraph':
-        return new SceneGraphSensor();
+        requests[key] = SceneGraphSensor;
+        break;
+      case 'deviceCameraView':
       case 'screenshotCamera':
-        return new ScreenshotCameraSensor();
+        requests[key] = DeviceCameraViewSensor;
+        break;
+      case 'userView':
       case 'screenshotXR':
-        return new ScreenshotXRSensor();
+        requests[key] = [UserViewSensor, {overlayOnCamera: true}];
+        break;
+      case 'somView':
       case 'screenshotSOM':
-        return new ScreenshotSOMSensor({
-          visibility: new VisibilitySensor({
-            verifyLineOfSight: options?.verifyLineOfSight,
-          }),
-        });
+        requests[key] = SOMViewSensor;
+        break;
       case 'depth':
-        return new DepthSensor({gridSize: options?.depthGridSize});
+        requests[key] = DepthSensor;
+        break;
       default:
         throw new Error(`Unknown sensor key: ${key}`);
     }
-  });
+  }
+
+  return requests;
 }
 
 function isScreenshotSensorKey(key: string): boolean {
   return (
+    key === 'deviceCameraView' ||
+    key === 'userView' ||
+    key === 'somView' ||
     key === 'screenshotCamera' ||
     key === 'screenshotXR' ||
     key === 'screenshotSOM'

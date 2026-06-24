@@ -16,7 +16,7 @@ observations.
 const mod = await import('/build/addons/user-agent-bridge/index.js');
 await mod.installUserAgentBridge({
   dtMs: 50,
-  sensors: ['state', 'visibleObjects', 'targeting', 'sceneGraph'],
+  sensors: ['state', 'visibility', 'targeting', 'sceneGraph', 'userView'],
 });
 
 const observation = await globalThis.userAgentBridge.observe();
@@ -25,6 +25,18 @@ await globalThis.userAgentBridge.step({
   rightHand: {move: [0, 0, -0.01]},
 });
 ```
+
+Sensor observations are backed by the `xrblocks/addons/sensors` facade and
+`SensorsManager`, so bridge keys map to the current sensor classes:
+
+- `state` -> `ProprioceptionSensor`
+- `visibility` / `visibleObjects` -> `VisibilitySensor`
+- `targeting` -> `TargetingSensor`
+- `sceneGraph` -> `SceneGraphSensor`
+- `deviceCameraView` / `screenshotCamera` -> `DeviceCameraViewSensor`
+- `userView` / `screenshotXR` -> `UserViewSensor`
+- `somView` / `screenshotSOM` -> `SOMViewSensor`
+- `depth` -> `DepthSensor`
 
 The public addon entrypoint remains `index.js`; the implementation lives in
 `UserAgentBridge.ts`.

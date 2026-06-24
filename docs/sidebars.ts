@@ -67,6 +67,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'samples/XR-Emoji',
         'samples/Face-Mirror',
+        'samples/Magic-Window',
         'samples/Custom-Gestures',
         'samples/RockPaperScissors',
         'samples/Netblocks',

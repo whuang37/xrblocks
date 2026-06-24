@@ -1,15 +1,13 @@
 import type * as GoogleGenAITypes from '@google/genai';
 import * as THREE from 'three';
 import * as xb from 'xrblocks';
-import {AUDIO_CAPTURE_PROCESSOR_CODE} from './AudioCaptureProcessorCode';
-
-const DEFAULT_SCHEDULE_AHEAD_TIME = 1.0;
 
 export interface GeminiManagerEventMap extends THREE.Object3DEventMap {
   inputTranscription: {message: string};
   outputTranscription: {message: string};
   turnComplete: object;
   interrupted: object;
+  close: object;
 }
 
 export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
@@ -17,19 +15,8 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
   xrDeviceCamera?: xb.XRDeviceCamera;
   ai!: xb.AI;
 
-  // Audio setup
-  audioStream: MediaStream | null = null;
-  audioContext: AudioContext | null = null;
-  sourceNode: MediaStreamAudioSourceNode | null = null;
-  processorNode: AudioWorkletNode | null = null;
-  queuedSourceNodes = new Set<AudioScheduledSourceNode>();
-
   // AI state
   isAIRunning: boolean = false;
-
-  // Audio playback setup
-  audioQueue: AudioBuffer[] = [];
-  nextAudioStartTime = 0;
 
   // Screenshot setInterval identifier
   private screenshotInterval?: ReturnType<typeof setInterval>;
@@ -39,11 +26,22 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
   currentOutputText: string = '';
   tools: xb.Tool[] = [];
 
-  scheduleAheadTime = DEFAULT_SCHEDULE_AHEAD_TIME;
-
   // Type and quality settings for sending the camera feed to Gemini.
   cameraMimeType = 'image/jpeg';
   cameraQuality = 0.8;
+  // Optional downscale for the camera frames sent to the model. Leave
+  // undefined to send full-resolution snapshots.
+  cameraWidth?: number;
+  cameraHeight?: number;
+
+  // What the live session streams to the model each frame:
+  //   'camera'     - raw passthrough frames from the device camera (default,
+  //                  matching the original startGeminiLive behavior)
+  //   'screenshot' - the rendered scene (virtual content), optionally over the
+  //                  camera image (see `overlayScreenshotOnCamera`)
+  captureMode: 'screenshot' | 'camera' = 'camera';
+  // In 'screenshot' mode, composite the virtual content over the camera image.
+  overlayScreenshotOnCamera = true;
 
   constructor() {
     super();
@@ -57,14 +55,51 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
   async startGeminiLive({
     liveParams,
     model,
+    tools,
+    captureMode,
+    overlayOnCamera,
+    camera,
   }: {
     liveParams?: GoogleGenAITypes.LiveConnectConfig;
     model?: string;
+    /** Tools the model may call. Overrides {@link GeminiManager.tools}. */
+    tools?: xb.Tool[];
+    /**
+     * What to stream each frame: `'screenshot'` (rendered virtual content) or
+     * `'camera'` (raw passthrough frames). Defaults to
+     * {@link GeminiManager.captureMode}.
+     */
+    captureMode?: 'screenshot' | 'camera';
+    /** In screenshot mode, composite virtual content over the camera image. */
+    overlayOnCamera?: boolean;
+    /** Capture config used in `'camera'` mode. */
+    camera?: {
+      /** Frames per second sent to the model. Default `1`. */
+      fps?: number;
+      /** JPEG quality, 0..1. */
+      quality?: number;
+      /** Downscale width in pixels. Omit for full resolution. */
+      width?: number;
+      /** Downscale height in pixels. Omit for full resolution. */
+      height?: number;
+    };
   } = {}) {
     if (this.isAIRunning || !this.ai) {
       console.warn('AI already running or not available');
       return;
     }
+
+    if (tools) this.tools = tools;
+    if (captureMode) this.captureMode = captureMode;
+    if (overlayOnCamera !== undefined) {
+      this.overlayScreenshotOnCamera = overlayOnCamera;
+    }
+    if (camera?.quality !== undefined) this.cameraQuality = camera.quality;
+    if (camera?.width !== undefined) this.cameraWidth = camera.width;
+    if (camera?.height !== undefined) this.cameraHeight = camera.height;
+    const intervalMs = camera?.fps
+      ? Math.max(1, Math.round(1000 / camera.fps))
+      : 1000;
 
     liveParams = liveParams || {};
     liveParams.tools = liveParams.tools || [];
@@ -72,9 +107,9 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
       functionDeclarations: this.tools.map((tool) => tool.toJSON()),
     });
     try {
-      await this.setupAudioCapture();
+      await xb.core.sound.enableAudio();
       await this.startLiveAI(liveParams, model);
-      this.startScreenshotCapture();
+      this.startScreenshotCapture(intervalMs);
       this.isAIRunning = true;
     } catch (error) {
       console.error('Failed to start Gemini Live:', error);
@@ -102,51 +137,15 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
     }
   }
 
-  async setupAudioCapture() {
-    this.audioStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        sampleRate: 16000,
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
-      },
-    });
-
-    const audioTracks = this.audioStream.getAudioTracks();
-    if (audioTracks.length === 0) {
-      throw new Error('No audio tracks found.');
-    }
-
-    this.audioContext = new AudioContext({sampleRate: 16000});
-    const blob = new Blob([AUDIO_CAPTURE_PROCESSOR_CODE], {
-      type: 'text/javascript',
-    });
-    const blobUrl = URL.createObjectURL(blob);
-    await this.audioContext.audioWorklet.addModule(blobUrl);
-    this.sourceNode = this.audioContext.createMediaStreamSource(
-      this.audioStream
-    );
-    this.processorNode = new AudioWorkletNode(
-      this.audioContext,
-      'audio-capture-processor'
-    );
-    this.processorNode.port.onmessage = (event) => {
-      if (event.data.type === 'audioData' && this.isAIRunning) {
-        this.sendAudioData(event.data.data);
-      }
-    };
-
-    this.sourceNode.connect(this.processorNode);
-    this.processorNode.connect(this.audioContext.destination);
-  }
-
   async startLiveAI(
     params: GoogleGenAITypes.LiveConnectConfig,
     model?: string
   ) {
     return new Promise<void>((resolve, reject) => {
+      let opened = false;
       this.ai.setLiveCallbacks({
         onopen: () => {
+          opened = true;
           resolve();
         },
         onmessage: (message: GoogleGenAITypes.LiveServerMessage) => {
@@ -158,6 +157,15 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
         },
         onclose: () => {
           this.isAIRunning = false;
+          // Free the mic, audio nodes and screenshot loop even when the
+          // session is closed by the server, not just via stopGeminiLive.
+          this.cleanup();
+          this.dispatchEvent({type: 'close'});
+          // If the session closed before it ever opened, the startup promise
+          // would otherwise hang forever; surface it as a failure.
+          if (!opened) {
+            reject(new Error('Live session closed before it opened'));
+          }
         },
       });
 
@@ -177,44 +185,46 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
 
   async captureAndSendScreenshot() {
     try {
-      const base64Image = await this.xrDeviceCamera!.getSnapshot({
-        outputFormat: 'base64',
-        mimeType: this.cameraMimeType,
-        quality: this.cameraQuality,
-      });
+      const base64Image =
+        this.captureMode === 'camera'
+          ? await this.xrDeviceCamera!.getSnapshot({
+              outputFormat: 'base64',
+              mimeType: this.cameraMimeType,
+              quality: this.cameraQuality,
+              ...(this.cameraWidth ? {width: this.cameraWidth} : {}),
+              ...(this.cameraHeight ? {height: this.cameraHeight} : {}),
+            })
+          : await xb.core.screenshotSynthesizer.getScreenshot(
+              this.overlayScreenshotOnCamera
+            );
       if (typeof base64Image == 'string') {
-        // Strip the data URL prefix if present
-        const base64Data = base64Image.startsWith('data:')
-          ? base64Image.split(',')[1]
-          : base64Image;
-        this.sendVideoFrame(base64Data);
+        // Strip the data URL prefix if present, preserving its declared MIME
+        // type (screenshots are PNG, camera snapshots are JPEG).
+        let mimeType = this.cameraMimeType;
+        let base64Data = base64Image;
+        if (base64Image.startsWith('data:')) {
+          const match = base64Image.match(/^data:([^;,]+)[^,]*,(.*)$/s);
+          if (match) {
+            mimeType = match[1];
+            base64Data = match[2];
+          } else {
+            base64Data = base64Image.split(',')[1];
+          }
+        }
+        this.sendVideoFrame(base64Data, mimeType);
       }
     } catch (error) {
-      console.error('Failed to capture screenshot:', error);
+      console.error('Failed to capture frame:', error);
     }
   }
 
-  sendAudioData(audioBuffer: ArrayBuffer) {
-    if (!this.isAIRunning || !this.ai || !this.ai.sendRealtimeInput) {
-      throw new Error('AI not ready to send audio clip.');
-    }
-    try {
-      const base64Audio = this.arrayBufferToBase64(audioBuffer);
-      this.ai.sendRealtimeInput({
-        audio: {data: base64Audio, mimeType: 'audio/pcm;rate=16000'},
-      });
-    } catch (error) {
-      console.error('Failed to send audio:', error);
-    }
-  }
-
-  sendVideoFrame(base64Image: string) {
+  sendVideoFrame(base64Image: string, mimeType: string = this.cameraMimeType) {
     if (!this.isAIRunning || !this.ai || !this.ai.sendRealtimeInput) {
       throw new Error('AI not ready to send video frame');
     }
     try {
       this.ai.sendRealtimeInput({
-        video: {data: base64Image, mimeType: 'image/jpeg'},
+        video: {data: base64Image, mimeType},
       });
     } catch (error) {
       console.error('❌ Failed to send video frame:', error);
@@ -222,105 +232,20 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
     }
   }
 
-  async initializeAudioContext() {
-    if (!this.audioContext) {
-      this.audioContext = new AudioContext({sampleRate: 24000});
-    }
-  }
-
-  async playAudioChunk(audioData: string) {
-    try {
-      await this.initializeAudioContext();
-      const arrayBuffer = this.base64ToArrayBuffer(audioData);
-      const audioBuffer = this.audioContext!.createBuffer(
-        1,
-        arrayBuffer.byteLength / 2,
-        24000
-      );
-      const channelData = audioBuffer.getChannelData(0);
-      const int16View = new Int16Array(arrayBuffer);
-
-      for (let i = 0; i < int16View.length; i++) {
-        channelData[i] = int16View[i] / 32768.0;
-      }
-
-      this.audioQueue.push(audioBuffer);
-
-      this.scheduleAudioBuffers();
-    } catch (error) {
-      console.error('Error playing audio chunk:', error);
-    }
-  }
-
-  scheduleAudioBuffers() {
-    while (
-      this.audioQueue.length > 0 &&
-      this.nextAudioStartTime <=
-        this.audioContext!.currentTime + this.scheduleAheadTime
-    ) {
-      const audioBuffer = this.audioQueue.shift()!;
-      const source = this.audioContext!.createBufferSource();
-      source.buffer = audioBuffer!;
-      source.connect(this.audioContext!.destination);
-      source.onended = () => {
-        source.disconnect();
-        this.queuedSourceNodes.delete(source);
-        this.scheduleAudioBuffers();
-      };
-
-      const startTime = Math.max(
-        this.nextAudioStartTime,
-        this.audioContext!.currentTime
-      );
-      source.start(startTime);
-      this.queuedSourceNodes.add(source);
-      this.nextAudioStartTime = startTime + audioBuffer.duration;
-    }
-  }
-
-  stopPlayingAudio() {
-    this.audioQueue = [];
-    this.nextAudioStartTime = 0;
-    for (const source of this.queuedSourceNodes) {
-      source.stop();
-      source.disconnect();
-    }
-    this.queuedSourceNodes.clear();
-  }
-
   cleanup() {
+    // Audio capture + playback are owned by CoreSound; stop both.
+    xb.core.sound.disableAudio();
+    xb.core.sound.stopAIAudio();
+
     if (this.screenshotInterval) {
       clearInterval(this.screenshotInterval);
       this.screenshotInterval = undefined;
-    }
-
-    // Clear audio queue and stop playback
-    this.audioQueue = [];
-
-    if (this.processorNode) {
-      this.processorNode.disconnect();
-      this.processorNode = null;
-    }
-
-    if (this.sourceNode) {
-      this.sourceNode.disconnect();
-      this.sourceNode = null;
-    }
-
-    if (this.audioContext) {
-      this.audioContext.close();
-      this.audioContext = null;
-    }
-
-    if (this.audioStream) {
-      this.audioStream.getTracks().forEach((track) => track.stop());
-      this.audioStream = null;
     }
   }
 
   handleAIMessage(message: GoogleGenAITypes.LiveServerMessage) {
     if (message.data) {
-      this.playAudioChunk(message.data);
+      xb.core.sound.playAIAudio(message.data);
     }
 
     for (const functionCall of message.toolCall?.functionCalls ?? []) {
@@ -360,7 +285,7 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
       }
 
       if (message.serverContent.interrupted) {
-        this.stopPlayingAudio();
+        xb.core.sound.stopAIAudio();
         this.dispatchEvent({type: 'interrupted'});
       }
 
@@ -368,25 +293,6 @@ export class GeminiManager extends xb.Script<GeminiManagerEventMap> {
         this.dispatchEvent({type: 'turnComplete'});
       }
     }
-  }
-
-  arrayBufferToBase64(buffer: ArrayBuffer): string {
-    const bytes = new Uint8Array(buffer);
-    let binary = '';
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
-  }
-
-  base64ToArrayBuffer(base64: string): ArrayBuffer {
-    const binaryString = atob(base64);
-    const len = binaryString.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    return bytes.buffer;
   }
 
   dispose() {

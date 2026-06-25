@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import {mkdir, writeFile} from 'node:fs/promises';
+import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 
@@ -10,7 +10,11 @@ const command = process.argv[2] || 'observe';
 const extraJson =
   command === 'tool' || command === 'call-tool'
     ? process.argv[4]
-    : process.argv[3];
+    : command === 'inject-audio-stt'
+      ? undefined
+      : command === 'gemini-say-wav'
+        ? process.argv[4]
+        : process.argv[3];
 
 if (typeof WebSocket === 'undefined') {
   console.error(
@@ -19,9 +23,11 @@ if (typeof WebSocket === 'undefined') {
   process.exit(1);
 }
 
-const request = createRequest(command, extraJson);
+const request = await createRequest(command, extraJson);
 const ws = new WebSocket(url);
 let sent = false;
+const timeoutMs =
+  command === 'inject-audio-stt' || command === 'gemini-say-wav' ? 30000 : 8000;
 
 const timeout = setTimeout(() => {
   console.error(`Timed out waiting for remote-control response from ${url}`);
@@ -31,7 +37,7 @@ const timeout = setTimeout(() => {
     // ignore
   }
   process.exit(1);
-}, 8000);
+}, timeoutMs);
 
 ws.addEventListener('open', () => {
   ws.send(
@@ -56,7 +62,7 @@ ws.addEventListener('message', async (event) => {
 
   if (message.type === 'response' && message.id === request.id) {
     clearTimeout(timeout);
-    await saveReturnedImages(message, command);
+    await saveReturnedMedia(message, command);
     console.log(JSON.stringify(message, null, 2));
     ws.close();
   }
@@ -68,7 +74,7 @@ ws.addEventListener('error', () => {
   process.exit(1);
 });
 
-function createRequest(name, jsonArg) {
+async function createRequest(name, jsonArg) {
   const id = `smoke-${Date.now()}`;
   const args = jsonArg ? JSON.parse(jsonArg) : undefined;
 
@@ -151,6 +157,32 @@ function createRequest(name, jsonArg) {
         name: 'resetCube',
         args: args || {},
       };
+    case 'start-stt':
+      return {
+        id,
+        type: 'callTool',
+        name: 'startStt',
+        args: args || {},
+      };
+    case 'get-stt':
+      return {
+        id,
+        type: 'callTool',
+        name: 'getSttState',
+        args: args || {},
+      };
+    case 'inject-audio-stt':
+      return createInjectAudioSttRequest(id);
+    case 'gemini-say-wav':
+      return {
+        id,
+        type: 'callTool',
+        name: 'geminiSayAndCaptureAudio',
+        args: {
+          text: process.argv[3] || 'this is a test',
+          ...(args || {}),
+        },
+      };
     default:
       console.error(
         [
@@ -168,16 +200,55 @@ function createRequest(name, jsonArg) {
           '  node samples/remote_control/send.mjs nudge-cube',
           '  node samples/remote_control/send.mjs nudge-cube \'{"dx":0.25}\'',
           '  node samples/remote_control/send.mjs reset-cube',
+          '  node samples/remote_control/send.mjs start-stt',
+          '  node samples/remote_control/send.mjs get-stt',
+          '  node samples/remote_control/send.mjs inject-audio-stt ./speech.wav \'{"waitMs":3000}\'',
+          '  node samples/remote_control/send.mjs inject-audio-stt ./speech.pcm \'{"mimeType":"audio/pcm","sampleRate":16000}\'',
+          '  node samples/remote_control/send.mjs gemini-say-wav "this is a test"',
+          '  node samples/remote_control/send.mjs gemini-say-wav "this is a test" \'{"timeoutMs":20000}\'',
         ].join('\n')
       );
       process.exit(1);
   }
 }
 
-async function saveReturnedImages(message, commandName) {
+async function createInjectAudioSttRequest(id) {
+  const filePath = process.argv[3];
+  if (!filePath) {
+    console.error(
+      'Usage: node samples/remote_control/send.mjs inject-audio-stt <audio.wav|audio.pcm> [jsonArgs]'
+    );
+    process.exit(1);
+  }
+
+  const args = process.argv[4] ? JSON.parse(process.argv[4]) : {};
+  const bytes = await readFile(filePath);
+  const inferredMimeType = filePath.toLowerCase().endsWith('.wav')
+    ? 'audio/wav'
+    : 'audio/pcm';
+
+  if ((args.mimeType ?? inferredMimeType) === 'audio/pcm' && !args.sampleRate) {
+    console.error('sampleRate is required for audio/pcm input.');
+    process.exit(1);
+  }
+
+  return {
+    id,
+    type: 'callTool',
+    name: 'injectAudioForStt',
+    args: {
+      mimeType: inferredMimeType,
+      waitMs: 2500,
+      ...args,
+      audioBase64: bytes.toString('base64'),
+    },
+  };
+}
+
+async function saveReturnedMedia(message, commandName) {
   if (!message.ok || message.result === undefined) return;
   const savedFiles = [];
-  message.result = await replaceImageDataUrls(
+  message.result = await replaceReturnedMedia(
     message.result,
     savedFiles,
     commandName
@@ -187,8 +258,11 @@ async function saveReturnedImages(message, commandName) {
   }
 }
 
-async function replaceImageDataUrls(value, savedFiles, commandName) {
-  if (typeof value === 'string' && value.startsWith('data:image/')) {
+async function replaceReturnedMedia(value, savedFiles, commandName) {
+  if (
+    typeof value === 'string' &&
+    (value.startsWith('data:image/') || value.startsWith('data:audio/'))
+  ) {
     const file = await saveDataUrl(value, commandName, savedFiles.length);
     savedFiles.push(file);
     return file.path;
@@ -196,15 +270,33 @@ async function replaceImageDataUrls(value, savedFiles, commandName) {
 
   if (Array.isArray(value)) {
     return Promise.all(
-      value.map((item) => replaceImageDataUrls(item, savedFiles, commandName))
+      value.map((item) => replaceReturnedMedia(item, savedFiles, commandName))
     );
   }
 
   if (value && typeof value === 'object') {
+    if (
+      typeof value.audioBase64 === 'string' &&
+      typeof value.mimeType === 'string' &&
+      value.mimeType.startsWith('audio/')
+    ) {
+      const file = await saveBase64File(
+        value.audioBase64,
+        value.mimeType,
+        commandName,
+        savedFiles.length
+      );
+      savedFiles.push(file);
+      return {
+        ...value,
+        audioBase64: file.path,
+      };
+    }
+
     const entries = await Promise.all(
       Object.entries(value).map(async ([key, item]) => [
         key,
-        await replaceImageDataUrls(item, savedFiles, commandName),
+        await replaceReturnedMedia(item, savedFiles, commandName),
       ])
     );
     return Object.fromEntries(entries);
@@ -214,12 +306,24 @@ async function replaceImageDataUrls(value, savedFiles, commandName) {
 }
 
 async function saveDataUrl(dataUrl, commandName, index) {
-  const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/.exec(dataUrl);
+  const match = /^data:((?:image|audio)\/[a-zA-Z0-9.+-]+);base64,(.*)$/.exec(
+    dataUrl
+  );
   if (!match) {
     throw new Error('Unsupported image data URL.');
   }
   const [, mimeType, base64] = match;
-  const extension = imageExtension(mimeType);
+  const extension = mediaExtension(mimeType);
+  return saveBase64File(base64, mimeType, commandName, index, extension);
+}
+
+async function saveBase64File(
+  base64,
+  mimeType,
+  commandName,
+  index,
+  extension = mediaExtension(mimeType)
+) {
   const dir = path.join(tmpdir(), 'xrblocks-remote-control');
   await mkdir(dir, {recursive: true});
   const safeCommand = commandName.replace(/[^a-zA-Z0-9_-]/g, '-');
@@ -236,7 +340,7 @@ async function saveDataUrl(dataUrl, commandName, index) {
   };
 }
 
-function imageExtension(mimeType) {
+function mediaExtension(mimeType) {
   switch (mimeType) {
     case 'image/jpeg':
       return 'jpg';
@@ -246,8 +350,16 @@ function imageExtension(mimeType) {
       return 'webp';
     case 'image/gif':
       return 'gif';
+    case 'audio/wav':
+    case 'audio/wave':
+    case 'audio/x-wav':
+      return 'wav';
+    case 'audio/mpeg':
+      return 'mp3';
+    case 'audio/ogg':
+      return 'ogg';
     default:
-      return mimeType.split('/')[1]?.replace(/[^a-zA-Z0-9]/g, '') || 'img';
+      return mimeType.split('/')[1]?.replace(/[^a-zA-Z0-9]/g, '') || 'bin';
   }
 }
 

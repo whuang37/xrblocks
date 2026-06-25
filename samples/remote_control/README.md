@@ -9,6 +9,10 @@ scene tools:
 - `getCubeState`
 - `nudgeCube`
 - `resetCube`
+- `startStt`
+- `getSttState`
+- `injectAudioForStt`
+- `geminiSayAndCaptureAudio`
 
 It also exposes the built-in remote-control tools:
 
@@ -17,6 +21,8 @@ It also exposes the built-in remote-control tools:
 - `getHands`
 - `getScreenshot`
 - `getSimulatorState`
+- `injectAudioInput`
+- `getAppAudio`
 
 ## Run It
 
@@ -77,6 +83,47 @@ node samples/remote_control/send.mjs get-camera '{"screenshot":true}'
 ```
 
 Files are saved under:
+
+```text
+$TMPDIR/xrblocks-remote-control/
+```
+
+## Audio STT Smoke Test
+
+Open the sample with a Gemini key so the page can start Gemini Live
+transcription:
+
+```text
+http://127.0.0.1:8080/samples/remote_control/?key=YOUR_GEMINI_KEY
+```
+
+Then inject a local speech WAV file through the remote-control audio path and
+print the transcribed value:
+
+```bash
+node samples/remote_control/send.mjs inject-audio-stt ./speech.wav '{"waitMs":3000}'
+```
+
+Raw 16-bit PCM is also supported when you provide a sample rate:
+
+```bash
+node samples/remote_control/send.mjs inject-audio-stt ./speech.pcm '{"mimeType":"audio/pcm","sampleRate":16000,"waitMs":3000}'
+```
+
+You can inspect the latest transcript without injecting new audio:
+
+```bash
+node samples/remote_control/send.mjs get-stt
+```
+
+To ask Gemini Live to speak and save the SDK-captured app audio as a WAV:
+
+```bash
+node samples/remote_control/send.mjs gemini-say-wav "this is a test"
+```
+
+The command waits for Gemini Live turn completion, prints JSON, and writes the
+WAV under:
 
 ```text
 $TMPDIR/xrblocks-remote-control/

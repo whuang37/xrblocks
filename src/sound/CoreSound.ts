@@ -4,6 +4,8 @@ import {Script} from '../core/Script';
 
 import {AudioListener} from './AudioListener';
 import {AudioPlayer} from './AudioPlayer';
+import {base64ToArrayBuffer, decodeWav, float32ToInt16} from './AudioDataUtils';
+import {AppAudioCapture, type AppAudioCaptureResult} from './AppAudioCapture';
 import {BackgroundMusic} from './BackgroundMusic';
 import {CategoryVolumes, VolumeCategory} from './CategoryVolumes';
 import {SoundOptions} from './SoundOptions';
@@ -11,6 +13,22 @@ import {SoundSynthesizer} from './SoundSynthesizer';
 import {SpatialAudio} from './SpatialAudio';
 import {SpeechRecognizer} from './SpeechRecognizer';
 import {SpeechSynthesizer} from './SpeechSynthesizer';
+
+export type InjectAudioInputOptions = {
+  audioBase64: string;
+  mimeType: 'audio/wav' | 'audio/pcm';
+  sampleRate?: number;
+  chunkMs?: number;
+};
+
+export type InjectAudioInputResult = {
+  completed: true;
+  sampleRate: number;
+  durationMs: number;
+  chunksSent: number;
+};
+
+export type {AppAudioCaptureResult};
 
 export class CoreSound extends Script {
   static dependencies = {camera: THREE.Camera, soundOptions: SoundOptions};
@@ -26,6 +44,10 @@ export class CoreSound extends Script {
   audioListener!: AudioListener;
   audioPlayer!: AudioPlayer;
   options!: SoundOptions;
+  appAudioCapture = new AppAudioCapture();
+  private outputCaptureProcessor?: ScriptProcessorNode;
+  private outputCaptureMute?: GainNode;
+  private outputCaptureRateMismatchWarned = false;
 
   init({
     camera,
@@ -46,6 +68,9 @@ export class CoreSound extends Script {
     // Gemini Live uses 24kHz but that gets handled automatically via playAIAudio
     this.audioPlayer = new AudioPlayer({sampleRate: 48000});
     this.audioPlayer.setCategoryVolumes(this.categoryVolumes);
+    this.audioPlayer.setCaptureSink((audioBuffer, sampleRate) => {
+      this.appAudioCapture.appendPCM(audioBuffer, sampleRate);
+    });
 
     camera.add(this.listener);
     this.add(this.backgroundMusic);
@@ -63,6 +88,7 @@ export class CoreSound extends Script {
       this.speechSynthesizer = new SpeechSynthesizer(this.categoryVolumes);
       this.add(this.speechSynthesizer);
     }
+    this.startOutputCaptureTap();
   }
 
   getAudioListener() {
@@ -202,6 +228,30 @@ export class CoreSound extends Script {
     await this.audioPlayer.playAudioChunk(base64Audio);
   }
 
+  injectAudioInput(options: InjectAudioInputOptions): InjectAudioInputResult {
+    const {pcm, sampleRate} = this.resolveInjectedAudio(options);
+    const chunkSamples = Math.max(
+      1,
+      Math.floor(sampleRate * ((options.chunkMs ?? 40) / 1000))
+    );
+    let chunksSent = 0;
+    for (let offset = 0; offset < pcm.length; offset += chunkSamples) {
+      const chunk = pcm.slice(offset, offset + chunkSamples);
+      this.audioListener.handleAudioInputChunk(chunk.buffer, sampleRate);
+      chunksSent++;
+    }
+    return {
+      completed: true,
+      sampleRate,
+      durationMs: (pcm.length / sampleRate) * 1000,
+      chunksSent,
+    };
+  }
+
+  getAppAudio(options: {clear?: boolean} = {}): AppAudioCaptureResult {
+    return this.appAudioCapture.exportWav(options);
+  }
+
   isAudioEnabled() {
     return this.audioListener?.getIsCapturing();
   }
@@ -218,6 +268,79 @@ export class CoreSound extends Script {
     return this.categoryVolumes.getEffectiveVolume(category, specificVolume);
   }
 
+  private resolveInjectedAudio(options: InjectAudioInputOptions) {
+    const buffer = base64ToArrayBuffer(options.audioBase64);
+    if (options.mimeType === 'audio/pcm') {
+      if (!options.sampleRate) {
+        throw new Error('sampleRate is required for audio/pcm input.');
+      }
+      return {
+        pcm: new Int16Array(buffer),
+        sampleRate: options.sampleRate,
+      };
+    }
+    const wav = decodeWav(buffer);
+    if (wav.channelCount === 1) {
+      return {pcm: wav.pcm, sampleRate: wav.sampleRate};
+    }
+
+    const frames = wav.pcm.length / wav.channelCount;
+    const mono = new Int16Array(frames);
+    for (let frame = 0; frame < frames; frame++) {
+      let sum = 0;
+      for (let channel = 0; channel < wav.channelCount; channel++) {
+        sum += wav.pcm[frame * wav.channelCount + channel];
+      }
+      mono[frame] = sum / wav.channelCount;
+    }
+    return {pcm: mono, sampleRate: wav.sampleRate};
+  }
+
+  private startOutputCaptureTap() {
+    const context = this.listener.context;
+    if (!context || !('createScriptProcessor' in context)) {
+      return;
+    }
+    try {
+      this.outputCaptureProcessor = context.createScriptProcessor(4096, 1, 1);
+      this.outputCaptureMute = context.createGain();
+      this.outputCaptureMute.gain.value = 0;
+      this.outputCaptureProcessor.onaudioprocess = (event) => {
+        const samples = event.inputBuffer.getChannelData(0);
+        let peak = 0;
+        for (let i = 0; i < samples.length; i++) {
+          peak = Math.max(peak, Math.abs(samples[i]));
+        }
+        if (peak < 0.0001) return;
+
+        try {
+          this.appAudioCapture.appendInt16(
+            float32ToInt16(samples),
+            context.sampleRate
+          );
+        } catch (error) {
+          if (!this.outputCaptureRateMismatchWarned) {
+            this.outputCaptureRateMismatchWarned = true;
+            console.warn(
+              'CoreSound: app audio capture skipped a chunk with a mismatched sample rate.',
+              error
+            );
+          }
+        }
+      };
+      this.listener.getInput().connect(this.outputCaptureProcessor);
+      this.outputCaptureProcessor.connect(this.outputCaptureMute);
+      this.outputCaptureMute.connect(context.destination);
+    } catch (error) {
+      console.warn(
+        'CoreSound: app audio capture tap failed to initialize.',
+        error
+      );
+      this.outputCaptureProcessor = undefined;
+      this.outputCaptureMute = undefined;
+    }
+  }
+
   muteAll() {
     this.categoryVolumes.isMuted = true;
   }
@@ -227,6 +350,8 @@ export class CoreSound extends Script {
   }
 
   destroy() {
+    this.outputCaptureProcessor?.disconnect();
+    this.outputCaptureMute?.disconnect();
     this.backgroundMusic?.destroy();
     this.spatialAudio?.destroy();
     this.speechRecognizer?.destroy();

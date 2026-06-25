@@ -1,6 +1,7 @@
 import {AI} from '../ai/AI';
 import {Registry} from '../core/components/Registry';
 import {Script} from '../core/Script.js';
+import {arrayBufferToBase64} from './AudioDataUtils';
 
 export interface AudioListenerOptions {
   sampleRate?: number;
@@ -8,15 +9,6 @@ export interface AudioListenerOptions {
   echoCancellation?: boolean;
   noiseSuppression?: boolean;
   autoGainControl?: boolean;
-}
-
-function arrayBufferToBase64(buffer: ArrayBuffer) {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
 }
 
 export class AudioListener extends Script {
@@ -112,15 +104,7 @@ export class AudioListener extends Script {
 
     this.processorNode.port.onmessage = (event) => {
       if (event.data.type === 'audioData') {
-        this.latestAudioBuffer = event.data.data;
-
-        // Accumulate chunks if requested
-        if (this.isAccumulating) {
-          this.accumulatedChunks.push(event.data.data);
-        }
-
-        this.onAudioData?.(event.data.data);
-        this.streamToAI(event.data.data);
+        this.handleAudioInputChunk(event.data.data);
       }
     };
 
@@ -130,6 +114,17 @@ export class AudioListener extends Script {
     }
 
     this.sourceNode.connect(this.processorNode);
+  }
+
+  handleAudioInputChunk(audioBuffer: ArrayBuffer, sampleRate?: number) {
+    this.latestAudioBuffer = audioBuffer;
+
+    if (this.isAccumulating) {
+      this.accumulatedChunks.push(audioBuffer);
+    }
+
+    this.onAudioData?.(audioBuffer);
+    this.streamToAI(audioBuffer, sampleRate);
   }
 
   private async setupAudioWorklet() {
@@ -157,11 +152,11 @@ export class AudioListener extends Script {
     URL.revokeObjectURL(processorURL);
   }
 
-  streamToAI(audioBuffer: ArrayBuffer) {
+  streamToAI(audioBuffer: ArrayBuffer, sampleRate?: number) {
     if (!this.aiService?.sendRealtimeInput) return;
     const base64Audio = arrayBufferToBase64(audioBuffer);
     const actualSampleRate =
-      this.audioContext?.sampleRate || this.options.sampleRate;
+      sampleRate || this.audioContext?.sampleRate || this.options.sampleRate;
     this.aiService.sendRealtimeInput({
       audio: {
         data: base64Audio,

@@ -19,6 +19,7 @@ export class AudioPlayer extends Script {
   private categoryVolumes?: CategoryVolumes;
   private volume = 1.0;
   private category = 'speech';
+  private captureSink?: (audioBuffer: ArrayBuffer, sampleRate: number) => void;
   scheduleAheadTime = DEFAULT_SCHEDULE_AHEAD_TIME;
 
   constructor(options: AudioPlayerOptions = {}) {
@@ -44,6 +45,12 @@ export class AudioPlayer extends Script {
   setVolume(level: number) {
     this.volume = Math.max(0, Math.min(1, level));
     this.updateGainNodeVolume();
+  }
+
+  setCaptureSink(
+    captureSink?: (audioBuffer: ArrayBuffer, sampleRate: number) => void
+  ) {
+    this.captureSink = captureSink;
   }
 
   /**
@@ -86,6 +93,7 @@ export class AudioPlayer extends Script {
 
     await this.initializeAudioContext();
     const arrayBuffer = this.base64ToArrayBuffer(base64AudioData);
+    this.captureSink?.(arrayBuffer.slice(0), this.options.sampleRate!);
     const audioBuffer = this.audioContext!.createBuffer(
       this.options.channelCount!,
       arrayBuffer.byteLength / 2,

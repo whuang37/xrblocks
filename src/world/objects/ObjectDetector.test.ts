@@ -155,7 +155,8 @@ describe('ObjectDetector Multi-Client API', () => {
 
     const results = await promise1;
     expect(results.map((obj) => obj.label)).toEqual(['chair']);
-    expect(detector.detectedObjects.map((obj) => obj.label)).toEqual(['chair']);
+    expect(detector.detectedObjects).toEqual([]);
+    expect(detector.get().map((obj) => obj.label)).toEqual(['chair']);
     expect(mockBackend.run).toHaveBeenCalledTimes(1);
     expect(
       (detector as unknown as PrivateObjectDetector).currentDetectionPromise
@@ -176,7 +177,9 @@ describe('ObjectDetector Multi-Client API', () => {
   });
 
   it('clears public results, tracked objects, and scene children', async () => {
-    await detector.runDetection();
+    detector.start({});
+    await (detector as unknown as PrivateObjectDetector)
+      .currentDetectionPromise;
     expect(detector.detectedObjects).toHaveLength(1);
     expect(detector.get()).toHaveLength(1);
     expect(detector.children).toHaveLength(1);

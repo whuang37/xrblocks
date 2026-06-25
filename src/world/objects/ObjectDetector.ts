@@ -211,7 +211,7 @@ export class ObjectDetector extends Script {
   }
 
   private async runDetectionInternal<T = null>(): Promise<DetectedObject<T>[]> {
-    this.clear(); // Clear previous results before starting a new detection.
+    this.clearDetectedObjects(); // Clear previous scene results before starting a new detection.
 
     const depthMeshSnapshot = this.getDepthMeshSnapshot();
     const cameraParametersSnapshot = getCameraParametersSnapshot(
@@ -250,7 +250,6 @@ export class ObjectDetector extends Script {
       this._detectedObjects.set(obj.uuid, obj);
       this.add(obj);
     }
-    // this.detectedObjects = detectedObjects as DetectedObject<unknown>[];
     return detectedObjects;
   }
 
@@ -338,15 +337,19 @@ export class ObjectDetector extends Script {
    * tracking.
    */
   clear() {
+    this.clearDetectedObjects();
+    this.detectedObjects = [];
+    return this;
+  }
+
+  private clearDetectedObjects() {
     for (const obj of this._detectedObjects.values()) {
       this.remove(obj);
     }
     this._detectedObjects.clear();
-    this.detectedObjects = [];
     if (this._debugVisualsGroup) {
       this._debugVisualsGroup.clear();
     }
-    return this;
   }
 
   /**

@@ -1,3 +1,20 @@
+import type {Depth, DepthArray} from './Depth';
+
+/**
+ * Generates a visual representation of the current depth buffer on a
+ * {@link Depth} instance and triggers a download for debugging.
+ * @param depth - The depth subsystem instance.
+ * @param viewIndex - The depth view index to visualize.
+ */
+export function visualizeDepth(depth: Depth, viewIndex = 0) {
+  const depthArray = depth.depthArray[viewIndex];
+  if (!depthArray) {
+    console.warn('Cannot visualize depth map: no depth data available.');
+    return;
+  }
+  visualizeDepthMap(depthArray, depth.width, depth.height);
+}
+
 /**
  * Generates a visual representation of a depth map, normalized to 0-1 range,
  * and triggers a download for debugging.
@@ -6,7 +23,7 @@
  * @param height - The depth map height in pixels.
  */
 export function visualizeDepthMap(
-  depthArray: Float32Array | Uint16Array,
+  depthArray: DepthArray,
   width: number,
   height: number
 ) {

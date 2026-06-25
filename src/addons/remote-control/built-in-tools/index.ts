@@ -3,6 +3,7 @@ import {
   createRemoteControlActionTools,
   type RemoteControlActionToolDependencies,
 } from './ActionTools';
+import {createRemoteControlAudioTools} from './AudioTools';
 import {
   createRemoteControlObservationTools,
   type RemoteControlObservationToolDependencies,
@@ -10,6 +11,7 @@ import {
 import type {RemoteControlBuiltInTool} from './Types';
 
 export * from './ActionTools';
+export * from './AudioTools';
 export * from './ObservationTools';
 export * from './Types';
 
@@ -24,5 +26,6 @@ export function createRemoteControlBuiltInTools(
   return [
     ...createRemoteControlActionTools(dependencies),
     ...createRemoteControlObservationTools(dependencies),
+    ...createRemoteControlAudioTools(dependencies),
   ];
 }

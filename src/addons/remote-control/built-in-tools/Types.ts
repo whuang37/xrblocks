@@ -17,6 +17,8 @@ export const REMOTE_CONTROL_BUILT_IN_TOOL_NAMES = {
   getHands: 'getHands',
   getScreenshot: 'getScreenshot',
   getSimulatorState: 'getSimulatorState',
+  injectAudioInput: 'injectAudioInput',
+  getAppAudio: 'getAppAudio',
 } as const;
 
 export type RemoteControlBuiltInTool = {

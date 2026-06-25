@@ -12,6 +12,8 @@ import {
   REMOTE_CONTROL_BUILT_IN_TOOL_NAMES,
   type RemoteControlCameraToolArgs,
   type RemoteControlClickToolArgs,
+  type RemoteControlGetAppAudioToolArgs,
+  type RemoteControlInjectAudioInputToolArgs,
   type RemoteControlLookAtTargetToolArgs,
   type RemoteControlPointToToolArgs,
   type RemoteControlReachToToolArgs,
@@ -158,6 +160,14 @@ export class RemoteControlClient {
 
   getSimulatorState() {
     return this.callTool(BUILT_IN_TOOLS.getSimulatorState, {});
+  }
+
+  injectAudioInput(args: RemoteControlInjectAudioInputToolArgs) {
+    return this.callTool(BUILT_IN_TOOLS.injectAudioInput, args);
+  }
+
+  getAppAudio(args?: RemoteControlGetAppAudioToolArgs) {
+    return this.callTool(BUILT_IN_TOOLS.getAppAudio, args ?? {});
   }
 
   callTool(name: string, args?: unknown) {

@@ -14,9 +14,9 @@
  * limitations under the License.
  *
  * @file xrblocks.js
- * @version v0.17.0
- * @commitid a8c4072
- * @builddate 2026-07-16T17:59:57.197Z
+ * @version v0.18.0
+ * @commitid d7fab93
+ * @builddate 2026-07-20T17:37:22.782Z
  * @description XR Blocks SDK, built from source with the above commit ID.
  * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
  * and follow rules below:
@@ -4349,7 +4349,8 @@ declare enum SimulatorMode {
     USER = "User",
     POSE = "Navigation",
     CONTROLLER = "Hands",
-    POINTER_LOCK = "PointerLock"
+    POINTER_LOCK = "PointerLock",
+    EDITOR = "Editor"
 }
 interface SimulatorCustomInstruction {
     header: string | TemplateResult;
@@ -4386,6 +4387,7 @@ declare class SimulatorOptions {
             Navigation: SimulatorMode;
             Hands: SimulatorMode;
             PointerLock: SimulatorMode;
+            Editor: SimulatorMode;
         };
     };
     simulatorSettingsPanel: {
@@ -6159,6 +6161,7 @@ declare class SimulatorControlMode {
     onPointerDown(_: MouseEvent): void;
     onPointerUp(_: MouseEvent): void;
     onPointerMove(_: MouseEvent): void;
+    onWheel(_: WheelEvent): boolean;
     onKeyDown(event: KeyboardEvent): void;
     onModeActivated(): void;
     onModeDeactivated(): void;
@@ -6261,6 +6264,7 @@ declare class SimulatorControls {
     onPointerMove: (event: MouseEvent) => void;
     onPointerDown: (event: MouseEvent) => void;
     onPointerUp: (event: MouseEvent) => void;
+    onWheel: (event: WheelEvent) => void;
     onKeyDown: (event: KeyboardEvent) => void;
     onKeyUp: (event: KeyboardEvent) => void;
     onBlur: () => void;
@@ -9705,6 +9709,13 @@ declare class ModelViewer extends Script implements Draggable {
     protected timer: THREE.Timer;
     protected animationMixer?: THREE.AnimationMixer;
     protected gltfMesh?: GLTF;
+    /** The loaded GLTF content's root object, if a model has been loaded via
+     * loadGLTFModel() -- public so external code (e.g. a scene-editor addon
+     * applying its own rotation gizmo) can read/transform the loaded
+     * content directly, independent of the ModelViewer's own
+     * position/scale. Exposes just the scene root, not the full GLTF
+     * (animations/cameras/etc.), to keep the rest of gltfMesh encapsulated. */
+    get modelScene(): THREE.Object3D | undefined;
     protected splatMesh?: SplatMesh;
     protected splatAnchor?: SplatAnchor;
     protected hoveringControllers: Set<unknown>;

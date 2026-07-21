@@ -15,8 +15,8 @@
  *
  * @file xrblocks.js
  * @version v0.18.0
- * @commitid ba474f6
- * @builddate 2026-07-21T18:15:14.610Z
+ * @commitid 2515f4a
+ * @builddate 2026-07-21T23:36:51.796Z
  * @description XR Blocks SDK, built from source with the above commit ID.
  * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
  * and follow rules below:
@@ -1089,9 +1089,9 @@ declare class MeshScript<TGeometry extends THREE.BufferGeometry = THREE.BufferGe
     constructor(geometry?: TGeometry, material?: TMaterial);
 }
 
-declare const GEMINI_DEFAULT_FLASH_MODEL = "gemini-3.5-flash";
+declare const GEMINI_DEFAULT_FLASH_MODEL = "gemini-3.6-flash";
 declare const GEMINI_DEFAULT_LIVE_MODEL = "gemini-3.1-flash-live-preview";
-declare const GEMINI_DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image-preview";
+declare const GEMINI_DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image";
 declare class GeminiOptions {
     apiKey: string;
     urlParam: string;
@@ -10285,6 +10285,9 @@ type ModelLoaderLoadOptions = ModelLoaderLoadGLTFOptions & {
  */
 declare class ModelLoader {
     private manager;
+    private gltfLoader?;
+    private ktx2Loader?;
+    private ktxRenderer?;
     /**
      * Creates an instance of ModelLoader.
      * @param manager - The
@@ -10292,6 +10295,7 @@ declare class ModelLoader {
      * required for KTX2 texture support.
      */
     constructor(manager?: THREE.LoadingManager);
+    private getGLTFLoader;
     /**
      * Loads a model based on its file extension. Supports .gltf, .glb,
      * .ply, .spz, .splat, and .ksplat.

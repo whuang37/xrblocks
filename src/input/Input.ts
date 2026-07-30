@@ -481,8 +481,10 @@ export class Input {
       inputs.push({
         controller,
         handIndex,
+        hand: this.hands[handIndex]?.joints?.wrist,
         point: indexTip.getWorldPosition(new THREE.Vector3()),
         intersections: [],
+        selected: controller.userData.selected === true,
       });
     }
 

@@ -217,10 +217,6 @@ export class Interaction {
     this.directTouch.update(inputs);
   }
 
-  getDirectTouchSurface(controller: Controller): THREE.Object3D | undefined {
-    return this.directTouch.getSurface(controller);
-  }
-
   /** Cancels a disconnected or disabled source and removes all stored state. */
   removeSource(controller: Controller): void {
     const hadTouch = this.directTouch.remove(controller);

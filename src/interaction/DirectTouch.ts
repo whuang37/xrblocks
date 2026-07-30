@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-import type {ObjectTouchEvent} from '../core/Script.js';
+import type {ObjectGrabEvent, ObjectTouchEvent} from '../core/Script.js';
 import type {Controller} from '../input/Controller.js';
 import {objectIsDescendantOf} from '../utils/SceneGraphUtils.js';
 import {HitResolver} from './HitResolver.js';
@@ -18,10 +18,10 @@ import {dispatchInteractionPath, isSelectionValid} from './InteractionUtils.js';
 interface TouchCapture {
   readonly selection: SelectionCapture;
   readonly ancestry: readonly THREE.Object3D[];
-  readonly resolved: ResolvedRay;
   readonly handIndex: number;
   point: THREE.Vector3;
   synthesized: boolean;
+  grab?: ObjectGrabEvent;
 }
 
 interface DirectTouchDependencies {
@@ -62,10 +62,6 @@ export class DirectTouch {
 
   getSnapshot(controller: Controller): InteractionSourceSnapshot | undefined {
     return this.snapshots.get(controller);
-  }
-
-  getSurface(controller: Controller): THREE.Object3D | undefined {
-    return this.captures.get(controller)?.resolved.surface;
   }
 
   isSelectingAt(object: THREE.Object3D): boolean {
@@ -112,6 +108,7 @@ export class DirectTouch {
         touch.handIndex,
         input.point
       );
+      this.updateGrab(touch, input);
       if (touch.synthesized) {
         this.dependencies.manipulation.update([snapshot]);
         this.dependencies.callbacks.invokeGlobal('onSelecting', {
@@ -133,7 +130,6 @@ export class DirectTouch {
     const touch: TouchCapture = {
       selection,
       ancestry: Object.freeze([...resolved.objectPath]),
-      resolved,
       handIndex: input.handIndex,
       point: input.point.clone(),
       synthesized: false,
@@ -146,6 +142,7 @@ export class DirectTouch {
       input.handIndex,
       input.point
     );
+    this.updateGrab(touch, input);
     if (prevented) return;
 
     const snapshot = this.createSnapshot(input);
@@ -169,6 +166,7 @@ export class DirectTouch {
     const touch = this.captures.get(controller);
     if (!touch) return;
     this.captures.delete(controller);
+    this.finishGrab(touch);
     this.dispatchTouchPath(
       touch.selection.scriptPath,
       'onObjectTouchEnd',
@@ -196,6 +194,42 @@ export class DirectTouch {
     }
 
     this.snapshots.delete(controller);
+  }
+
+  private updateGrab(touch: TouchCapture, input: DirectTouchInput): void {
+    if (!input.selected || !input.hand) {
+      this.finishGrab(touch);
+      return;
+    }
+
+    if (!touch.grab) {
+      touch.grab = {handIndex: input.handIndex, hand: input.hand};
+      dispatchInteractionPath(
+        this.dependencies.callbacks,
+        touch.selection.scriptPath,
+        'onObjectGrabStart',
+        touch.grab
+      );
+      return;
+    }
+
+    dispatchInteractionPath(
+      this.dependencies.callbacks,
+      touch.selection.scriptPath,
+      'onObjectGrabbing',
+      touch.grab
+    );
+  }
+
+  private finishGrab(touch: TouchCapture): void {
+    if (!touch.grab) return;
+    dispatchInteractionPath(
+      this.dependencies.callbacks,
+      touch.selection.scriptPath,
+      'onObjectGrabEnd',
+      touch.grab
+    );
+    touch.grab = undefined;
   }
 
   private createSnapshot(input: DirectTouchInput): InteractionSourceSnapshot {

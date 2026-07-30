@@ -41,6 +41,40 @@ describe('Input head gestures', () => {
   });
 });
 
+describe('Input direct touch', () => {
+  it('reports contact, selection, and the wrist through one frame input', () => {
+    const input = new Input();
+    const controller = new THREE.Object3D() as Controller;
+    controller.userData.selected = true;
+    const indexTip = new THREE.Object3D();
+    const wrist = new THREE.Object3D();
+    input.controllers = [controller];
+    input.hands = [
+      {
+        joints: {'index-finger-tip': indexTip, wrist},
+      } as unknown as THREE.XRHandSpace,
+    ];
+    input.controllersEnabled = false;
+
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
+    input.scene = new THREE.Scene();
+    input.scene.add(mesh);
+    input.scene.updateMatrixWorld(true);
+
+    input.update();
+
+    expect(input.directTouchInputs).toHaveLength(1);
+    expect(input.directTouchInputs[0]).toMatchObject({
+      controller,
+      handIndex: 0,
+      hand: wrist,
+      selected: true,
+    });
+    expect(input.directTouchInputs[0].intersections[0].object).toBe(mesh);
+  });
+});
+
+describe('Input events', () => {
   it('dispatches selectend and resets selected state upon disconnection', () => {
     const input = new Input();
     const mockController = new THREE.Object3D() as unknown as Controller;

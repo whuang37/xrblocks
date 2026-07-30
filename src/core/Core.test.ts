@@ -82,9 +82,11 @@ describe('Core and ScriptsManager exception handling via EventDispatcher', () =>
     it('routes interaction hooks through ScriptsManager', () => {
       const script = new Script();
       const controller = new THREE.Object3D() as Controller;
+      const hand = new THREE.Object3D();
       const selectStart = vi
         .spyOn(script, 'onObjectSelectStart')
         .mockReturnValue(true);
+      const grabStart = vi.spyOn(script, 'onObjectGrabStart');
 
       expect(
         core.scriptsManager.invokeTarget(script, 'onObjectSelectStart', {
@@ -92,6 +94,11 @@ describe('Core and ScriptsManager exception handling via EventDispatcher', () =>
         })
       ).toBe(true);
       expect(selectStart).toHaveBeenCalledWith({target: controller});
+      core.scriptsManager.invokeTarget(script, 'onObjectGrabStart', {
+        handIndex: 0,
+        hand,
+      });
+      expect(grabStart).toHaveBeenCalledWith({handIndex: 0, hand});
     });
 
     it('routes global and manipulation hooks through ScriptsManager', () => {

@@ -30,8 +30,10 @@ export interface RaySourceInput {
 export interface DirectTouchInput {
   controller: Controller;
   handIndex: number;
+  hand?: THREE.Object3D;
   point: THREE.Vector3;
   intersections: readonly THREE.Intersection[];
+  selected: boolean;
   orientation?: THREE.Quaternion;
 }
 
@@ -77,6 +79,9 @@ export type TargetedInteractionHook =
   | 'onObjectTouchStart'
   | 'onObjectTouching'
   | 'onObjectTouchEnd'
+  | 'onObjectGrabStart'
+  | 'onObjectGrabbing'
+  | 'onObjectGrabEnd'
   | 'onHoverEnter'
   | 'onHovering'
   | 'onHoverExit';

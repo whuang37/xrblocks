@@ -5,9 +5,7 @@ import {Hands} from '../input/Hands';
 import {Input} from '../input/Input';
 import {Interaction} from '../interaction/Interaction';
 
-import {ObjectGrabEvent, Script} from './Script';
-
-type MaybeXRScript = THREE.Object3D & {isXRScript?: boolean};
+import {Script} from './Script';
 
 /**
  * User is an embodied instance to manage hands, controllers, speech, and
@@ -75,27 +73,9 @@ export class User extends Script {
    */
   hands?: Hands;
 
-  /**
-   * Maps a hand index (0 or 1) to a set of meshes it is currently touching.
-   */
-  touchedObjects = new Map<number, Set<THREE.Mesh>>();
-
-  /**
-   * Maps a hand index to another map that associates a grabbed mesh with its
-   * initial grab event data.
-   */
-  grabbedObjects = new Map<number, Map<THREE.Mesh, ObjectGrabEvent>>();
-
   input!: Input;
   private interaction!: Interaction;
   controllers!: Controller[];
-
-  /**
-   * Constructs a new User.
-   */
-  constructor() {
-    super();
-  }
 
   /**
    * Initializes the User.
@@ -242,114 +222,6 @@ export class User extends Script {
       });
     }
     return this.input.controllers[id].userData.squeezing;
-  }
-
-  /**
-   * The main update loop called each frame.
-   */
-  update() {
-    this.updateGrabState();
-  }
-
-  /**
-   * Checks for and handles grab events (touching + pinching).
-   */
-  updateGrabState() {
-    if (!this.hands) {
-      return;
-    }
-
-    for (let i = 0; i < this.numHands; i++) {
-      const isPinching = this.isSelecting(i);
-      const controller = this.controllers[i];
-      const surface = controller
-        ? this.interaction.getDirectTouchSurface(controller)
-        : undefined;
-      const touchedMeshes = (surface as Partial<THREE.Mesh> | undefined)?.isMesh
-        ? new Set([surface as THREE.Mesh])
-        : new Set<THREE.Mesh>();
-      if (touchedMeshes.size > 0) this.touchedObjects.set(i, touchedMeshes);
-      else this.touchedObjects.delete(i);
-
-      const currentlyGrabbedMeshes = isPinching
-        ? touchedMeshes
-        : new Set<THREE.Mesh>();
-      const previouslyGrabbedMeshesMap =
-        this.grabbedObjects.get(i) || new Map();
-
-      const newlyGrabbedMeshes = [...currentlyGrabbedMeshes].filter(
-        (mesh) => !previouslyGrabbedMeshesMap.has(mesh)
-      );
-
-      const releasedMeshes = [...previouslyGrabbedMeshesMap.keys()].filter(
-        (mesh) => !currentlyGrabbedMeshes.has(mesh)
-      );
-
-      for (const mesh of newlyGrabbedMeshes) {
-        const hand = this.hands.getWrist(i);
-        if (!hand) continue;
-
-        const grabEvent = {handIndex: i, hand: hand};
-
-        if (!this.grabbedObjects.has(i)) {
-          this.grabbedObjects.set(i, new Map());
-        }
-        this.grabbedObjects.get(i)!.set(mesh, grabEvent);
-        this.callObjectGrabStart(grabEvent, mesh);
-      }
-
-      for (const mesh of releasedMeshes) {
-        const grabEvent = previouslyGrabbedMeshesMap.get(mesh);
-        this.callObjectGrabEnd(grabEvent, mesh);
-        previouslyGrabbedMeshesMap.delete(mesh);
-      }
-
-      for (const mesh of currentlyGrabbedMeshes) {
-        if (previouslyGrabbedMeshesMap.has(mesh)) {
-          const grabEvent = previouslyGrabbedMeshesMap.get(mesh);
-          this.callObjectGrabbing(grabEvent, mesh);
-        }
-      }
-    }
-  }
-
-  /**
-   * Recursively calls onObjectGrabStart on a target and its ancestors.
-   * @param event - The original grab start event.
-   * @param target - The object being grabbed.
-   */
-  callObjectGrabStart(event: ObjectGrabEvent, target: THREE.Object3D | null) {
-    if (target == null) return;
-    if ((target as MaybeXRScript).isXRScript) {
-      (target as Script).onObjectGrabStart(event);
-    }
-    this.callObjectGrabStart(event, target.parent);
-  }
-
-  /**
-   * Recursively calls onObjectGrabbing on a target and its ancestors.
-   * @param event - The original grabbing event.
-   * @param target - The object being grabbed.
-   */
-  callObjectGrabbing(event: ObjectGrabEvent, target: THREE.Object3D | null) {
-    if (target == null) return;
-    if ((target as MaybeXRScript).isXRScript) {
-      (target as Script).onObjectGrabbing(event);
-    }
-    this.callObjectGrabbing(event, target.parent);
-  }
-
-  /**
-   * Recursively calls onObjectGrabEnd on a target and its ancestors.
-   * @param event - The original grab end event.
-   * @param target - The object being released.
-   */
-  callObjectGrabEnd(event: ObjectGrabEvent, target: THREE.Object3D | null) {
-    if (target == null) return;
-    if ((target as MaybeXRScript).isXRScript) {
-      (target as Script).onObjectGrabEnd(event);
-    }
-    this.callObjectGrabEnd(event, target.parent);
   }
 
   /**

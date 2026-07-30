@@ -161,7 +161,6 @@ describe('Core and ScriptsManager exception handling via EventDispatcher', () =>
     it('should catch script exceptions, emit exception event, and continue updating other scripts when enabled', () => {
       const script1 = {
         name: 'Script1',
-        ux: {reset: vi.fn()},
         update: vi.fn().mockImplementation(() => {
           throw new Error('Script1 crashed');
         }),
@@ -169,7 +168,6 @@ describe('Core and ScriptsManager exception handling via EventDispatcher', () =>
 
       const script2 = {
         name: 'Script2',
-        ux: {reset: vi.fn()},
         update: vi.fn(),
       } as unknown as Script;
 
@@ -188,10 +186,6 @@ describe('Core and ScriptsManager exception handling via EventDispatcher', () =>
           core as unknown as {update: (time: number, frame: XRFrame) => void}
         ).update(1000, {} as XRFrame);
       }).not.toThrow();
-
-      // Both scripts had their UX reset
-      expect(script1.ux.reset).toHaveBeenCalled();
-      expect(script2.ux.reset).toHaveBeenCalled();
 
       // Both updates were attempted
       expect(script1.update).toHaveBeenCalled();
@@ -258,14 +252,9 @@ describe('Core and ScriptsManager exception handling via EventDispatcher', () =>
       expect(events.length).toBe(0);
     });
 
-    it('should catch and emit individual events for exceptions in UX reset, onSelecting, and onSqueezing', () => {
+    it('should catch and emit individual events for selecting and squeezing exceptions', () => {
       const script1 = {
         name: 'Script1',
-        ux: {
-          reset: vi.fn().mockImplementation(() => {
-            throw new Error('UX reset crashed');
-          }),
-        },
         onSelecting: vi.fn().mockImplementation(() => {
           throw new Error('onSelecting crashed');
         }),
@@ -277,7 +266,6 @@ describe('Core and ScriptsManager exception handling via EventDispatcher', () =>
 
       const script2 = {
         name: 'Script2',
-        ux: {reset: vi.fn()},
         onSelecting: vi.fn(),
         onSqueezing: vi.fn(),
         update: vi.fn(),
@@ -305,20 +293,16 @@ describe('Core and ScriptsManager exception handling via EventDispatcher', () =>
       }).not.toThrow();
 
       // script2 calls should still execute successfully
-      expect(script2.ux.reset).toHaveBeenCalled();
       expect(script2.onSelecting).toHaveBeenCalled();
       expect(script2.onSqueezing).toHaveBeenCalled();
       expect(script2.update).toHaveBeenCalled();
 
-      // console.error is called three times
-      expect(consoleErrorSpy).toHaveBeenCalledTimes(3);
+      expect(consoleErrorSpy).toHaveBeenCalledTimes(2);
 
-      // Three events are dispatched
-      expect(events.length).toBe(3);
+      expect(events.length).toBe(2);
       expect(events.map((e) => e.context)).toEqual([
         'onSelecting',
         'onSqueezing',
-        'ux.reset',
       ]);
     });
   });

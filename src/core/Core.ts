@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {reversePainterSortStable} from '@pmndrs/uikit';
 
 import {AI} from '../ai/AI';
 import {AIOptions} from '../ai/AIOptions';
@@ -28,7 +29,6 @@ import {Simulator} from '../simulator/Simulator';
 import {SimulatorOptions} from '../simulator/SimulatorOptions';
 import {CoreSound} from '../sound/CoreSound';
 import {SoundOptions} from '../sound/SoundOptions';
-import {UI} from '../ui/UI';
 import {callInitWithDependencyInjection} from '../utils/DependencyInjection';
 import {loadingSpinnerManager} from '../utils/LoadingSpinnerManager';
 import {traverseUtil} from '../utils/SceneGraphUtils';
@@ -49,7 +49,6 @@ import {XRButton} from './components/XRButton';
 import {XREffects} from './components/XREffects';
 import {XRTransition} from './components/XRTransition';
 import {Options} from './Options';
-import {UIKitOptions} from './UIKitOptions';
 import {Script} from './Script';
 import {User} from './User';
 import {PermissionsManager} from './components/PermissionsManager';
@@ -93,9 +92,6 @@ export class Core {
 
   /** Represents the user in the XR scene. */
   user = new User();
-
-  /** Manages all UI elements. */
-  ui = new UI();
 
   /** Manages all (spatial) audio playback. */
   sound = new CoreSound();
@@ -235,13 +231,7 @@ export class Core {
     this.scene.name = 'XR Blocks Scene';
 
     this.scene.add(this.xrSystemsGroup);
-    this.xrSystemsGroup.add(
-      this.user,
-      this.ui,
-      this.sound,
-      this.world,
-      this.context
-    );
+    this.xrSystemsGroup.add(this.user, this.sound, this.world, this.context);
 
     this.registry.register(this.registry);
     this.registry.register(this);
@@ -253,7 +243,6 @@ export class Core {
     this.registry.register(this.input);
     this.registry.register(this.user);
     this.registry.register(this.interaction);
-    this.registry.register(this.ui);
     this.registry.register(this.sound);
     this.registry.register(this.simulator);
     this.registry.register(this.simulator.navMesh);
@@ -300,7 +289,6 @@ export class Core {
     this.registry.register(options.context, ContextOptions);
     this.registry.register(options.context.scene, SceneOptions);
     this.registry.register(options.world.meshes, MeshDetectionOptions);
-    this.registry.register(options.uikit, UIKitOptions);
     this.registry.register(options.ai, AIOptions);
     this.registry.register(options.sound, SoundOptions);
     this.registry.register(options.gestures, GestureRecognitionOptions);
@@ -339,14 +327,8 @@ export class Core {
     };
     this.registry.register(this.renderer);
 
-    if (options.uikit.enabled) {
-      this.renderer.localClippingEnabled = true;
-      if (options.uikit.reversePainterSortStable) {
-        this.renderer.setTransparentSort(
-          options.uikit.reversePainterSortStable
-        );
-      }
-    }
+    this.renderer.localClippingEnabled = true;
+    this.renderer.setTransparentSort(reversePainterSortStable);
 
     this.renderer.xr.setReferenceSpaceType(options.referenceSpaceType);
     // For desktop simulator:
@@ -626,8 +608,7 @@ export class Core {
     // Force matrix updates since there is no active renderer render loop in headless/test environments.
     this.scene.updateMatrixWorld(true);
 
-    // Updates reticles and UIs.
-    this.scriptsManager.resetUX();
+    // Update input and resolved interaction state.
     this.input.update();
     this.updateInteractionSources();
     this.interaction.updateDirectTouches(this.input.directTouchInputs);

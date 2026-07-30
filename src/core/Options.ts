@@ -16,7 +16,6 @@ import {SimulatorMode, SimulatorOptions} from '../simulator/SimulatorOptions';
 import {SoundOptions} from '../sound/SoundOptions';
 import {deepMerge} from '../utils/OptionsUtils';
 import {DeepPartial, DeepReadonly} from '../utils/Types';
-import {UIKitOptions} from './UIKitOptions.js';
 import {WorldOptions} from '../world/WorldOptions';
 import {getUrlParamBool, getUrlParameter} from '../utils/utils';
 import {Handedness} from '../input/Hands';
@@ -132,7 +131,6 @@ export class Options {
   simulator = new SimulatorOptions();
   world = new WorldOptions();
   context = new ContextOptions();
-  uikit = new UIKitOptions();
   physics = new PhysicsOptions();
   transition = new XRTransitionOptions();
   camera = {
@@ -233,16 +231,6 @@ export class Options {
    */
   enableVR() {
     this.xrSessionMode = 'immersive-vr';
-    return this;
-  }
-
-  /**
-   * Enables a standard set of options for a UI-focused experience.
-   * @returns The instance for chaining.
-   */
-  enableUI() {
-    this.antialias = true;
-    this.reticles.enabled = true;
     return this;
   }
 

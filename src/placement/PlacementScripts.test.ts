@@ -8,7 +8,7 @@ import {
   suspendTransformScripts,
 } from './TransformScript';
 
-describe('spatial scripts', () => {
+describe('placement scripts', () => {
   it('rebases a followed object after manipulation', () => {
     const target = new THREE.Object3D();
     const object = new THREE.Object3D();

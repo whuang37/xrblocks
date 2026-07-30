@@ -1,0 +1,206 @@
+---
+sidebar_position: 2
+---
+
+import {CodeSearchLink} from './components/CodeSearchLink.jsx';
+
+# SDK capabilities
+
+XR Blocks is a JavaScript and TypeScript SDK for prototyping AI-powered AR,
+VR, and desktop 3D applications with three.js. The same script can run in a
+WebXR session or in the desktop simulator. The main public API is the set of
+exports in <CodeSearchLink path="src/xrblocks.ts" />. Optional features are
+published below `xrblocks/addons/`. This page groups those APIs by what they
+let an application do.
+
+## Start with one script
+
+Install the package and its three.js peer dependency:
+
+```bash
+npm install xrblocks three
+```
+
+An XR Blocks application is one or more `xb.Script` objects. Add the scripts
+before calling `xb.init()`; the engine owns the renderer and frame loop.
+
+```js
+import * as THREE from 'three';
+import * as xb from 'xrblocks';
+
+class App extends xb.Script {
+  init() {
+    this.add(new THREE.HemisphereLight(0xffffff, 0x666666, 3));
+
+    this.cube = new THREE.Mesh(
+      new THREE.BoxGeometry(0.3, 0.3, 0.3),
+      new THREE.MeshStandardMaterial({color: 0x4285f4})
+    );
+    this.cube.position.set(0, xb.user.height - 0.3, -xb.user.objectDistance);
+    this.add(this.cube);
+  }
+
+  update() {
+    this.cube.rotation.y += xb.getDeltaTime();
+  }
+
+  onSelectEnd() {
+    // Runs after a desktop click or an XR pinch/trigger.
+    this.cube.material.color.set(Math.random() * 0xffffff);
+  }
+}
+
+xb.add(new App());
+await xb.init(new xb.Options());
+```
+
+See the complete <CodeSearchLink path="templates/0_basic/main.js" /> example
+and the lifecycle definition in <CodeSearchLink path="src/core/Script.ts" />.
+Scripts can implement initialization, per-frame updates, physics updates,
+keyboard and controller input, XR session events, and object-specific select,
+hover, touch, and grab events.
+
+## Configure features
+
+`xb.Options` holds all subsystem settings. Its helper methods can be chained.
+
+```js
+const options = new xb.Options()
+  .enableUI()
+  .enableHands()
+  .enableGestures()
+  .enableDepth()
+  .enablePlaneDetection();
+
+options.setAppTitle('My XR app');
+await xb.init(options);
+```
+
+The current helpers are:
+
+| Area              | Helpers                                                                                                                                                           |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Runtime           | `enableVR()`, `enableAutomationMode()`, `enableXRTransitions()`                                                                                                   |
+| Interaction       | `enableUI()`, `enableReticles()`, `enableControllers()`, `enableHands()`, `enableHandRays()`, `enableGestures()`, `enableHeadGestures()`, `enableStrokes()`       |
+| Sensors and world | `enableDepth()`, `enableCamera()`, `enablePlaneDetection()`, `enableObjectDetection()`, `enableHumanDetection()`, `enableFaceDetection()`, `enableSegmentation()` |
+| AI context        | `enableAI()`, `enableContext()`, `enableSceneContext()`, `enableVisibleObjectsContext()`, `enableSetOfMarkContext()`                                              |
+
+The source of truth for defaults and side effects is
+
+<CodeSearchLink path="src/core/Options.ts" />. Physics does not have an
+`enablePhysics()` helper. Assign the Rapier module to `options.physics.RAPIER`
+as shown in <CodeSearchLink path="docs/docs/manual/Physics.md" />.
+
+## Core capabilities
+
+| Capability            | What it provides                                                                                                                                                                                                               | Start here                                                                                                                                                                                                             |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Engine and lifecycle  | A singleton renderer, scene, camera, WebXR session, script manager, dependency registry, time helpers, and XR entry button. Common aliases include `xb.core`, `xb.scene`, `xb.camera`, `xb.user`, `xb.add()`, and `xb.init()`. | <CodeSearchLink path="src/singletons.ts" /> and <CodeSearchLink path="docs/docs/manual/Core.mdx" />                                                                                                                    |
+| Cross-platform input  | Desktop mouse and keyboard, tracked controllers, gamepads, gaze, controller rays, reticles, and unified select/squeeze events.                                                                                                 | <CodeSearchLink path="src/input/Input.ts" /> and <CodeSearchLink path="docs/docs/manual/Inputs.md" />                                                                                                                  |
+| Hand interaction      | WebXR or MediaPipe hand joints, pinch/select, direct touch, grabbing, handedness, and hand rays.                                                                                                                               | <CodeSearchLink path="templates/2_hands/main.js" /> and <CodeSearchLink path="docs/docs/manual/Hands.mdx" />                                                                                                           |
+| Gesture recognition   | Built-in and custom hand gestures, head nod/shake recognition, and $1-style drawn-stroke recognition. Pose estimators include WebXR, MediaPipe, and TensorFlow implementations.                                                | <CodeSearchLink path="samples/gestures_heuristic/main.js" />, <CodeSearchLink path="samples/head_gestures/main.js" />, and <CodeSearchLink path="demos/unistroke_recognizer/main.js" />                                |
+| Core spatial UI       | Panels, grids, rows, columns, text, images, video, icons, buttons, sliders, pagers, orbiters, scrolling text, model viewers, and sketch panels. UI controls use the same click, pinch, and touch interaction model.            | <CodeSearchLink path="templates/1_ui/main.js" /> and <CodeSearchLink path="docs/docs/manual/UI.mdx" />                                                                                                                 |
+| 3D assets             | GLTF/GLB loading, Gaussian splats, model viewing, object placement, scene-graph helpers, rotation helpers, and accelerated BVH raycasts.                                                                                       | <CodeSearchLink path="samples/modelviewer/main.js" /> and <CodeSearchLink path="src/utils/ModelLoader.ts" />                                                                                                           |
+| Camera and video      | Front or environment camera input, camera parameter conversion, live media streams, video-file streams, and stereo image/layer utilities.                                                                                      | <CodeSearchLink path="templates/5_camera/main.js" /> and <CodeSearchLink path="templates/4_stereo/main.js" />                                                                                                          |
+| Depth and occlusion   | WebXR depth textures, a reconstructed depth mesh, debug views, depth-based hit testing, transparent-material occlusion, and depth colliders for physics.                                                                       | <CodeSearchLink path="templates/3_depth/main.js" /> and <CodeSearchLink path="docs/docs/manual/Depth.md" />                                                                                                            |
+| Lighting              | WebXR light estimation and environment lighting for virtual objects.                                                                                                                                                           | <CodeSearchLink path="samples/lighting/main.js" /> and <CodeSearchLink path="src/lighting/Lighting.ts" />                                                                                                              |
+| World understanding   | Detected planes and meshes; camera-based object, human-pose, face-landmark, and person-segmentation results. Object detection supports simulator, MediaPipe, and AI-backed workflows.                                          | <CodeSearchLink path="src/world/World.ts" />, <CodeSearchLink path="templates/planes/main.js" />, <CodeSearchLink path="demos/human_pose_detector/main.js" />, and <CodeSearchLink path="demos/face_mirror/main.js" /> |
+| Agent context         | A semantic scene tree, visible-object state, screenshots, and Set-of-Mark labels for tools or AI agents.                                                                                                                       | <CodeSearchLink path="src/context/Context.ts" /> and <CodeSearchLink path="demos/context/main.js" />                                                                                                                   |
+| Generative AI         | Gemini and OpenAI clients, text and multimodal queries, Gemini Live voice/video sessions, and image generation.                                                                                                                | <CodeSearchLink path="templates/6_ai/main.js" />, <CodeSearchLink path="templates/7_ai_live/main.js" />, and <CodeSearchLink path="docs/docs/manual/AI.mdx" />                                                         |
+| Agent framework       | Base agents, tools, skybox generation, weather lookup, and agent-facing context integration. This area is still developing.                                                                                                    | <CodeSearchLink path="src/agent/Agent.ts" /> and <CodeSearchLink path="src/agent/README.md" />                                                                                                                         |
+| Sound and speech      | Audio playback, positional audio, background music, category volumes, microphone capture, speech recognition, speech synthesis, and sound synthesis.                                                                           | <CodeSearchLink path="samples/sound/main.js" /> and <CodeSearchLink path="docs/docs/manual/Sound.mdx" />                                                                                                               |
+| Physics               | Rapier rigid bodies, colliders, simulation steps, and depth-mesh collision.                                                                                                                                                    | <CodeSearchLink path="src/physics/Physics.ts" /> and <CodeSearchLink path="docs/docs/manual/Physics.md" />                                                                                                             |
+| Drag and manipulation | Translation, rotation, and scaling of scene objects through `DragManager` and per-script `UX` state.                                                                                                                           | <CodeSearchLink path="src/ux/DragManager.ts" /> and <CodeSearchLink path="docs/docs/manual/DragManager.md" />                                                                                                          |
+| Desktop simulator     | Virtual head, hands, controllers, camera, depth, planes, meshes, objects, environments, navigation meshes, hand poses, physics modes, and repeatable user actions.                                                             | <CodeSearchLink path="src/simulator/Simulator.ts" /> and <CodeSearchLink path="docs/docs/manual/Simulator.mdx" />                                                                                                      |
+| Face animation        | A stylized face and viseme-weight types for speech-driven facial animation.                                                                                                                                                    | <CodeSearchLink path="src/StylizedFace.ts" /> and <CodeSearchLink path="src/VisemeWeights.ts" />                                                                                                                       |
+
+### Small feature examples
+
+Enable and read plane detection:
+
+```js
+const options = new xb.Options().enablePlaneDetection();
+options.world.planes.showDebugVisualizations = true;
+await xb.init(options);
+
+const detectedPlanes = xb.world.planes?.get() ?? [];
+console.log(detectedPlanes);
+```
+
+The complete pattern is in <CodeSearchLink path="templates/planes/main.js" />.
+
+Run an AI query after enabling AI:
+
+```js
+const options = new xb.Options().enableAI();
+await xb.init(options);
+
+if (xb.ai.isAvailable()) {
+  const response = await xb.ai.query({prompt: 'Describe this XR scene.'});
+  console.log(typeof response === 'string' ? response : response?.text);
+}
+```
+
+AI features need a provider key. The `?key=` and local `keys.json` paths are
+only for prototypes. Production applications must keep keys on a server. See
+
+<CodeSearchLink path="src/ai/AI.ts" /> for the current API.
+
+## Optional addons
+
+Addons are separate bundles. Import the barrel when one exists, for example:
+
+```js
+import {AgentHands} from 'xrblocks/addons/agenthands/index.js';
+import {EmbodiedControl} from 'xrblocks/addons/embodied-control/index.js';
+import {enableNet} from 'xrblocks/addons/netblocks/src/index.js';
+```
+
+| Addon              | Capability                                                                                                                                                                                              | Example or source                                                                                                                                                                                  |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `uiblocks`         | Rich flexbox-based spatial cards, panels, text, images, icons, gradients, strokes, shadows, and billboard/manipulation/anchor behaviors. It uses `@pmndrs/uikit` and is separate from the core grid UI. | <CodeSearchLink path="src/addons/uiblocks/README.md" /> and <CodeSearchLink path="docs/docs/manual/UIBlocks.mdx" />                                                                                |
+| `netblocks`        | Multiplayer rooms, peers, presence, shared objects, ownership, RPC events, BroadcastChannel/WebRTC/WebSocket transports, and spatial voice chat.                                                        | <CodeSearchLink path="src/addons/netblocks/README.md" /> and <CodeSearchLink path="docs/docs/manual/Netblocks.mdx" />                                                                              |
+| `lipsync`          | Audio feature extraction and viseme/blendshape weights that drive an avatar mouth from a `MediaStream`.                                                                                                 | <CodeSearchLink path="src/addons/lipsync/README.md" /> and <CodeSearchLink path="docs/docs/manual/Lipsync.mdx" />                                                                                  |
+| `agenthands`       | A speaking agent embodiment with animated hands, an orb head, timed gesture markup, pointing, and object grounding.                                                                                     | <CodeSearchLink path="src/addons/agenthands/README.md" /> and <CodeSearchLink path="demos/agent_hands/main.js" />                                                                                  |
+| `embodied-control` | Programmatic locomotion, head rotation, hand movement/poses, and select actions for demos and deterministic tests.                                                                                      | <CodeSearchLink path="src/addons/embodied-control/README.md" /> and <CodeSearchLink path="samples/embodied_control/main.js" />                                                                     |
+| `remote-control`   | A local WebSocket endpoint, relay, clients, observation tools, and action tools for controlling a running XR Blocks page from another process.                                                          | <CodeSearchLink path="src/addons/remote-control/README.md" /> and <CodeSearchLink path="samples/remote_control/main.js" />                                                                         |
+| `testing`          | A sequential in-page `TestRunner` for functional, integration, and simulator tests.                                                                                                                     | <CodeSearchLink path="src/addons/testing/index.ts" /> and <CodeSearchLink path="src/addons/testing/example.test.ts" />                                                                             |
+| `virtualkeyboard`  | A spatial QWERTY keyboard with shift, backspace, enter, text state, and callbacks.                                                                                                                      | <CodeSearchLink path="src/addons/virtualkeyboard/README.md" />                                                                                                                                     |
+| `glasses`          | Glasses-style cards, a system bar, clock/weather views, and supporting model/UI management.                                                                                                             | <CodeSearchLink path="src/addons/glasses/README.md" /> and <CodeSearchLink path="samples/glasses_ui/main.ts" />                                                                                    |
+| `editor`           | Scene hierarchy, model picker, selection, transforms, undo/redo command history, scene manifests, and editor panels.                                                                                    | <CodeSearchLink path="src/addons/editor/SceneEditor.ts" />                                                                                                                                         |
+| Utility addons     | Volumetric clouds, planar video-see-through rendering, decal geometry, model/text helpers, long-select handling, performance stats, palettes, and simulator UI overlays.                                | <CodeSearchLink path="src/addons/volumes/VolumetricCloud.ts" />, <CodeSearchLink path="src/addons/camera/PlanarVST.ts" />, and <CodeSearchLink path="src/addons/objects/SimpleDecalGeometry.ts" /> |
+
+Addon leaf files are also built as importable modules. Prefer documented index
+barrels and working samples because leaf paths are lower-level and can change.
+The addon build rules are in <CodeSearchLink path="rollup.config.js" />.
+
+## Choose the next example
+
+Use a template when you want the smallest complete application:
+
+- <CodeSearchLink path="templates/0_basic" />: lifecycle and select input
+- <CodeSearchLink path="templates/1_ui" />: spatial UI
+- <CodeSearchLink path="templates/2_hands" />: hand joints and interaction
+- <CodeSearchLink path="templates/3_depth" />: depth placement
+- <CodeSearchLink path="templates/4_stereo" />: stereo rendering
+- <CodeSearchLink path="templates/5_camera" />: device camera
+- <CodeSearchLink path="templates/6_ai" /> and
+  <CodeSearchLink path="templates/7_ai_live" />: AI queries and Gemini Live
+- <CodeSearchLink path="templates/8_objects" />: object detection
+- <CodeSearchLink path="templates/9_xr_toggle" />: AR/VR switching
+
+Use the larger `samples/` and `demos/` folders when you need a complete pattern
+for gestures, depth, sound, simulation, world sensing, multiplayer, agents, or
+AI-driven applications.
+
+## Platform and security notes
+
+- XR Blocks targets Chrome 136+ with WebXR on Android XR and provides a desktop
+  simulator for development. Keep the `three` version aligned with the peer
+  dependency in <CodeSearchLink path="package.json" />.
+- Camera, microphone, geolocation, hand, and WebXR features can request user
+  permission. Handle denied permission in the application.
+- Device sensing and MediaPipe features run locally. Gemini and OpenAI features
+  send configured data to their providers.
+- Never commit provider keys or ship a production key in browser code. Use a
+  server-side proxy for production AI requests.

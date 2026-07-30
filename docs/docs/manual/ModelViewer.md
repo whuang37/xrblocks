@@ -4,7 +4,7 @@ title: Model Viewer
 ---
 
 The [`ModelViewer`](/api/classes/ModelViewer) class provides a convenient way to display 3D models in the scene and provide standard interactions for moving, rotating, and scaling the 3D model similar to [ARCore Scene Viewer](https://developers.google.com/ar/develop/scene-viewer).
-See [`DragManager`](DragManager.md) for details about these interactions.
+See [Object Manipulation](Manipulation.md) for details about these interactions.
 
 ## Usage
 

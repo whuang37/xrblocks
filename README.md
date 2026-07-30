@@ -35,6 +35,9 @@ immersive applications with features like:
 
 - **Hand Tracking & Gestures:** Access advanced hand tracking, custom gestures
   with TensorFlow Lite / PyTorch models, and interaction events.
+- **Unified Interaction:** Add translation, rotation, and scaling through one
+  `Object3D.xb.manipulation` configuration. Selection capture and transform
+  sessions work across mouse, ray, and simulator input.
 - **Hand Gesture Recognition:** Opt into pinch, open-palm, fist, thumbs-up, point,
   and spread detection with `options.enableGestures()`, tune providers or
   thresholds, and subscribe to `gesturestart`/`gestureupdate`/`gestureend`

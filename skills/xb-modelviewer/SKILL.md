@@ -3,7 +3,7 @@ name: xb-modelviewer
 description: >-
   Load and display 3D models in an XR Blocks app with `xb.ModelViewer` — GLTF/GLB
   models (static or animated), Gaussian-splat (.spz) models, or your own
-  `THREE.Object3D` — wrapped with an optional draggable platform, bounding box, and
+  `THREE.Object3D` — wrapped with an optional translation platform, bounding box, and
   raycast cylinder so users can grab and reposition them in XR. Use when spawning,
   scaling, or placing 3D objects/assets in the scene, putting a model inside a UI
   panel, or auto-placing a model on a real-world horizontal surface. Covers
@@ -51,14 +51,14 @@ await model.loadSplatModel({
 });
 ```
 
-## Wrap your own geometry (with a draggable platform)
+## Wrap your own geometry (with a translation platform)
 
 ```js
 const model = new xb.ModelViewer({});
 model.add(new THREE.Mesh(geometry, material));
 model.setupBoundingBox();
 model.setupRaycastCylinder();
-model.setupPlatform(); // draggable base so users can move it in XR
+model.setupPlatform(); // translation handle so users can move it in XR
 model.position.set(-0.6, 0.5, -1.5);
 this.add(model);
 ```

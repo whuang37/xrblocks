@@ -5,6 +5,7 @@ import type {ManipulationEvent} from '../interaction/manipulation/ManipulationTy
 import type {Physics} from '../physics/Physics';
 import type {Injectable} from '../utils/DependencyInjection';
 import type {Constructor} from '../utils/Types';
+import {markDefaultScriptMethods} from './ScriptHooks';
 
 export interface SelectEvent {
   target: Controller;
@@ -57,7 +58,7 @@ export interface KeyEvent {
 export function ScriptMixin<TBase extends Constructor<THREE.Object3D>>(
   base: TBase
 ) {
-  return class extends base implements Injectable {
+  class MixedScript extends base implements Injectable {
     isXRScript = true;
 
     /**
@@ -214,7 +215,10 @@ export function ScriptMixin<TBase extends Constructor<THREE.Object3D>>(
      * Called when the script is removed from the scene. Opposite of init.
      */
     dispose() {}
-  };
+  }
+
+  markDefaultScriptMethods(MixedScript.prototype);
+  return MixedScript;
 }
 
 /**

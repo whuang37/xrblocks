@@ -14,6 +14,10 @@ import type {
   TargetedInteractionHook,
 } from './InteractionTypes.js';
 import {dispatchInteractionPath, isSelectionValid} from './InteractionUtils.js';
+import {
+  isSemanticControl,
+  isSemanticControlDisabled,
+} from './SemanticControl.js';
 
 interface TouchCapture {
   readonly selection: SelectionCapture;
@@ -21,6 +25,7 @@ interface TouchCapture {
   readonly handIndex: number;
   point: THREE.Vector3;
   synthesized: boolean;
+  semanticControl?: THREE.Object3D;
   grab?: ObjectGrabEvent;
 }
 
@@ -38,16 +43,19 @@ export class DirectTouch {
 
   constructor(private readonly dependencies: DirectTouchDependencies) {}
 
-  /** Replaces the physical direct-touch sources for one frame. */
-  update(inputs: readonly DirectTouchInput[]): void {
+  /** Replaces the physical direct-touch sources and returns active snapshots. */
+  update(inputs: readonly DirectTouchInput[]): InteractionSourceSnapshot[] {
     const activeSources = new Set<Controller>();
+    const snapshots: InteractionSourceSnapshot[] = [];
     for (const input of inputs) {
       activeSources.add(input.controller);
-      this.updateSource(input);
+      const snapshot = this.updateSource(input);
+      if (snapshot) snapshots.push(snapshot);
     }
     for (const controller of [...this.captures.keys()]) {
       if (!activeSources.has(controller)) this.finish(controller, true);
     }
+    return snapshots;
   }
 
   remove(controller: Controller): boolean {
@@ -76,7 +84,9 @@ export class DirectTouch {
     return false;
   }
 
-  private updateSource(input: DirectTouchInput): void {
+  private updateSource(
+    input: DirectTouchInput
+  ): InteractionSourceSnapshot | undefined {
     const resolved = this.dependencies.resolver.resolve(
       input.intersections,
       'direct-touch'
@@ -87,13 +97,15 @@ export class DirectTouch {
     if (touch && !isSelectionValid(touch.selection, touch.ancestry)) {
       this.finish(input.controller, true);
       touch = undefined;
+    } else if (touch && !resolved?.target) {
+      this.finish(input.controller, false);
+      touch = undefined;
     } else if (
       touch &&
-      (!resolved?.target ||
-        (resolved.manipulation?.owner ?? resolved.target) !==
-          touch.selection.owner)
+      (resolved!.manipulation?.owner ?? resolved!.target) !==
+        touch.selection.owner
     ) {
-      this.finish(input.controller, false);
+      this.finish(input.controller, true);
       touch = undefined;
     }
 
@@ -110,12 +122,10 @@ export class DirectTouch {
       );
       this.updateGrab(touch, input);
       if (touch.synthesized) {
-        this.dependencies.manipulation.update([snapshot]);
-        this.dependencies.callbacks.invokeGlobal('onSelecting', {
-          target: input.controller,
-        });
+        return snapshot;
       }
     }
+    return undefined;
   }
 
   private start(input: DirectTouchInput, resolved: ResolvedRay): void {
@@ -133,6 +143,11 @@ export class DirectTouch {
       handIndex: input.handIndex,
       point: input.point.clone(),
       synthesized: false,
+      semanticControl:
+        isSemanticControl(resolved.target!) &&
+        !isSemanticControlDisabled(resolved.target!)
+          ? resolved.target
+          : undefined,
     };
     this.captures.set(input.controller, touch);
 
@@ -183,6 +198,13 @@ export class DirectTouch {
         'onObjectSelectEnd',
         {target: controller}
       );
+      if (
+        !canceled &&
+        touch.semanticControl &&
+        !isSemanticControlDisabled(touch.semanticControl)
+      ) {
+        this.dependencies.callbacks.invokeSemantic(touch.semanticControl);
+      }
       if (!canceled) {
         this.dependencies.callbacks.invokeGlobal('onSelect', {
           target: controller,

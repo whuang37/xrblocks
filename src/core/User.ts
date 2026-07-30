@@ -158,8 +158,6 @@ export class User extends Script {
 
   /**
    * Gets the intersection point on a specific object.
-   * Not recommended for general use, since a View / ModelView's
-   * ux.positions contains the intersected points.
    * @param obj - The object to check for intersection.
    * @param id - The controller ID, or -1 for any controller.
    * @returns The intersection details, or null if no intersection.

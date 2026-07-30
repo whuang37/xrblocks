@@ -65,8 +65,8 @@ export class ReticlePresenter implements ReticlePresentationObserver {
     reticle.position.copy(intersection.point);
 
     if (intersection.normal) {
-      intersection.object.updateWorldMatrix(true, false);
-      NORMAL_MATRIX.getNormalMatrix(intersection.object.matrixWorld);
+      resolved.hitObject.updateWorldMatrix(true, false);
+      NORMAL_MATRIX.getNormalMatrix(resolved.hitObject.matrixWorld);
       WORLD_NORMAL.copy(intersection.normal)
         .applyMatrix3(NORMAL_MATRIX)
         .normalize();

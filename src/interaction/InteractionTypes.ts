@@ -38,6 +38,12 @@ export interface DirectTouchInput {
   orientation?: THREE.Quaternion;
 }
 
+/** All physical interaction input sampled for one engine frame. */
+export interface InteractionFrameInput {
+  readonly raySources: readonly RaySourceInput[];
+  readonly directTouches: readonly DirectTouchInput[];
+}
+
 /** Frame-local physical input. */
 export interface InteractionSourceSnapshot {
   readonly controller: Controller;
@@ -51,6 +57,9 @@ export interface InteractionSourceSnapshot {
 
 export interface ResolvedRay {
   readonly intersection: THREE.Intersection;
+  /** Physical object that supplied the hit geometry. */
+  readonly hitObject: THREE.Object3D;
+  /** Public object that owns the hit. */
   readonly surface: THREE.Object3D;
   readonly target?: THREE.Object3D;
   readonly scriptPath: readonly Script[];
@@ -109,6 +118,7 @@ export interface InteractionCallbackDispatch {
     hook: TargetedInteractionHook,
     argument: unknown
   ): unknown;
+  invokeSemantic(object: THREE.Object3D): boolean;
   invokeGlobal(hook: GlobalInteractionHook, event: {target: Controller}): void;
 }
 

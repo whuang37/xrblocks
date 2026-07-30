@@ -6,6 +6,11 @@ import type {Controller} from '../input/Controller.js';
 import {Reticle} from './reticle/Reticle.js';
 import {Interaction} from './Interaction.js';
 import {
+  activateSemanticControl,
+  registerSemanticControl,
+} from './SemanticControl.js';
+import {
+  DirectTouchInput,
   GlobalInteractionHook,
   InteractionCallbackDispatch,
   InteractionManipulation,
@@ -48,6 +53,21 @@ function input(
   };
 }
 
+function updateRays(
+  interaction: Interaction,
+  raySources: readonly RaySourceInput[],
+  deltaSeconds = 0
+): void {
+  interaction.update({raySources, directTouches: []}, deltaSeconds);
+}
+
+function updateTouches(
+  interaction: Interaction,
+  directTouches: readonly DirectTouchInput[]
+): void {
+  interaction.update({raySources: [], directTouches});
+}
+
 class TestCallbacks implements InteractionCallbackDispatch {
   readonly calls: string[] = [];
   readonly arguments: Array<{key: string; argument: unknown}> = [];
@@ -76,10 +96,16 @@ class TestCallbacks implements InteractionCallbackDispatch {
   invokeGlobal(hook: GlobalInteractionHook): void {
     this.calls.push(`global:${hook}`);
   }
+
+  invokeSemantic(object: THREE.Object3D): boolean {
+    this.calls.push(`${object.name}:onClick`);
+    return activateSemanticControl(object);
+  }
 }
 
 class TestManipulation implements InteractionManipulation {
   readonly calls: string[] = [];
+  readonly updates: InteractionSourceSnapshot[][] = [];
   resolution?: {owner: THREE.Object3D};
   claimScale = false;
 
@@ -94,8 +120,9 @@ class TestManipulation implements InteractionManipulation {
     this.calls.push('start');
     return true;
   }
-  update(_snapshots: Iterable<InteractionSourceSnapshot>): void {
+  update(snapshots: Iterable<InteractionSourceSnapshot>): void {
     this.calls.push('update');
+    this.updates.push([...snapshots]);
   }
   end(): void {
     this.calls.push('end');
@@ -136,7 +163,7 @@ describe('Interaction', () => {
     callbacks.scripts.add(disabled);
     callbacks.targets.add(disabled);
 
-    interaction.updateRaySources([
+    updateRays(interaction, [
       input(source, [hit(hiddenChild), hit(ignoredChild), hit(surface)]),
     ]);
 
@@ -157,7 +184,7 @@ describe('Interaction', () => {
     callbacks.scripts.add(child);
     callbacks.targets.add(child);
 
-    interaction.updateRaySources([input(source, [hit(child)])]);
+    updateRays(interaction, [input(source, [hit(child)])]);
 
     expect(interaction.getResolvedRay(source)?.target).toBe(child);
     expect(interaction.getResolvedRay(source)?.scriptPath).toEqual([child]);
@@ -176,9 +203,9 @@ describe('Interaction', () => {
     callbacks.targets.add(first);
     callbacks.targets.add(second);
 
-    interaction.updateRaySources([input(source, [hit(first)])]);
+    updateRays(interaction, [input(source, [hit(first)])]);
     callbacks.calls.length = 0;
-    interaction.updateRaySources([input(source, [hit(second)])]);
+    updateRays(interaction, [input(source, [hit(second)])]);
 
     expect(callbacks.calls).toEqual([
       'first:onHoverExit',
@@ -199,13 +226,13 @@ describe('Interaction', () => {
     callbacks.targets.add(child);
     callbacks.returns.set('child:onHoverEnter', {handled: true});
 
-    interaction.updateRaySources([input(source, [hit(child)])]);
+    updateRays(interaction, [input(source, [hit(child)])]);
     expect(callbacks.calls).toContain('parent:onHoverEnter');
 
     interaction.removeSource(source);
     callbacks.calls.length = 0;
     callbacks.returns.set('child:onHoverEnter', true);
-    interaction.updateRaySources([input(source, [hit(child)])]);
+    updateRays(interaction, [input(source, [hit(child)])]);
     expect(callbacks.calls).not.toContain('parent:onHoverEnter');
   });
 
@@ -215,11 +242,11 @@ describe('Interaction', () => {
     callbacks.scripts.add(target);
     callbacks.targets.add(target);
 
-    interaction.updateRaySources([input(source, [hit(target)])]);
+    updateRays(interaction, [input(source, [hit(target)])]);
     callbacks.calls.length = 0;
     manipulation.calls.length = 0;
-    interaction.updateRaySources([input(source, [hit(target)], true)]);
-    interaction.updateRaySources([input(source, [])]);
+    updateRays(interaction, [input(source, [hit(target)], true)]);
+    updateRays(interaction, [input(source, [])]);
 
     expect(callbacks.calls).toEqual([
       'target:onHovering',
@@ -239,21 +266,42 @@ describe('Interaction', () => {
     ]);
   });
 
+  it('activates a semantic control only after release on the same control', () => {
+    const target = new TestObject();
+    target.name = 'button';
+    const onClick = vi.fn();
+    registerSemanticControl(target, {
+      isDisabled: () => false,
+      activate: onClick,
+    });
+    callbacks.scripts.add(target);
+    callbacks.targets.add(target);
+
+    updateRays(interaction, [input(source, [hit(target)])]);
+    updateRays(interaction, [input(source, [hit(target)], true)]);
+    updateRays(interaction, [input(source, [hit(target)])]);
+    expect(onClick).toHaveBeenCalledTimes(1);
+
+    updateRays(interaction, [input(source, [hit(target)], true)]);
+    updateRays(interaction, [input(source, [])]);
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
   it('fires long select once on the captured target path', () => {
     const target = new TestObject();
     target.name = 'target';
     callbacks.scripts.add(target);
     callbacks.targets.add(target);
 
-    interaction.updateRaySources([input(source, [hit(target)])]);
+    updateRays(interaction, [input(source, [hit(target)])]);
     callbacks.calls.length = 0;
     callbacks.arguments.length = 0;
 
-    interaction.updateRaySources([input(source, [hit(target)], true)], 0.25);
+    updateRays(interaction, [input(source, [hit(target)], true)], 0.25);
     expect(callbacks.calls).not.toContain('target:onObjectLongSelect');
 
-    interaction.updateRaySources([input(source, [], true)], 0.5);
-    interaction.updateRaySources([input(source, [], true)], 1);
+    updateRays(interaction, [input(source, [], true)], 0.5);
+    updateRays(interaction, [input(source, [], true)], 1);
 
     expect(
       callbacks.calls.filter((call) => call === 'target:onObjectLongSelect')
@@ -270,9 +318,9 @@ describe('Interaction', () => {
     callbacks.scripts.add(target);
     callbacks.targets.add(target);
 
-    interaction.updateRaySources([input(source, [hit(target)])]);
-    interaction.updateRaySources([input(source, [hit(target)], true)], 0.25);
-    interaction.updateRaySources([input(source, [hit(target)])], 1);
+    updateRays(interaction, [input(source, [hit(target)])]);
+    updateRays(interaction, [input(source, [hit(target)], true)], 0.25);
+    updateRays(interaction, [input(source, [hit(target)])], 1);
 
     expect(callbacks.calls).not.toContain('target:onObjectLongSelect');
   });
@@ -284,8 +332,8 @@ describe('Interaction', () => {
     callbacks.targets.add(target);
     manipulation.resolution = {owner: target};
 
-    interaction.updateRaySources([input(source, [hit(target)])]);
-    interaction.updateRaySources([input(source, [hit(target)], true)], 1);
+    updateRays(interaction, [input(source, [hit(target)])]);
+    updateRays(interaction, [input(source, [hit(target)], true)], 1);
 
     expect(manipulation.calls).toContain('start');
     expect(callbacks.calls).not.toContain('target:onObjectLongSelect');
@@ -304,11 +352,11 @@ describe('Interaction', () => {
     vi.spyOn(manipulation, 'end').mockImplementation(() => {
       callbacks.calls.push('manipulation:end');
     });
-    interaction.updateRaySources([input(source, [hit(target)])]);
+    updateRays(interaction, [input(source, [hit(target)])]);
     callbacks.calls.length = 0;
 
-    interaction.updateRaySources([input(source, [hit(target)], true)]);
-    interaction.updateRaySources([input(source, [hit(target)])]);
+    updateRays(interaction, [input(source, [hit(target)], true)]);
+    updateRays(interaction, [input(source, [hit(target)])]);
 
     expect(callbacks.calls).toEqual([
       'target:onHovering',
@@ -336,11 +384,11 @@ describe('Interaction', () => {
     const selectionCalls = () =>
       callbacks.calls.filter((call) => call.includes('Select'));
 
-    interaction.updateRaySources([gazeInput(1)], 1);
-    interaction.updateRaySources([gazeInput(2)], 1);
+    updateRays(interaction, [gazeInput(1)], 1);
+    updateRays(interaction, [gazeInput(2)], 1);
     expect(selectionCalls()).toEqual([]);
 
-    interaction.updateRaySources([gazeInput(2)], 2);
+    updateRays(interaction, [gazeInput(2)], 2);
     expect(selectionCalls()).toEqual([
       'target:onObjectSelectStart',
       'global:onSelectStart',
@@ -349,15 +397,12 @@ describe('Interaction', () => {
       'global:onSelectEnd',
     ]);
 
-    interaction.updateRaySources([gazeInput(2)], 2);
+    updateRays(interaction, [gazeInput(2)], 2);
     expect(selectionCalls()).toHaveLength(5);
 
-    interaction.updateRaySources(
-      [{...input(source, []), sourceType: 'gaze'}],
-      2
-    );
-    interaction.updateRaySources([gazeInput(2)], 2);
-    interaction.updateRaySources([gazeInput(2)], 2);
+    updateRays(interaction, [{...input(source, []), sourceType: 'gaze'}], 2);
+    updateRays(interaction, [gazeInput(2)], 2);
+    updateRays(interaction, [gazeInput(2)], 2);
     expect(selectionCalls()).toHaveLength(10);
   });
 
@@ -375,11 +420,11 @@ describe('Interaction', () => {
       selected: false,
     };
 
-    interaction.updateDirectTouches([touch]);
-    interaction.updateDirectTouches([
+    updateTouches(interaction, [touch]);
+    updateTouches(interaction, [
       {...touch, point: new THREE.Vector3(0.2, 0, -1)},
     ]);
-    interaction.updateDirectTouches([{...touch, intersections: []}]);
+    updateTouches(interaction, [{...touch, intersections: []}]);
 
     expect(callbacks.calls).toEqual([
       'target:onObjectTouchStart',
@@ -393,6 +438,64 @@ describe('Interaction', () => {
       'global:onSelectEnd',
     ]);
     expect(manipulation.calls).toEqual(['start', 'update', 'end']);
+  });
+
+  it('updates manipulation once with every active source snapshot', () => {
+    const rayTarget = new TestObject();
+    rayTarget.name = 'ray';
+    const touchTarget = new TestObject();
+    touchTarget.name = 'touch';
+    callbacks.scripts.add(rayTarget);
+    callbacks.targets.add(rayTarget);
+    callbacks.scripts.add(touchTarget);
+    callbacks.targets.add(touchTarget);
+
+    const touchSource = controller();
+    const touch: DirectTouchInput = {
+      controller: touchSource,
+      handIndex: 0,
+      point: new THREE.Vector3(),
+      intersections: [hit(touchTarget)],
+      selected: false,
+    };
+    updateTouches(interaction, [touch]);
+    manipulation.calls.length = 0;
+    manipulation.updates.length = 0;
+
+    interaction.update({
+      raySources: [input(source, [hit(rayTarget)])],
+      directTouches: [touch],
+    });
+
+    expect(manipulation.calls).toEqual(['update']);
+    expect(manipulation.updates[0]).toHaveLength(2);
+    expect(
+      manipulation.updates[0].map((snapshot) => snapshot.sourceType)
+    ).toEqual(['controller-ray', 'direct-touch']);
+  });
+
+  it('activates a semantic control after direct touch completes', () => {
+    const target = new TestObject();
+    target.name = 'button';
+    const onClick = vi.fn();
+    registerSemanticControl(target, {
+      isDisabled: () => false,
+      activate: onClick,
+    });
+    callbacks.scripts.add(target);
+    callbacks.targets.add(target);
+    const touch: DirectTouchInput = {
+      controller: source,
+      handIndex: 0,
+      point: new THREE.Vector3(),
+      intersections: [hit(target)],
+      selected: false,
+    };
+
+    updateTouches(interaction, [touch]);
+    updateTouches(interaction, [{...touch, intersections: []}]);
+
+    expect(onClick).toHaveBeenCalledOnce();
   });
 
   it('keeps prevented direct touch callbacks without synthesized selection', () => {
@@ -410,8 +513,8 @@ describe('Interaction', () => {
       selected: false,
     };
 
-    interaction.updateDirectTouches([touch]);
-    interaction.updateDirectTouches([{...touch, intersections: []}]);
+    updateTouches(interaction, [touch]);
+    updateTouches(interaction, [{...touch, intersections: []}]);
 
     expect(callbacks.calls).toEqual([
       'target:onObjectTouchStart',
@@ -426,7 +529,7 @@ describe('Interaction', () => {
     callbacks.scripts.add(target);
     callbacks.targets.add(target);
     manipulation.resolution = {owner: target};
-    interaction.updateDirectTouches([
+    updateTouches(interaction, [
       {
         controller: source,
         handIndex: 0,
@@ -438,7 +541,7 @@ describe('Interaction', () => {
     callbacks.calls.length = 0;
     manipulation.calls.length = 0;
 
-    interaction.updateDirectTouches([]);
+    updateTouches(interaction, []);
 
     expect(callbacks.calls).toEqual([
       'target:onObjectTouchEnd',
@@ -463,11 +566,11 @@ describe('Interaction', () => {
       selected: false,
     };
 
-    interaction.updateDirectTouches([touch]);
-    interaction.updateDirectTouches([{...touch, selected: true}]);
-    interaction.updateDirectTouches([{...touch, selected: true}]);
-    interaction.updateDirectTouches([touch]);
-    interaction.updateDirectTouches([{...touch, intersections: []}]);
+    updateTouches(interaction, [touch]);
+    updateTouches(interaction, [{...touch, selected: true}]);
+    updateTouches(interaction, [{...touch, selected: true}]);
+    updateTouches(interaction, [touch]);
+    updateTouches(interaction, [{...touch, intersections: []}]);
 
     expect(callbacks.calls).toEqual([
       'target:onObjectTouchStart',
@@ -498,12 +601,12 @@ describe('Interaction', () => {
     callbacks.targets.add(owner);
     manipulation.resolution = {owner};
 
-    interaction.updateRaySources([input(source, [hit(surface)])]);
-    interaction.updateRaySources([input(source, [hit(surface)], true)]);
+    updateRays(interaction, [input(source, [hit(surface)])]);
+    updateRays(interaction, [input(source, [hit(surface)], true)]);
     callbacks.calls.length = 0;
     manipulation.calls.length = 0;
     surface.interactionEnabled = false;
-    interaction.updateRaySources([input(source, [hit(surface)], true)]);
+    updateRays(interaction, [input(source, [hit(surface)], true)]);
 
     expect(manipulation.calls).toContain('cancel');
     expect(callbacks.calls).toContain('owner:onObjectSelectEnd');
@@ -516,14 +619,14 @@ describe('Interaction', () => {
     callbacks.scripts.add(target);
     callbacks.targets.add(target);
 
-    interaction.updateRaySources([input(source, [hit(target)])]);
-    interaction.updateRaySources([input(source, [hit(target)], true)]);
+    updateRays(interaction, [input(source, [hit(target)])]);
+    updateRays(interaction, [input(source, [hit(target)], true)]);
     callbacks.calls.length = 0;
     manipulation.calls.length = 0;
     target.visible = false;
-    interaction.updateRaySources([input(source, [hit(target)], true)]);
-    interaction.updateRaySources([input(source, [hit(target)], true)]);
-    interaction.updateRaySources([input(source, [hit(target)])]);
+    updateRays(interaction, [input(source, [hit(target)], true)]);
+    updateRays(interaction, [input(source, [hit(target)], true)]);
+    updateRays(interaction, [input(source, [hit(target)])]);
 
     expect(callbacks.calls).toEqual([
       'target:onObjectSelectEnd',
@@ -546,11 +649,11 @@ describe('Interaction', () => {
     const target = new TestObject();
     callbacks.scripts.add(target);
     callbacks.targets.add(target);
-    interaction.updateRaySources([input(source, [hit(target)])]);
-    interaction.updateRaySources([input(source, [hit(target)], true)]);
+    updateRays(interaction, [input(source, [hit(target)])]);
+    updateRays(interaction, [input(source, [hit(target)], true)]);
     target.visible = false;
 
-    interaction.updateRaySources([input(source, [], true)]);
+    updateRays(interaction, [input(source, [], true)]);
 
     expect(reticle.visible).toBe(false);
   });
@@ -560,7 +663,7 @@ describe('Interaction', () => {
       new THREE.Vector3(1, 2, 3),
       new THREE.Vector3(0, 0, -1)
     );
-    interaction.updateRaySources([
+    updateRays(interaction, [
       {...input(source, []), ray, position: new THREE.Vector3(4, 5, 6)},
     ]);
     ray.origin.set(9, 9, 9);
@@ -579,11 +682,11 @@ describe('Interaction', () => {
     callbacks.scripts.add(target);
     callbacks.targets.add(target);
     manipulation.claimScale = true;
-    interaction.updateRaySources([input(source, [hit(target)])]);
+    updateRays(interaction, [input(source, [hit(target)])]);
     callbacks.calls.length = 0;
 
-    interaction.updateRaySources([input(source, [hit(target)], true)]);
-    interaction.updateRaySources([input(source, [hit(target)])]);
+    updateRays(interaction, [input(source, [hit(target)], true)]);
+    updateRays(interaction, [input(source, [hit(target)])]);
 
     expect(callbacks.calls).toEqual([
       'target:onHovering',
@@ -604,12 +707,12 @@ describe('Interaction', () => {
     callbacks.scripts.add(target);
     callbacks.targets.add(target);
 
-    interaction.updateRaySources([input(source, [hit(target)])]);
+    updateRays(interaction, [input(source, [hit(target)])]);
     expect(reticle.visible).toBe(true);
     expect(reticle.targetObject).toBe(target);
     expect(reticle.position.toArray()).toEqual([0, 0, -1]);
     target.reticleMode = 'hidden';
-    interaction.updateRaySources([input(source, [hit(target)])]);
+    updateRays(interaction, [input(source, [hit(target)])]);
     expect(reticle.visible).toBe(false);
     expect(reticle.targetObject).toBeUndefined();
   });
@@ -630,12 +733,12 @@ describe('Interaction', () => {
     callbacks.scripts.add(target);
     callbacks.targets.add(target);
 
-    interaction.updateRaySources([input(source, [hit(target, 1.5)])]);
+    updateRays(interaction, [input(source, [hit(target, 1.5)])]);
 
     expect(reticle.visible).toBe(true);
     expect(reticle.targetObject).toBe(target);
 
-    interaction.updateRaySources([input(source, [hit(target, 2)])]);
+    updateRays(interaction, [input(source, [hit(target, 2)])]);
 
     expect(reticle.visible).toBe(true);
     expect(reticle.position.toArray()).toEqual([0, 0, -1]);

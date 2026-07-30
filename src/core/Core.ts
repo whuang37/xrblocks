@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import {reversePainterSortStable} from '@pmndrs/uikit';
 
 import {AI} from '../ai/AI';
 import {AIOptions} from '../ai/AIOptions';
@@ -18,9 +17,7 @@ import {HeadGestureRecognitionOptions} from '../input/headGestures/HeadGestureRe
 import type {PoseEstimator} from '../input/gestures/GestureTypes';
 import {StrokeRecognitionOptions} from '../input/strokes/StrokeRecognitionOptions';
 import {Input} from '../input/Input';
-import type {Controller} from '../input/Controller';
 import {Interaction} from '../interaction/Interaction';
-import type {RaySourceInput} from '../interaction/InteractionTypes';
 import {ManipulationManager} from '../interaction/manipulation/ManipulationManager';
 import {ReticlePresenter} from '../interaction/ReticlePresenter';
 import {Lighting} from '../lighting/Lighting';
@@ -110,7 +107,6 @@ export class Core {
   private manipulationManager!: ManipulationManager;
   private reticleOptions = new ReticleOptions();
   private reticlePresenter = new ReticlePresenter(this.reticleOptions);
-  private interactionSources = new Set<Controller>();
 
   /** Manages real-world understanding: planes, meshes, objects, and sounds. */
   world = new World();
@@ -256,10 +252,7 @@ export class Core {
   }
 
   dispose() {
-    for (const controller of this.interactionSources) {
-      this.interaction.removeSource(controller);
-    }
-    this.interactionSources.clear();
+    this.interaction.clear();
     this.input.dispose();
     window.removeEventListener('resize', this.onWindowResize);
   }
@@ -328,9 +321,6 @@ export class Core {
       return null;
     };
     this.registry.register(this.renderer);
-
-    this.renderer.localClippingEnabled = true;
-    this.renderer.setTransparentSort(reversePainterSortStable);
 
     this.renderer.xr.setReferenceSpaceType(options.referenceSpaceType);
     // For desktop simulator:
@@ -537,50 +527,6 @@ export class Core {
    * @param time - The current time in milliseconds.
    * @param frame - The WebXR frame object, if in an XR session.
    */
-  private getRaySourceType(
-    controller: Controller
-  ): RaySourceInput['sourceType'] {
-    if (controller === this.input.mouseController) return 'mouse';
-    if (controller === this.input.gazeController) return 'gaze';
-    if (controller.inputSource?.hand) return 'hand-ray';
-    return 'controller-ray';
-  }
-
-  private updateInteractionSources() {
-    const sources: RaySourceInput[] = [];
-    const nextSources = new Set<Controller>();
-    if (this.input.controllersEnabled) {
-      for (const controller of this.input.controllers) {
-        if (controller.userData.connected === false) continue;
-        const position = controller.getWorldPosition(new THREE.Vector3());
-        const orientation = controller.getWorldQuaternion(
-          new THREE.Quaternion()
-        );
-        sources.push({
-          controller,
-          sourceType: this.getRaySourceType(controller),
-          ray: new THREE.Ray(
-            position,
-            new THREE.Vector3(0, 0, -1).applyQuaternion(orientation).normalize()
-          ),
-          intersections:
-            this.input.intersectionsForController.get(controller) ?? [],
-          selected: controller.userData.selected === true,
-          position,
-          orientation,
-        });
-        nextSources.add(controller);
-      }
-    }
-
-    for (const controller of this.interactionSources) {
-      if (!nextSources.has(controller))
-        this.interaction.removeSource(controller);
-    }
-    this.interactionSources = nextSources;
-    this.interaction.updateRaySources(sources, this.timer.getDelta());
-  }
-
   private update = (time: number, frame: XRFrame) => {
     if (this._isPaused && !this.isSteppingFrame) {
       return;
@@ -614,8 +560,10 @@ export class Core {
 
     // Update input and resolved interaction state.
     this.input.update();
-    this.updateInteractionSources();
-    this.interaction.updateDirectTouches(this.input.directTouchInputs);
+    this.interaction.update(
+      this.input.getInteractionFrame(),
+      this.timer.getDelta()
+    );
 
     // Updates scripts with user interactions.
     for (const controller of this.input.controllers) {

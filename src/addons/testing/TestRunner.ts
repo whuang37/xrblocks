@@ -170,6 +170,7 @@ export class TestRunner {
 
     const coreInternal = this.core as unknown as {
       onWindowResize?: EventListenerOrEventListenerObject;
+      simulationTimer: object;
     };
     if (coreInternal.onWindowResize) {
       window.removeEventListener('resize', coreInternal.onWindowResize);
@@ -186,7 +187,11 @@ export class TestRunner {
     input.hands.length = 0;
     input.leftController = undefined;
     input.rightController = undefined;
-    input.intersectionsForController.clear();
+    (
+      input as unknown as {
+        intersectionsForController: Map<unknown, unknown>;
+      }
+    ).intersectionsForController.clear();
     input.activeControllers.clear();
     input.listeners.clear();
 
@@ -209,6 +214,9 @@ export class TestRunner {
     registryInternal.instances.clear();
     this.core.registry.register(this.core.registry);
     this.core.registry.register(this.core, Core);
+    this.core.registry.register(this.core.waitFrame);
+    this.core.registry.register(this.core.screenshotSynthesizer);
+    this.core.registry.register(coreInternal.simulationTimer);
     this.core.registry.register(this.core.scene, THREE.Scene);
     this.core.registry.register(this.core.camera, THREE.Camera);
     this.core.registry.register(this.core.timer, THREE.Timer);
@@ -217,9 +225,11 @@ export class TestRunner {
     this.core.registry.register(this.core.sound);
     this.core.registry.register(coreWritable.interaction);
     this.core.registry.register(this.core.simulator);
+    this.core.registry.register(this.core.simulator.navMesh);
     this.core.registry.register(this.core.scriptsManager);
     this.core.registry.register(this.core.depth);
     this.core.registry.register(this.core.world);
+    this.core.registry.register(this.core.context);
     this.core.registry.register(this.core.xrSystemsGroup);
 
     if (this.core.renderer) {

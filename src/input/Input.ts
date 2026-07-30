@@ -5,7 +5,11 @@ import {XRHandModelFactory} from 'three/addons/webxr/XRHandModelFactory.js';
 import {NUM_HANDS} from '../constants';
 import {Options} from '../core/Options.js';
 import {KeyEvent} from '../core/Script';
-import type {DirectTouchInput} from '../interaction/InteractionTypes.js';
+import type {
+  DirectTouchInput,
+  InteractionFrameInput,
+  RaySourceInput,
+} from '../interaction/InteractionTypes.js';
 import {Reticle} from '../interaction/reticle/Reticle.js';
 import {Raycaster} from '../core/components/Raycaster';
 
@@ -61,13 +65,15 @@ export class Input {
   controllersEnabled = true;
   listeners = new Map();
   private pinchFilter = new PinchFilter((event) => this.dispatchEvent(event));
-  intersectionsForController = new Map<Controller, THREE.Intersection[]>();
-  intersections = [];
+  private intersectionsForController = new Map<
+    Controller,
+    THREE.Intersection[]
+  >();
   activeControllers = new ActiveControllers();
   leftController?: Controller;
   rightController?: Controller;
   reticles = new Reticles();
-  directTouchInputs: DirectTouchInput[] = [];
+  private directTouchInputs: DirectTouchInput[] = [];
   scene?: THREE.Scene;
 
   /**
@@ -470,6 +476,42 @@ export class Input {
       }
     }
     this.updateDirectTouchInputs();
+  }
+
+  /** Returns the complete physical input sampled this frame. */
+  getInteractionFrame(): InteractionFrameInput {
+    const raySources: RaySourceInput[] = [];
+    if (this.controllersEnabled) {
+      for (const controller of this.controllers) {
+        if (controller.userData.connected === false) continue;
+        const position = controller.getWorldPosition(new THREE.Vector3());
+        const orientation = controller.getWorldQuaternion(
+          new THREE.Quaternion()
+        );
+        raySources.push({
+          controller,
+          sourceType: this.getRaySourceType(controller),
+          ray: new THREE.Ray(
+            position,
+            new THREE.Vector3(0, 0, -1).applyQuaternion(orientation).normalize()
+          ),
+          intersections: this.intersectionsForController.get(controller) ?? [],
+          selected: controller.userData.selected === true,
+          position,
+          orientation,
+        });
+      }
+    }
+    return {raySources, directTouches: this.directTouchInputs};
+  }
+
+  private getRaySourceType(
+    controller: Controller
+  ): RaySourceInput['sourceType'] {
+    if (controller === this.mouseController) return 'mouse';
+    if (controller === this.gazeController) return 'gaze';
+    if (controller.inputSource?.hand) return 'hand-ray';
+    return 'controller-ray';
   }
 
   private updateDirectTouchInputs() {

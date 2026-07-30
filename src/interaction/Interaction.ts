@@ -7,8 +7,8 @@ import {DirectTouch} from './DirectTouch.js';
 import {GazeDwell} from './GazeDwell.js';
 import {HitResolver} from './HitResolver.js';
 import {
-  DirectTouchInput,
   InteractionDependencies,
+  InteractionFrameInput,
   InteractionManipulation,
   InteractionSourceSnapshot,
   RaySourceInput,
@@ -17,6 +17,10 @@ import {
 } from './InteractionTypes.js';
 import {dispatchInteractionPath, isSelectionValid} from './InteractionUtils.js';
 import {ReticlePresenter} from './ReticlePresenter.js';
+import {
+  isSemanticControl,
+  isSemanticControlDisabled,
+} from './SemanticControl.js';
 
 interface TargetCapture {
   kind: 'target';
@@ -25,6 +29,12 @@ interface TargetCapture {
   longSelectDuration: number;
   longSelectFired: boolean;
   automaticActionClaimed: boolean;
+  semanticControl?: THREE.Object3D;
+}
+
+interface RayFrameResult {
+  snapshots: InteractionSourceSnapshot[];
+  selectionEnds: Controller[];
 }
 
 type ActiveCapture = {kind: 'none'} | {kind: 'auxiliary'} | TargetCapture;
@@ -58,6 +68,7 @@ export class Interaction {
   >();
   private readonly captures = new Map<Controller, ActiveCapture>();
   private readonly suppressedUntilRelease = new Set<Controller>();
+  private frameSources = new Set<Controller>();
 
   constructor(dependencies: InteractionDependencies) {
     this.callbacks = dependencies.callbacks;
@@ -76,8 +87,48 @@ export class Interaction {
     });
   }
 
-  /** Replaces the physical state for all ray sources in one frame. */
-  updateRaySources(inputs: readonly RaySourceInput[], deltaSeconds = 0): void {
+  /** Replaces all physical interaction state for one engine frame. */
+  update(frame: InteractionFrameInput, deltaSeconds = 0): void {
+    const nextSources = new Set<Controller>();
+    for (const input of frame.raySources) nextSources.add(input.controller);
+    for (const input of frame.directTouches) nextSources.add(input.controller);
+    for (const controller of this.frameSources) {
+      if (!nextSources.has(controller)) this.removeSource(controller);
+    }
+    this.frameSources = nextSources;
+
+    const touchSnapshots = this.directTouch.update(frame.directTouches);
+    const rayFrame = this.updateRaySources(frame.raySources, deltaSeconds);
+    const snapshots = [...rayFrame.snapshots, ...touchSnapshots];
+    if (snapshots.length > 0) this.manipulation.update(snapshots);
+    for (const snapshot of rayFrame.snapshots) {
+      if (snapshot.selected && this.captures.has(snapshot.controller)) {
+        this.updateLongSelect(snapshot.controller, deltaSeconds);
+        this.callbacks.invokeGlobal('onSelecting', {
+          target: snapshot.controller,
+        });
+      }
+    }
+    for (const snapshot of touchSnapshots) {
+      this.callbacks.invokeGlobal('onSelecting', {
+        target: snapshot.controller,
+      });
+    }
+    for (const controller of rayFrame.selectionEnds) {
+      this.endSelection(controller);
+    }
+  }
+
+  /** Cancels all active input sources. */
+  clear(): void {
+    for (const controller of this.frameSources) this.removeSource(controller);
+    this.frameSources.clear();
+  }
+
+  private updateRaySources(
+    inputs: readonly RaySourceInput[],
+    deltaSeconds: number
+  ): RayFrameResult {
     const frameSnapshots: InteractionSourceSnapshot[] = [];
     const selectionEnds: Controller[] = [];
     for (const input of inputs) {
@@ -145,16 +196,7 @@ export class Interaction {
       frameSnapshots.push(snapshot);
     }
 
-    this.manipulation.update(frameSnapshots);
-    for (const snapshot of frameSnapshots) {
-      if (snapshot.selected && this.captures.has(snapshot.controller)) {
-        this.updateLongSelect(snapshot.controller, deltaSeconds);
-        this.callbacks.invokeGlobal('onSelecting', {
-          target: snapshot.controller,
-        });
-      }
-    }
-    for (const controller of selectionEnds) this.endSelection(controller);
+    return {snapshots: frameSnapshots, selectionEnds};
   }
 
   private beginSelection(controller: Controller): void {
@@ -193,6 +235,11 @@ export class Interaction {
       longSelectDuration: 0,
       longSelectFired: false,
       automaticActionClaimed: false,
+      semanticControl:
+        isSemanticControl(resolved.target) &&
+        !isSemanticControlDisabled(resolved.target)
+          ? resolved.target
+          : undefined,
     };
     this.captures.set(controller, capture);
     dispatchInteractionPath(
@@ -228,22 +275,23 @@ export class Interaction {
         'onObjectSelectEnd',
         event
       );
+      const control = capture.semanticControl;
+      if (
+        control &&
+        this.resolvedRays.get(controller)?.target === control &&
+        !isSemanticControlDisabled(control)
+      ) {
+        this.callbacks.invokeSemantic(control);
+      }
     }
     this.callbacks.invokeGlobal('onSelect', event);
     this.callbacks.invokeGlobal('onSelectEnd', event);
   }
 
-  /** Replaces the physical direct-touch sources for one frame. */
-  updateDirectTouches(inputs: readonly DirectTouchInput[]): void {
-    this.directTouch.update(inputs);
-  }
-
   /** Cancels a disconnected or disabled source and removes all stored state. */
   removeSource(controller: Controller): void {
-    const hadTouch = this.directTouch.remove(controller);
-    const hadCapture = this.captures.has(controller);
+    this.directTouch.remove(controller);
     this.cancelCapture(controller);
-    if (!hadTouch && !hadCapture) this.manipulation.cancelSource(controller);
     this.updateHoverPath(controller, []);
     this.reticle.clear(controller);
     this.snapshots.delete(controller);

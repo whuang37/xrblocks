@@ -63,14 +63,16 @@ describe('Input direct touch', () => {
 
     input.update();
 
-    expect(input.directTouchInputs).toHaveLength(1);
-    expect(input.directTouchInputs[0]).toMatchObject({
+    const frame = input.getInteractionFrame();
+
+    expect(frame.directTouches).toHaveLength(1);
+    expect(frame.directTouches[0]).toMatchObject({
       controller,
       handIndex: 0,
       hand: wrist,
       selected: true,
     });
-    expect(input.directTouchInputs[0].intersections[0].object).toBe(mesh);
+    expect(frame.directTouches[0].intersections[0].object).toBe(mesh);
   });
 });
 

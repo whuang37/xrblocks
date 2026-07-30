@@ -3,6 +3,9 @@ import * as THREE from 'three';
 import {lerp} from '../../utils/utils';
 import {ReticleShader} from '../shaders/ReticleShader';
 
+const HOVER_RING_BRIGHTNESS = 0.3;
+const HOVER_RING_OPACITY = 0.7;
+
 /**
  * A 3D visual marker used to indicate a user's aim or interaction
  * point in an XR scene. It orients itself to surfaces it intersects with and
@@ -33,6 +36,12 @@ export class Reticle extends THREE.Mesh<
 
   /** Object on which the reticle is hovering. */
   targetObject?: THREE.Object3D;
+
+  /** Ring shown when the reticle is over an interactable object. */
+  private readonly hoverRing: THREE.Mesh<
+    THREE.RingGeometry,
+    THREE.MeshBasicMaterial
+  >;
 
   // --- Private properties for performance optimization ---
   private readonly originalNormal = new THREE.Vector3(0, 0, 1);
@@ -71,6 +80,22 @@ export class Reticle extends THREE.Mesh<
 
     this.rotationSmoothing = rotationSmoothing;
     this.offset = offset;
+
+    this.hoverRing = new THREE.Mesh(
+      new THREE.RingGeometry(size, size * 1.15, 32),
+      new THREE.MeshBasicMaterial({
+        color: getHoverRingColor(this.getColor()),
+        depthTest,
+        depthWrite: false,
+        transparent: true,
+        opacity: HOVER_RING_OPACITY,
+      })
+    );
+    this.hoverRing.position.z = offset;
+    this.hoverRing.renderOrder = this.renderOrder;
+    this.hoverRing.visible = false;
+    this.hoverRing.raycast = () => {};
+    this.add(this.hoverRing);
   }
 
   /**
@@ -117,6 +142,9 @@ export class Reticle extends THREE.Mesh<
    */
   setColor(color: THREE.Color | number | string) {
     this.material.uniforms.uColor.value.set(color);
+    this.hoverRing.material.color.copy(
+      getHoverRingColor(this.material.uniforms.uColor.value)
+    );
   }
 
   /**
@@ -148,8 +176,20 @@ export class Reticle extends THREE.Mesh<
   }
 
   /**
+   * Shows a ring around the reticle while it hovers over an interactable
+   * object.
+   */
+  setHovering(hovering: boolean) {
+    this.hoverRing.visible = hovering;
+  }
+
+  /**
    * Overrides the default raycast method to make the reticle ignored by
    * raycasters.
    */
   raycast() {}
+}
+
+function getHoverRingColor(color: THREE.Color) {
+  return color.clone().multiplyScalar(HOVER_RING_BRIGHTNESS);
 }

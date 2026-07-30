@@ -3,8 +3,8 @@ import * as THREE from 'three';
 
 import {SelectEvent} from '../../core/Script';
 import {User} from '../../core/User';
+import type {XBObjectOptions} from '../../interaction/manipulation/ManipulationTypes';
 import {View} from '../core/View';
-import {DragMode} from '../../ux/DragManager';
 
 interface LinePoint {
   x: number;
@@ -19,7 +19,7 @@ interface LinePoint {
  * functionality.
  */
 export class SketchPanel extends View {
-  draggingMode = DragMode.DO_NOT_DRAG;
+  xb: XBObjectOptions = {manipulationHandle: 'none'};
   static dependencies = {user: User};
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
@@ -120,7 +120,7 @@ export class SketchPanel extends View {
       return;
     }
 
-    const data = this.user.getReticleIntersection(id);
+    const data = this.user.getRayIntersection(id);
 
     if (data) {
       if (data.object instanceof SketchPanel && data.uv) {

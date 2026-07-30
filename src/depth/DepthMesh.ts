@@ -13,7 +13,6 @@ export class DepthMesh extends MeshScript {
     renderer: THREE.WebGLRenderer,
   };
   static isDepthMesh = true;
-  ignoreReticleRaycast = false;
   private worldPosition = new THREE.Vector3();
   private worldQuaternion = new THREE.Quaternion();
   private updateVertexNormals = false;

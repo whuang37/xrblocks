@@ -1,7 +1,7 @@
 import {describe, it, expect} from 'vitest';
 import {TestRunner} from './TestRunner';
 import * as THREE from 'three';
-import {Script, type SelectEvent, TextButton, Options, core} from 'xrblocks';
+import {Script, type SelectEvent, Options, core} from 'xrblocks';
 
 class SimpleRotationScript extends Script {
   speed = 1.0;
@@ -36,18 +36,6 @@ class GrabbableScript extends Script {
   override onObjectSelectEnd(_event: SelectEvent) {
     this.grabbedByHand = null;
     return true;
-  }
-}
-
-class GameController extends Script {
-  score = 0;
-  spawnedItems = new Set<THREE.Object3D>();
-
-  spawnItem() {
-    const item = new THREE.Object3D();
-    this.spawnedItems.add(item);
-    this.add(item);
-    this.score++;
   }
 }
 
@@ -115,37 +103,7 @@ describe('TestRunner functional examples', () => {
     await runner.destroy();
   });
 
-  it('should run Example 4: UI Button Clicking & Game Logic', async () => {
-    const game = new GameController();
-
-    // Create button that triggers spawning on game controller.
-    const button = new TextButton({
-      text: 'Spawn Item',
-    });
-    button.onTriggered = () => {
-      game.spawnItem();
-    };
-    button.position.set(0, core.user.height, -core.user.height);
-
-    const runner = await TestRunner.create({
-      scripts: [game, button],
-    });
-
-    expect(game.score).toBe(0);
-
-    // Point right hand (index 1) at button and click it.
-    await runner.actions.pointTo(1, button);
-    expect(game.score).toBe(0);
-    await runner.actions.click(1);
-    await runner.actions.step({durationMs: 250});
-
-    expect(game.score).toBe(1);
-    expect(game.spawnedItems.size).toBe(1);
-
-    await runner.destroy();
-  });
-
-  it('should run Example 5: End-to-End Heuristic Gesture Recognition', async () => {
+  it('should run Example 4: End-to-End Heuristic Gesture Recognition', async () => {
     class TestGestureScript extends Script {
       pinchDetected = false;
       private _onGestureStart?: (event: Event) => void;

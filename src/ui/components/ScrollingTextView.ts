@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
+import type {XBObjectOptions} from '../../interaction/manipulation/ManipulationTypes';
 import {View} from '../core/View';
-import {DragMode} from '../../ux/DragManager';
 
 /**
  * A View that displays text on a canvas and supports smooth
@@ -12,7 +12,7 @@ import {DragMode} from '../../ux/DragManager';
  * canvas texture.
  */
 export class ScrollingTextView extends View {
-  draggingMode = DragMode.DO_NOT_DRAG;
+  xb: XBObjectOptions = {manipulationHandle: 'none'};
   options: {
     width: number;
     height: number;

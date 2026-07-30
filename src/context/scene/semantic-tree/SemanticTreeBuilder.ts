@@ -21,7 +21,6 @@ type SemanticObject = THREE.Object3D & {
   isXRScript?: boolean;
   isUI?: boolean;
   selectable?: boolean;
-  draggable?: boolean;
   disabled?: boolean;
   baseSizeX?: number;
   baseSizeY?: number;
@@ -289,7 +288,7 @@ function inferTraits(object: THREE.Object3D): string[] | undefined {
     semanticObject.userData.semantic?.traits ?? []
   );
   if (semanticObject.selectable) traits.add('selectable');
-  if (semanticObject.draggable) traits.add('draggable');
+  if (semanticObject.xb?.manipulation) traits.add('manipulable');
   if (typeof (semanticObject as {onClick?: unknown}).onClick === 'function') {
     traits.add('selectable');
   }

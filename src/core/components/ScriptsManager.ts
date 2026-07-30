@@ -8,7 +8,13 @@ import type {
   TargetedInteractionHook,
 } from '../../interaction/InteractionTypes';
 import type {ManipulationEvent} from '../../interaction/manipulation/ManipulationTypes';
-import {KeyEvent, type ObjectTouchEvent, Script, SelectEvent} from '../Script';
+import {
+  KeyEvent,
+  type ObjectGrabEvent,
+  type ObjectTouchEvent,
+  Script,
+  SelectEvent,
+} from '../Script';
 
 type MaybeScript = THREE.Object3D & {isXRScript?: boolean};
 
@@ -76,6 +82,15 @@ export class ScriptsManager
       }
       if (hook === 'onObjectTouchEnd') {
         return script.onObjectTouchEnd(argument as ObjectTouchEvent);
+      }
+      if (hook === 'onObjectGrabStart') {
+        return script.onObjectGrabStart(argument as ObjectGrabEvent);
+      }
+      if (hook === 'onObjectGrabbing') {
+        return script.onObjectGrabbing(argument as ObjectGrabEvent);
+      }
+      if (hook === 'onObjectGrabEnd') {
+        return script.onObjectGrabEnd(argument as ObjectGrabEvent);
       }
       const controller = argument as Controller;
       if (hook === 'onHoverEnter') return script.onHoverEnter(controller);

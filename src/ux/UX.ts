@@ -14,11 +14,6 @@ export class UX {
   parent;
 
   /**
-   * Indicates if the parent object can be dragged.
-   */
-  draggable = false;
-
-  /**
    * Indicates if the parent object can be selected.
    */
   selectable = false;
@@ -71,19 +66,6 @@ export class UX {
    * controller.
    */
   uvs: THREE.Vector2[] = [];
-
-  // --- Drag Management State ---
-
-  /**
-   * The initial position of the object when a drag operation begins.
-   */
-  initialPosition = new THREE.Vector3();
-
-  /**
-   * The initial distance from the controller to the object at the start of a
-   * drag for computing the relative dragging distances and angles.
-   */
-  initialDistance?: number;
 
   /**
    * @param parent - The script or object that owns this UX instance.

@@ -30,7 +30,7 @@ export class Orbiter extends Grid {
   elevation: number;
 
   // These values are based on Material Design guidelines: https://developer.android.com/design/ui/xr/guides/spatial-ui
-  private static readonly BASE_OFFSET = 0.02; // put the orbiter outside of the parent panel's "draggable region" by default
+  private static readonly BASE_OFFSET = 0.02; // Put the orbiter outside the parent panel's manipulation region.
   private static readonly BASE_ELEVATION = 0.02; // put the orbiter at 15dp above the parent panel by default
   private static readonly MAX_OUTWARD = 0.05; // avoid the orbiter being too far away from the parent panel
 

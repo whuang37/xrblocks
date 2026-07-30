@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 
 import {User} from '../../core/User';
-import {Draggable, DragMode, HasDraggingMode} from '../../ux/DragManager';
 import {DP_TO_DMM} from '../constants';
 import {Grid} from '../layouts/Grid';
 import {SpatialPanelShader} from '../shaders/SpatialPanelShader';
@@ -28,19 +27,16 @@ export type PanelFadeState = 'idle' | 'fading-in' | 'fading-out';
 /**
  * A fundamental UI container that displays content on a 2D quad in
  * 3D space. It supports background colors, rounded corners (squircles), and can
- * be made interactive and draggable. It serves as a base for building complex
- * user interfaces.
+ * be made interactive. It serves as a base for building complex user
+ * interfaces.
  *
  * The panel intelligently selects a shader:
- * - `SpatialPanelShader`: For interactive, draggable panels with hover/select
- * highlights.
+ * - `SpatialPanelShader`: For interactive panels with hover/select highlights.
  * - `SquircleShader`: For static, non-interactive panels with a clean, rounded
  * look.
  */
-export class Panel extends View implements Draggable, Partial<HasDraggingMode> {
+export class Panel extends View {
   static dependencies = {user: User, timer: THREE.Timer};
-
-  keepFacingCamera = true;
 
   /** Text description of the view */
   name = 'Panel';
@@ -50,12 +46,6 @@ export class Panel extends View implements Draggable, Partial<HasDraggingMode> {
 
   /** The underlying mesh that renders the panel's background. */
   mesh: PanelMesh;
-
-  /** Determines if the panel can be dragged by the user. */
-  draggable = false;
-
-  /** Dragging mode, defaults to true if draggable else undefined. */
-  draggingMode?: DragMode;
 
   /** Determines if the panel can be touched by the user's hands. */
   touchable = false;
@@ -123,9 +113,7 @@ export class Panel extends View implements Draggable, Partial<HasDraggingMode> {
   constructor(options: PanelOptions = {}) {
     super(options);
 
-    const isDraggable = options.draggable ?? this.draggable;
-
-    const useBorderlessShader = options.useBorderlessShader ?? !isDraggable;
+    const useBorderlessShader = options.useBorderlessShader ?? true;
     // Use SpatialPanelShader for SpatialPanel, while developers can choose
     // useBorderlessShader=false to disable the interactive border.
     const shader = useBorderlessShader ? SquircleShader : SpatialPanelShader;
@@ -134,11 +122,6 @@ export class Panel extends View implements Draggable, Partial<HasDraggingMode> {
 
     // Applies user-provided options or default options.
     this.backgroundColor = options.backgroundColor ?? this.backgroundColor;
-    this.draggable = isDraggable;
-    this.draggingMode =
-      (options.draggingMode ?? this.draggable)
-        ? DragMode.TRANSLATING
-        : DragMode.DO_NOT_DRAG;
     this.touchable = options.touchable ?? this.touchable;
     this.isRoot = options.isRoot ?? true;
     this.width = options.width ?? (this.isRoot ? DEFAULT_WIDTH_M : 1);

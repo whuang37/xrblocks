@@ -1,33 +1,30 @@
 import {Panel} from '../core/Panel';
 import {PanelOptions} from '../core/PanelOptions';
+import {ManipulationAction} from '../../interaction/manipulation/ManipulationTypes';
 
 /**
  * A fundamental UI container that lets you display app content in a
  * 3D space. It can be thought of as a "window" or "surface" in XR. It provides
  * visual feedback for user interactions like hovering and selecting, driven by
- * a custom shader, and can be made draggable.
+ * a custom shader, and can be moved by the user.
  */
 export type SpatialPanelOptions = PanelOptions & {
   showEdge?: boolean;
-  dragFacingCamera?: boolean;
 };
 
 export class SpatialPanel extends Panel {
   /**
-   * Keeps the panel facing the camera as it is dragged.
-   */
-  dragFacingCamera = true;
-
-  /**
    * Creates an instance of SpatialPanel.
    */
   constructor(options: SpatialPanelOptions = {}) {
-    options.draggable = options.draggable ?? true;
-    options.dragFacingCamera = options.dragFacingCamera ?? true;
+    options.xb ??= {
+      manipulation: {
+        actions: {translate: {faceCamera: true}},
+        handle: {action: ManipulationAction.Translate},
+      },
+    };
+    options.useBorderlessShader ??= false;
     super(options);
-    // Reset the following fields with our own defaults.
-    this.draggable = options.draggable ?? this.draggable;
-    this.dragFacingCamera = options.dragFacingCamera ?? this.dragFacingCamera;
     this.mesh.material.visible = options.showEdge !== false;
   }
 

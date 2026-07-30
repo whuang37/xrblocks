@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 
 import {VIEW_DEPTH_GAP} from '../../constants';
+import type {XBObjectOptions} from '../../interaction/manipulation/ManipulationTypes';
 import {getVec4ByColorString} from '../../utils/utils';
 import {TextView, TextViewOptions} from '../components/TextView';
 import {SquircleShader} from '../shaders/SquircleShader';
-import {DragMode} from '../../ux/DragManager';
 
 /**
  * An interactive button with a rounded rectangle background and a
@@ -21,7 +21,7 @@ export type TextButtonOptions = TextViewOptions & {
 };
 
 export class TextButton extends TextView {
-  draggingMode = DragMode.DO_NOT_DRAG;
+  xb: XBObjectOptions = {manipulationHandle: 'none'};
   /** Default description of this view in Three.js DevTools. */
   name = 'TextButton';
   /** The font size of the text label. */

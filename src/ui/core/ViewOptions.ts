@@ -1,9 +1,10 @@
-import type {DragMode} from '../../ux/DragManager';
+import type {XBObjectOptions} from '../../interaction/manipulation/ManipulationTypes';
 
 /**
  * Options for View.
  */
 export type ViewOptions = {
+  xb?: XBObjectOptions;
   name?: string;
   isRoot?: boolean;
   selectable?: boolean;
@@ -17,5 +18,4 @@ export type ViewOptions = {
   paddingY?: number;
   paddingZ?: number;
   opacity?: number;
-  draggingMode?: DragMode;
 };

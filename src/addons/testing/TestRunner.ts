@@ -199,6 +199,7 @@ export class TestRunner {
     const coreWritable = this.core as unknown as {
       effects?: unknown;
       renderer?: unknown;
+      interaction: object;
     };
     coreWritable.effects = undefined;
 
@@ -215,7 +216,7 @@ export class TestRunner {
     this.core.registry.register(this.core.user);
     this.core.registry.register(this.core.ui);
     this.core.registry.register(this.core.sound);
-    this.core.registry.register(this.core.dragManager);
+    this.core.registry.register(coreWritable.interaction);
     this.core.registry.register(this.core.simulator);
     this.core.registry.register(this.core.scriptsManager);
     this.core.registry.register(this.core.depth);

@@ -6,7 +6,7 @@ import {NUM_HANDS} from '../constants';
 import {Options} from '../core/Options.js';
 import {KeyEvent} from '../core/Script';
 import type {DirectTouchInput} from '../interaction/InteractionTypes.js';
-import {Reticle} from '../ui/core/Reticle.js';
+import {Reticle} from '../interaction/reticle/Reticle.js';
 import {Raycaster} from '../core/components/Raycaster';
 
 import {ControllerRayVisual} from './components/ControllerRayVisual';

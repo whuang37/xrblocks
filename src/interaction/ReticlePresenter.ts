@@ -7,12 +7,6 @@ import type {
   ReticlePresentationObserver,
 } from './InteractionTypes.js';
 
-interface LegacyUXOwner extends THREE.Object3D {
-  ux?: {
-    update(controller: THREE.Object3D, hit: THREE.Intersection): void;
-  };
-}
-
 const NORMAL_MATRIX = new THREE.Matrix3();
 const WORLD_NORMAL = new THREE.Vector3();
 
@@ -78,11 +72,6 @@ export class ReticlePresenter implements ReticlePresentationObserver {
       WORLD_NORMAL.copy(ray.direction).negate().normalize();
     }
     reticle.setRotationFromNormalVector(WORLD_NORMAL);
-
-    const legacyOwner = resolved.objectPath.find(
-      (object) => typeof (object as LegacyUXOwner).ux?.update === 'function'
-    ) as LegacyUXOwner | undefined;
-    legacyOwner?.ux?.update(snapshot.controller, intersection);
   }
 
   clear(controller: Controller): void {

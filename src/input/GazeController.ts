@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 import {Script} from '../core/Script';
-import {Reticle} from '../ui/core/Reticle';
+import {Reticle} from '../interaction/reticle/Reticle';
 
 import {Controller} from './Controller';
 

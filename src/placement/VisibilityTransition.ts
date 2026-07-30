@@ -1,13 +1,13 @@
 import * as THREE from 'three';
 
-import {Script} from '../core/Script';
+import {TransformScript} from './TransformScript';
 
 export interface VisibilityTransitionOptions {
   duration?: number;
 }
 
 /** Animates its parent's visibility with a scale transition. */
-export class VisibilityTransition extends Script {
+export class VisibilityTransition extends TransformScript {
   static dependencies = {timer: THREE.Timer};
 
   private timer?: THREE.Timer;
@@ -50,7 +50,8 @@ export class VisibilityTransition extends Script {
   }
 
   update() {
-    if (!this.parent || !this.timer || !this.animating) return;
+    if (!this.canUpdate || !this.parent || !this.timer || !this.animating)
+      return;
     const direction = this.targetVisible ? 1 : -1;
     const delta = Math.min(this.timer.getDelta(), 0.1);
     this.progress = THREE.MathUtils.clamp(

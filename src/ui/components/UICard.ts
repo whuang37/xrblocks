@@ -57,18 +57,25 @@ export class UICard extends XRUI(GradientPanel) {
       ...properties
     } = config;
 
+    const resolvedPixelSize = pixelSize ?? DEFAULT_CARD_PROPS.pixelSize;
+    const resolvedSizeX = sizeX ?? DEFAULT_CARD_PROPS.sizeX;
+    const resolvedSizeY = sizeY ?? DEFAULT_CARD_PROPS.sizeY;
+
     super({
       ...DEFAULT_CARD_PROPS,
       ...properties,
+      pixelSize: resolvedPixelSize,
+      sizeX: resolvedSizeX,
+      sizeY: resolvedSizeY,
       pointerEvents: properties.pointerEvents ?? 'auto',
     });
 
     this.name = name ?? 'UICard';
-    this.cardPixelSize = pixelSize ?? DEFAULT_CARD_PROPS.pixelSize;
+    this.cardPixelSize = resolvedPixelSize;
     this.baseWidth = properties.width as number | undefined;
     this.baseHeight = properties.height as number | undefined;
-    this.baseSizeX = sizeX ?? DEFAULT_CARD_PROPS.sizeX;
-    this.baseSizeY = sizeY ?? DEFAULT_CARD_PROPS.sizeY;
+    this.baseSizeX = resolvedSizeX;
+    this.baseSizeY = resolvedSizeY;
     this.anchorX = resolveHorizontalAnchor(
       anchorX ?? DEFAULT_CARD_PROPS.anchorX
     );

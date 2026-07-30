@@ -1,5 +1,6 @@
-import {Container, ContainerProperties} from '@pmndrs/uikit';
+import {Component, Container, ContainerProperties} from '@pmndrs/uikit';
 import * as THREE from 'three';
+import {TransformScript} from '../../placement/TransformScript';
 import {PanelLayer, PanelLayerProperties} from './layers/PanelLayer';
 
 /**
@@ -20,6 +21,11 @@ export abstract class ShaderPanel<
 
   constructor(properties: T) {
     const {...containerProps} = properties;
+    const containerConfig = {
+      hasNonUikitChildren: true,
+    } as NonNullable<ConstructorParameters<typeof Container>[2]> & {
+      hasNonUikitChildren: boolean;
+    };
 
     // Default styles.
     const defaultProps: ContainerProperties = {
@@ -29,7 +35,23 @@ export abstract class ShaderPanel<
       ...containerProps,
     };
 
-    super(defaultProps);
+    // XR Blocks panels may contain non-rendering placement Scripts alongside
+    // UIKit layout children. Non-UIKit children do not enter the Yoga layout.
+    super(defaultProps, undefined, containerConfig);
+  }
+
+  override add(...objects: THREE.Object3D[]): this {
+    for (const object of objects) {
+      if (
+        !(object instanceof Component) &&
+        !(object instanceof TransformScript)
+      ) {
+        throw new Error(
+          'XR Blocks UI panels only accept UIKit components or TransformScript children.'
+        );
+      }
+    }
+    return super.add(...objects);
   }
 
   /**

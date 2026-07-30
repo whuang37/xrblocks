@@ -14,7 +14,6 @@ export const ReticleShader = {
   uniforms: {
     uColor: {value: new THREE.Color().setHex(0xffffff)},
     uPressed: {value: 0.0},
-    uOpacity: {value: 1.0},
   },
 
   vertexShader: /* glsl */ `
@@ -33,7 +32,6 @@ export const ReticleShader = {
   uniform sampler2D uDepthTexture;
   uniform vec3 uColor;
   uniform float uPressed;
-  uniform float uOpacity;
 
   varying vec2 vTexCoord;
 
@@ -90,7 +88,6 @@ export const ReticleShader = {
     gl_FragColor = final_color * outer_alpha;
     // Converts to straight alpha.
     gl_FragColor.rgb = gl_FragColor.rgb / max(gl_FragColor.a, 0.001);
-    gl_FragColor.a *= uOpacity;
   }
 `,
 };

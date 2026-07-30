@@ -46,11 +46,14 @@ export class ReticleOptions {
   enabled = true;
   /**
    * Maximum reticle interaction distance in meters. Hits at or beyond this
-   * distance are not shown and cannot be selected. Undefined means unlimited.
+   * distance cannot hover or select. Undefined means unlimited.
    */
   maxDistance?: number;
-  /** Distance in meters over which the reticle fades before maxDistance. */
-  fadeDistance = 0.5;
+  /**
+   * Distance in meters at which to render the reticle when no valid hit is
+   * found. Set to 0 to hide the reticle on a miss.
+   */
+  defaultRenderDistance = 0;
 }
 
 /**

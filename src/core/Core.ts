@@ -344,7 +344,8 @@ export class Core {
 
     this.options = options;
     this.reticleOptions.maxDistance = options.reticles.maxDistance;
-    this.reticleOptions.fadeDistance = options.reticles.fadeDistance;
+    this.reticleOptions.defaultRenderDistance =
+      options.reticles.defaultRenderDistance;
     this.scriptsManager.catchExceptions = options.catchScriptExceptions;
 
     // Sets up input. Head gestures are camera-only and do not require controllers.

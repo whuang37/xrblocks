@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import {lerp} from '../../utils/utils';
 import {ReticleShader} from './ReticleShader';
 
-const HOVER_RING_BRIGHTNESS = 0.3;
+const HOVER_RING_BRIGHTNESS = 0.4;
 const HOVER_RING_OPACITY = 0.7;
 
 /**
@@ -153,13 +153,6 @@ export class Reticle extends THREE.Mesh<
    */
   getColor(): THREE.Color {
     return this.material.uniforms.uColor.value;
-  }
-
-  /** Sets the opacity of the reticle and its hover ring. */
-  setOpacity(opacity: number) {
-    const clampedOpacity = THREE.MathUtils.clamp(opacity, 0, 1);
-    this.material.uniforms.uOpacity.value = clampedOpacity;
-    this.hoverRing.material.opacity = HOVER_RING_OPACITY * clampedOpacity;
   }
 
   /**

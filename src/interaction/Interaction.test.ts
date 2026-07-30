@@ -614,12 +614,12 @@ describe('Interaction', () => {
     expect(reticle.targetObject).toBeUndefined();
   });
 
-  it('limits interaction range and fades the reticle near its edge', () => {
+  it('uses the default render distance for hits beyond the maximum', () => {
     const reticle = new Reticle(0);
     source.reticle = reticle;
     const reticleOptions = new ReticleOptions();
-    reticleOptions.maxDistance = 3;
-    reticleOptions.fadeDistance = 1;
+    reticleOptions.maxDistance = 2;
+    reticleOptions.defaultRenderDistance = 1;
     interaction = new Interaction({
       callbacks,
       manipulation,
@@ -630,15 +630,15 @@ describe('Interaction', () => {
     callbacks.scripts.add(target);
     callbacks.targets.add(target);
 
-    interaction.updateRaySources([input(source, [hit(target, 2.5)])]);
+    interaction.updateRaySources([input(source, [hit(target, 1.5)])]);
 
     expect(reticle.visible).toBe(true);
-    expect(reticle.material.uniforms.uOpacity.value).toBeCloseTo(0.5);
     expect(reticle.targetObject).toBe(target);
 
-    interaction.updateRaySources([input(source, [hit(target, 3)])]);
+    interaction.updateRaySources([input(source, [hit(target, 2)])]);
 
-    expect(reticle.visible).toBe(false);
+    expect(reticle.visible).toBe(true);
+    expect(reticle.position.toArray()).toEqual([0, 0, -1]);
     expect(reticle.targetObject).toBeUndefined();
     expect(callbacks.calls).toContain('target:onHoverExit');
   });

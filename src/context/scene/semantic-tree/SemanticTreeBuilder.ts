@@ -27,10 +27,6 @@ type SemanticObject = THREE.Object3D & {
   behaviors?: unknown[];
   text?: string;
   icon?: string;
-  ux?: {
-    isHovered?: () => boolean;
-    isSelected?: () => boolean;
-  };
   userData: THREE.Object3D['userData'] & {
     semantic?: SemanticMetadata;
   };
@@ -274,7 +270,7 @@ function inferSource(
     className === 'UICard' ||
     className === 'AdditiveUICard'
   ) {
-    return 'uiblocks';
+    return 'xrblocks';
   }
   if ((object as SemanticObject).isView || (object as SemanticObject).isPanel) {
     return 'xrblocks';
@@ -344,11 +340,6 @@ function createSemanticNode(
   if (semantic.text) node.text = semantic.text;
   if (semantic.traits?.length) node.traits = semantic.traits;
   if (semantic.disabled !== undefined) node.disabled = semantic.disabled;
-  const hovered = (object as SemanticObject).ux?.isHovered?.();
-  const selected = (object as SemanticObject).ux?.isSelected?.();
-  if (hovered !== undefined) node.hovered = hovered;
-  if (selected !== undefined) node.selected = selected;
-
   const bounds = getSemanticBounds(object);
   if (bounds) node.bounds = bounds;
   return node;

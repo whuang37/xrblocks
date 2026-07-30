@@ -6,8 +6,8 @@ import {
   Image,
   InProperties,
 } from '@pmndrs/uikit';
-import {TextWithEmoji} from '../../uiblocks/src/core/primitives/TextWithEmoji';
 import {computed} from '@preact/signals-core';
+import {TextWithEmoji} from 'xrblocks';
 
 import {ActionButton} from './ActionButton';
 import {ButtonProperties} from './ButtonProperties';

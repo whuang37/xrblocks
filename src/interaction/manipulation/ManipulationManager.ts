@@ -5,7 +5,7 @@ import type {Controller} from '../../input/Controller';
 import {
   resumeTransformScripts,
   suspendTransformScripts,
-} from '../../spatial/TransformScript';
+} from '../../placement/TransformScript';
 import {UP} from '../../utils/HelperConstants';
 import {objectIsDescendantOf} from '../../utils/SceneGraphUtils';
 import type {

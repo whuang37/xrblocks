@@ -6,10 +6,10 @@ import {
   WithSignal,
 } from '@pmndrs/uikit';
 import {computed} from '@preact/signals-core';
+import {TextWithEmoji} from 'xrblocks';
 
 import {HighlightMaterial} from './HighlightMaterial';
 import {MaterialSymbolsIcon} from './MaterialSymbolsIcon';
-import {TextWithEmoji} from '../../uiblocks/src/core/primitives/TextWithEmoji';
 
 /** Properties for the ActionButton component. */
 export type ActionButtonOutProperties = {

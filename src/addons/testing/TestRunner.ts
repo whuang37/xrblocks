@@ -214,7 +214,6 @@ export class TestRunner {
     this.core.registry.register(this.core.timer, THREE.Timer);
     this.core.registry.register(this.core.input);
     this.core.registry.register(this.core.user);
-    this.core.registry.register(this.core.ui);
     this.core.registry.register(this.core.sound);
     this.core.registry.register(coreWritable.interaction);
     this.core.registry.register(this.core.simulator);

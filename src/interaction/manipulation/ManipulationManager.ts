@@ -2,6 +2,8 @@ import * as THREE from 'three';
 
 import type {Script} from '../../core/Script';
 import type {Controller} from '../../input/Controller';
+import {UP} from '../../utils/HelperConstants';
+import {objectIsDescendantOf} from '../../utils/SceneGraphUtils';
 import type {
   InteractionSourceSnapshot,
   ManipulationResolution,
@@ -107,7 +109,6 @@ type Proposal = ProposalBase &
       }
   );
 
-const WORLD_UP = new THREE.Vector3(0, 1, 0);
 const EPSILON = 1e-8;
 
 /**
@@ -402,7 +403,7 @@ export class ManipulationManager {
       !current ||
       !session.owner.visible ||
       session.owner.parent !== session.ownerParent ||
-      !isDescendantOf(session.primary.capture.surface, session.owner) ||
+      !objectIsDescendantOf(session.primary.capture.surface, session.owner) ||
       resolution?.owner !== session.owner ||
       resolution.action !== session.primaryAction
     ) {
@@ -752,18 +753,6 @@ function cloneSnapshot(
   };
 }
 
-function isDescendantOf(
-  object: THREE.Object3D,
-  owner: THREE.Object3D
-): boolean {
-  let current: THREE.Object3D | null = object;
-  while (current) {
-    if (current === owner) return true;
-    current = current.parent;
-  }
-  return false;
-}
-
 function axisVector(axis: RotateOptions['axis']): THREE.Vector3 | undefined {
   const vector =
     axis === undefined || axis === 'y'
@@ -805,11 +794,7 @@ function faceCameraQuaternion(
   cameraPosition.y = worldPosition.y;
   if (cameraPosition.distanceToSquared(worldPosition) < EPSILON)
     return undefined;
-  const matrix = new THREE.Matrix4().lookAt(
-    cameraPosition,
-    worldPosition,
-    WORLD_UP
-  );
+  const matrix = new THREE.Matrix4().lookAt(cameraPosition, worldPosition, UP);
   return worldQuaternionToLocal(
     owner,
     new THREE.Quaternion().setFromRotationMatrix(matrix)

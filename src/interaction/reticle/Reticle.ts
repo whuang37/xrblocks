@@ -155,6 +155,13 @@ export class Reticle extends THREE.Mesh<
     return this.material.uniforms.uColor.value;
   }
 
+  /** Sets the opacity of the reticle and its hover ring. */
+  setOpacity(opacity: number) {
+    const clampedOpacity = THREE.MathUtils.clamp(opacity, 0, 1);
+    this.material.uniforms.uOpacity.value = clampedOpacity;
+    this.hoverRing.material.opacity = HOVER_RING_OPACITY * clampedOpacity;
+  }
+
   /**
    * Sets the visual state of the reticle to "pressed" or "unpressed".
    * This provides visual feedback to the user during interaction.

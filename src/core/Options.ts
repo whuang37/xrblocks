@@ -45,11 +45,12 @@ export class InputOptions {
 export class ReticleOptions {
   enabled = true;
   /**
-   * When set to a positive value, the reticle is placed at this distance
-   * (in meters) along the controller ray when no intersection is found,
-   * instead of being hidden. Set to 0 to hide the reticle on miss.
+   * Maximum reticle interaction distance in meters. Hits at or beyond this
+   * distance are not shown and cannot be selected. Undefined means unlimited.
    */
-  defaultDistance = 0;
+  maxDistance?: number;
+  /** Distance in meters over which the reticle fades before maxDistance. */
+  fadeDistance = 0.5;
 }
 
 /**

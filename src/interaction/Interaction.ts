@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 
+import {ReticleOptions} from '../core/Options.js';
 import type {Controller} from '../input/Controller.js';
 import {objectIsDescendantOf} from '../utils/SceneGraphUtils.js';
 import {DirectTouch} from './DirectTouch.js';
@@ -44,6 +45,7 @@ export class Interaction {
   private readonly callbacks;
   private readonly manipulation;
   private readonly reticle;
+  private readonly reticleOptions;
   private readonly resolver;
   private readonly directTouch;
   private readonly longSelectDuration;
@@ -60,9 +62,9 @@ export class Interaction {
   constructor(dependencies: InteractionDependencies) {
     this.callbacks = dependencies.callbacks;
     this.manipulation = dependencies.manipulation ?? NO_MANIPULATION;
+    this.reticleOptions = dependencies.reticleOptions ?? new ReticleOptions();
     this.reticle =
-      dependencies.reticle ??
-      new ReticlePresenter(dependencies.defaultReticleDistance);
+      dependencies.reticle ?? new ReticlePresenter(this.reticleOptions);
     this.longSelectDuration =
       dependencies.longSelectDuration ?? DEFAULT_LONG_SELECT_DURATION;
     this.resolver = new HitResolver(this.callbacks, this.manipulation);
@@ -108,10 +110,14 @@ export class Interaction {
         continue;
       }
 
-      const resolved = this.resolver.resolve(
-        input.intersections,
-        input.sourceType
-      );
+      const maxDistance = this.reticleOptions.maxDistance;
+      const intersections =
+        maxDistance === undefined
+          ? input.intersections
+          : input.intersections.filter(
+              (intersection) => intersection.distance < maxDistance
+            );
+      const resolved = this.resolver.resolve(intersections, input.sourceType);
       let gazeCompleted = false;
       if (input.sourceType === 'gaze') {
         const dwell = this.gazeDwell.update(

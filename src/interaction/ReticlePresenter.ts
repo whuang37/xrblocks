@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 
+import {ReticleOptions} from '../core/Options.js';
 import type {Controller} from '../input/Controller.js';
 import type {
   InteractionSourceSnapshot,
@@ -12,7 +13,7 @@ const WORLD_NORMAL = new THREE.Vector3();
 
 /** Presents resolved state. It never performs a raycast or changes targeting. */
 export class ReticlePresenter implements ReticlePresentationObserver {
-  constructor(public defaultDistance = 0) {}
+  constructor(private readonly options = new ReticleOptions()) {}
 
   present(
     snapshot: InteractionSourceSnapshot,
@@ -42,21 +43,13 @@ export class ReticlePresenter implements ReticlePresentationObserver {
       reticle.intersection = undefined;
       reticle.targetObject = undefined;
       reticle.setHovering(false);
-      if (this.defaultDistance <= 0) {
-        reticle.visible = false;
-        return;
-      }
-      reticle.visible = true;
-      reticle.position
-        .copy(ray.origin)
-        .addScaledVector(ray.direction, this.defaultDistance);
-      WORLD_NORMAL.copy(ray.direction).negate().normalize();
-      reticle.setRotationFromNormalVector(WORLD_NORMAL);
+      reticle.visible = false;
       return;
     }
 
     const {intersection} = resolved;
     reticle.visible = true;
+    reticle.setOpacity(this.getOpacity(intersection.distance));
     reticle.intersection = intersection;
     reticle.targetObject = resolved.target;
     reticle.setHovering(resolved.target !== undefined);
@@ -74,9 +67,30 @@ export class ReticlePresenter implements ReticlePresentationObserver {
     reticle.setRotationFromNormalVector(WORLD_NORMAL);
   }
 
+  private getOpacity(distance: number): number {
+    const {maxDistance} = this.options;
+    if (maxDistance === undefined) return 1;
+    if (distance >= maxDistance) return 0;
+
+    const fadeDistance = Math.min(
+      Math.max(this.options.fadeDistance, 0),
+      maxDistance
+    );
+    if (fadeDistance === 0) return 1;
+
+    const fadeStart = maxDistance - fadeDistance;
+    const progress = Math.min(
+      Math.max((distance - fadeStart) / fadeDistance, 0),
+      1
+    );
+    const smoothProgress = progress * progress * (3 - 2 * progress);
+    return 1 - smoothProgress;
+  }
+
   clear(controller: Controller): void {
     if (!controller.reticle) return;
     controller.reticle.visible = false;
+    controller.reticle.setOpacity(1);
     controller.reticle.intersection = undefined;
     controller.reticle.targetObject = undefined;
     controller.reticle.setHovering(false);

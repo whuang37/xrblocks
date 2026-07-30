@@ -48,7 +48,7 @@ import {
 import {XRButton} from './components/XRButton';
 import {XREffects} from './components/XREffects';
 import {XRTransition} from './components/XRTransition';
-import {Options} from './Options';
+import {Options, ReticleOptions} from './Options';
 import {Script} from './Script';
 import {User} from './User';
 import {PermissionsManager} from './components/PermissionsManager';
@@ -108,7 +108,8 @@ export class Core {
   /** Private interaction and manipulation runtime. */
   private interaction!: Interaction;
   private manipulationManager!: ManipulationManager;
-  private reticlePresenter = new ReticlePresenter();
+  private reticleOptions = new ReticleOptions();
+  private reticlePresenter = new ReticlePresenter(this.reticleOptions);
   private interactionSources = new Set<Controller>();
 
   /** Manages real-world understanding: planes, meshes, objects, and sounds. */
@@ -226,6 +227,7 @@ export class Core {
       callbacks: this.scriptsManager,
       manipulation: this.manipulationManager,
       reticle: this.reticlePresenter,
+      reticleOptions: this.reticleOptions,
     });
 
     this.scene.name = 'XR Blocks Scene';
@@ -341,7 +343,8 @@ export class Core {
     }
 
     this.options = options;
-    this.reticlePresenter.defaultDistance = options.reticles.defaultDistance;
+    this.reticleOptions.maxDistance = options.reticles.maxDistance;
+    this.reticleOptions.fadeDistance = options.reticles.fadeDistance;
     this.scriptsManager.catchExceptions = options.catchScriptExceptions;
 
     // Sets up input. Head gestures are camera-only and do not require controllers.

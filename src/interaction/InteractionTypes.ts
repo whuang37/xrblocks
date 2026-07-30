@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 
+import type {ReticleOptions} from '../core/Options.js';
 import type {Script} from '../core/Script.js';
 import type {Controller} from '../input/Controller.js';
 import type {
@@ -145,6 +146,6 @@ export interface InteractionDependencies {
   callbacks: InteractionCallbackDispatch;
   manipulation?: InteractionManipulation;
   reticle?: ReticlePresentationObserver;
-  defaultReticleDistance?: number;
+  reticleOptions?: ReticleOptions;
   longSelectDuration?: number;
 }

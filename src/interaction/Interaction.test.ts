@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
+import {ReticleOptions} from '../core/Options.js';
 import type {Controller} from '../input/Controller.js';
 import {Reticle} from './reticle/Reticle.js';
 import {Interaction} from './Interaction.js';
@@ -535,13 +536,12 @@ describe('Interaction', () => {
     expect(callbacks.calls).not.toContain('global:onSelect');
   });
 
-  it('does not show the miss fallback while a canceled source is suppressed', () => {
+  it('does not show the reticle while a canceled source is suppressed', () => {
     const reticle = new Reticle(0);
     source.reticle = reticle;
     interaction = new Interaction({
       callbacks,
       manipulation,
-      defaultReticleDistance: 2,
     });
     const target = new TestObject();
     callbacks.scripts.add(target);
@@ -614,19 +614,32 @@ describe('Interaction', () => {
     expect(reticle.targetObject).toBeUndefined();
   });
 
-  it('uses the configured ray-facing fallback on a miss', () => {
+  it('limits interaction range and fades the reticle near its edge', () => {
     const reticle = new Reticle(0);
     source.reticle = reticle;
+    const reticleOptions = new ReticleOptions();
+    reticleOptions.maxDistance = 3;
+    reticleOptions.fadeDistance = 1;
     interaction = new Interaction({
       callbacks,
       manipulation,
-      defaultReticleDistance: 2,
+      reticleOptions,
     });
+    const target = new TestObject();
+    target.name = 'target';
+    callbacks.scripts.add(target);
+    callbacks.targets.add(target);
 
-    interaction.updateRaySources([input(source, [])]);
+    interaction.updateRaySources([input(source, [hit(target, 2.5)])]);
 
     expect(reticle.visible).toBe(true);
-    expect(reticle.position.toArray()).toEqual([0, 0, -2]);
+    expect(reticle.material.uniforms.uOpacity.value).toBeCloseTo(0.5);
+    expect(reticle.targetObject).toBe(target);
+
+    interaction.updateRaySources([input(source, [hit(target, 3)])]);
+
+    expect(reticle.visible).toBe(false);
     expect(reticle.targetObject).toBeUndefined();
+    expect(callbacks.calls).toContain('target:onHoverExit');
   });
 });

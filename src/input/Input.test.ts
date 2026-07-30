@@ -41,7 +41,6 @@ describe('Input head gestures', () => {
   });
 });
 
-describe('Input resilience and cleanup', () => {
   it('dispatches selectend and resets selected state upon disconnection', () => {
     const input = new Input();
     const mockController = new THREE.Object3D() as unknown as Controller;

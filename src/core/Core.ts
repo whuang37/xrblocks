@@ -17,7 +17,7 @@ import {HeadGestureRecognitionOptions} from '../input/headGestures/HeadGestureRe
 import type {PoseEstimator} from '../input/gestures/GestureTypes';
 import {StrokeRecognitionOptions} from '../input/strokes/StrokeRecognitionOptions';
 import {Input} from '../input/Input';
-import type {Controller, ControllerEvent} from '../input/Controller';
+import type {Controller} from '../input/Controller';
 import {Interaction} from '../interaction/Interaction';
 import type {RaySourceInput} from '../interaction/InteractionTypes';
 import {ManipulationManager} from '../interaction/manipulation/ManipulationManager';
@@ -370,8 +370,6 @@ export class Core {
       renderer: this.renderer,
     });
     if (options.controllers.enabled) {
-      this.input.bindSelectStart(this.onSelectStart);
-      this.input.bindSelectEnd(this.onSelectEnd);
       this.input.bindSqueezeStart(this.scriptsManager.callSqueezeStart);
       this.input.bindSqueezeEnd(this.scriptsManager.callSqueezeEnd);
       this.input.bindSqueeze(this.scriptsManager.callSqueeze);
@@ -594,18 +592,8 @@ export class Core {
         this.interaction.removeSource(controller);
     }
     this.interactionSources = nextSources;
-    this.interaction.updateRaySources(sources);
+    this.interaction.updateRaySources(sources, this.timer.getDelta());
   }
-
-  private onSelectStart = (event: ControllerEvent) => {
-    this.updateInteractionSources();
-    this.interaction.selectStart(event.target);
-  };
-
-  private onSelectEnd = (event: ControllerEvent) => {
-    this.updateInteractionSources();
-    this.interaction.selectEnd(event.target);
-  };
 
   private update = (time: number, frame: XRFrame) => {
     if (this._isPaused && !this.isSteppingFrame) {
@@ -642,6 +630,7 @@ export class Core {
     this.scriptsManager.resetUX();
     this.input.update();
     this.updateInteractionSources();
+    this.interaction.updateDirectTouches(this.input.directTouchInputs);
 
     // Updates scripts with user interactions.
     for (const controller of this.input.controllers) {

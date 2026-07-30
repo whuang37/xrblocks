@@ -57,7 +57,7 @@ declare module 'three' {
   interface Object3D {
     pointerEvents?: PointerEvents;
     interactionEnabled?: boolean;
-    reticle?: ReticleMode;
+    reticleMode?: ReticleMode;
     xb?: XBObjectOptions;
   }
 }

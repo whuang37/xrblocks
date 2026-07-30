@@ -5,6 +5,7 @@ import {XRHandModelFactory} from 'three/addons/webxr/XRHandModelFactory.js';
 import {NUM_HANDS} from '../constants';
 import {Options} from '../core/Options.js';
 import {KeyEvent} from '../core/Script';
+import type {DirectTouchInput} from '../interaction/InteractionTypes.js';
 import {Reticle} from '../ui/core/Reticle.js';
 import {Raycaster} from '../core/components/Raycaster';
 
@@ -33,6 +34,12 @@ export class Reticles extends THREE.Group {
 
 // Reusable objects for performance.
 const MATRIX4 = new THREE.Matrix4();
+const TOUCH_BOX = new THREE.Box3();
+const TOUCH_CENTER = new THREE.Vector3();
+
+type MutableDirectTouchInput = Omit<DirectTouchInput, 'intersections'> & {
+  intersections: THREE.Intersection[];
+};
 
 /**
  * The XRInput class holds all the controllers and performs raycasts through the
@@ -60,6 +67,7 @@ export class Input {
   leftController?: Controller;
   rightController?: Controller;
   reticles = new Reticles();
+  directTouchInputs: DirectTouchInput[] = [];
   scene?: THREE.Scene;
 
   /**
@@ -461,6 +469,46 @@ export class Input {
         this.updateController(controller);
       }
     }
+    this.updateDirectTouchInputs();
+  }
+
+  private updateDirectTouchInputs() {
+    const inputs: MutableDirectTouchInput[] = [];
+    for (let handIndex = 0; handIndex < NUM_HANDS; handIndex++) {
+      const controller = this.controllers[handIndex];
+      const indexTip = this.hands[handIndex]?.joints?.['index-finger-tip'];
+      if (!controller || !indexTip) continue;
+      inputs.push({
+        controller,
+        handIndex,
+        point: indexTip.getWorldPosition(new THREE.Vector3()),
+        intersections: [],
+      });
+    }
+
+    if (inputs.length > 0) {
+      this.scene?.traverse((object) => {
+        if (!(object as Partial<THREE.Mesh>).isMesh || !object.visible) return;
+        try {
+          TOUCH_BOX.setFromObject(object);
+        } catch (_) {
+          return;
+        }
+        for (const input of inputs) {
+          if (!TOUCH_BOX.containsPoint(input.point)) continue;
+          input.intersections.push({
+            distance: TOUCH_BOX.getCenter(TOUCH_CENTER).distanceTo(input.point),
+            object,
+            point: input.point,
+          });
+        }
+      });
+      for (const input of inputs) {
+        input.intersections.sort((a, b) => a.distance - b.distance);
+      }
+    }
+
+    this.directTouchInputs = inputs;
   }
 
   updateController(controller: Controller) {

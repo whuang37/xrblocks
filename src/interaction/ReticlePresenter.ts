@@ -33,7 +33,11 @@ export class ReticlePresenter implements ReticlePresentationObserver {
     }
 
     reticle.direction.copy(ray.direction).normalize();
-    reticle.setPressed(snapshot.selected);
+    if (snapshot.selectionProgress === undefined) {
+      reticle.setPressed(snapshot.selected);
+    } else {
+      reticle.setPressedAmount(snapshot.selectionProgress);
+    }
 
     if (resolved?.reticleMode === 'hidden') {
       this.clear(snapshot.controller);
@@ -43,6 +47,7 @@ export class ReticlePresenter implements ReticlePresentationObserver {
     if (!resolved) {
       reticle.intersection = undefined;
       reticle.targetObject = undefined;
+      reticle.setHovering(false);
       if (this.defaultDistance <= 0) {
         reticle.visible = false;
         return;
@@ -60,6 +65,7 @@ export class ReticlePresenter implements ReticlePresentationObserver {
     reticle.visible = true;
     reticle.intersection = intersection;
     reticle.targetObject = resolved.target;
+    reticle.setHovering(resolved.target !== undefined);
     reticle.position.copy(intersection.point);
 
     if (intersection.normal) {
@@ -84,5 +90,6 @@ export class ReticlePresenter implements ReticlePresentationObserver {
     controller.reticle.visible = false;
     controller.reticle.intersection = undefined;
     controller.reticle.targetObject = undefined;
+    controller.reticle.setHovering(false);
   }
 }

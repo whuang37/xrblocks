@@ -9,9 +9,6 @@ import {ObjectGrabEvent, Script} from './Script';
 
 type MaybeXRScript = THREE.Object3D & {isXRScript?: boolean};
 
-const tempBox = new THREE.Box3();
-const tempCenter = new THREE.Vector3();
-
 /**
  * User is an embodied instance to manage hands, controllers, speech, and
  * avatars. It extends Script to update human-world interaction.
@@ -24,7 +21,6 @@ export class User extends Script {
   static dependencies = {
     input: Input,
     interaction: Interaction,
-    scene: THREE.Scene,
   };
 
   /**
@@ -92,7 +88,6 @@ export class User extends Script {
 
   input!: Input;
   private interaction!: Interaction;
-  scene!: THREE.Scene;
   controllers!: Controller[];
 
   /**
@@ -105,19 +100,10 @@ export class User extends Script {
   /**
    * Initializes the User.
    */
-  init({
-    input,
-    interaction,
-    scene,
-  }: {
-    input: Input;
-    interaction: Interaction;
-    scene: THREE.Scene;
-  }) {
+  init({input, interaction}: {input: Input; interaction: Interaction}) {
     this.input = input;
     this.interaction = interaction;
     this.controllers = input.controllers;
-    this.scene = scene;
   }
 
   /**
@@ -262,9 +248,6 @@ export class User extends Script {
    * The main update loop called each frame.
    */
   update() {
-    // Direct touch detection.
-    this.updateTouchState();
-    // Direct grab detection.
     this.updateGrabState();
   }
 
@@ -278,7 +261,15 @@ export class User extends Script {
 
     for (let i = 0; i < this.numHands; i++) {
       const isPinching = this.isSelecting(i);
-      const touchedMeshes = this.touchedObjects.get(i) || new Set<THREE.Mesh>();
+      const controller = this.controllers[i];
+      const surface = controller
+        ? this.interaction.getDirectTouchSurface(controller)
+        : undefined;
+      const touchedMeshes = (surface as Partial<THREE.Mesh> | undefined)?.isMesh
+        ? new Set([surface as THREE.Mesh])
+        : new Set<THREE.Mesh>();
+      if (touchedMeshes.size > 0) this.touchedObjects.set(i, touchedMeshes);
+      else this.touchedObjects.delete(i);
 
       const currentlyGrabbedMeshes = isPinching
         ? touchedMeshes
@@ -318,62 +309,6 @@ export class User extends Script {
           const grabEvent = previouslyGrabbedMeshesMap.get(mesh);
           this.callObjectGrabbing(grabEvent, mesh);
         }
-      }
-    }
-  }
-
-  /**
-   * Checks for and handles touch events for the hands' index fingers.
-   */
-  updateTouchState() {
-    if (!this.hands) {
-      return;
-    }
-    for (let i = 0; i < this.numHands; i++) {
-      const indexTip = this.hands.getIndexTip(i);
-      const controller = this.controllers[i];
-      if (!indexTip) {
-        if (controller) this.interaction.removeDirectTouch(controller);
-        this.touchedObjects.delete(i);
-        continue;
-      }
-
-      const indexTipPosition = new THREE.Vector3();
-      indexTip.getWorldPosition(indexTipPosition);
-
-      const contacts: THREE.Intersection[] = [];
-      this.scene.traverse((object) => {
-        if ((object as Partial<THREE.Mesh>).isMesh && object.visible) {
-          try {
-            tempBox.setFromObject(object);
-          } catch (_) {
-            return;
-          }
-          if (tempBox.containsPoint(indexTipPosition)) {
-            contacts.push({
-              distance: tempBox
-                .getCenter(tempCenter)
-                .distanceTo(indexTipPosition),
-              object,
-              point: indexTipPosition,
-            });
-          }
-        }
-      });
-      contacts.sort((a, b) => a.distance - b.distance);
-
-      const surface = controller
-        ? this.interaction.updateDirectTouch({
-            controller,
-            handIndex: i,
-            point: indexTipPosition,
-            intersections: contacts,
-          })
-        : undefined;
-      if ((surface as Partial<THREE.Mesh> | undefined)?.isMesh) {
-        this.touchedObjects.set(i, new Set([surface as THREE.Mesh]));
-      } else {
-        this.touchedObjects.delete(i);
       }
     }
   }

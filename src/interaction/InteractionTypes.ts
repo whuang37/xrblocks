@@ -43,6 +43,7 @@ export interface InteractionSourceSnapshot {
   readonly orientation: THREE.Quaternion;
   readonly ray?: THREE.Ray;
   readonly selected: boolean;
+  readonly selectionProgress?: number;
 }
 
 export interface ResolvedRay {

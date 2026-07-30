@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 
 import {Script} from '../core/Script';
+import {Interaction} from '../interaction/Interaction';
 import {Reticle} from '../ui/core/Reticle';
 import {AnimatableNumber} from '../ui/interaction/AnimatableNumber';
 
@@ -32,7 +33,11 @@ export class GazeController
   extends Script<GazeControllerEventMap>
   implements Controller
 {
-  static dependencies = {camera: THREE.Camera, timer: THREE.Timer};
+  static dependencies = {
+    camera: THREE.Camera,
+    interaction: Interaction,
+    timer: THREE.Timer,
+  };
 
   /**
    * User data for the controller, including its connection status, unique ID,
@@ -75,8 +80,21 @@ export class GazeController
 
   camera!: THREE.Camera;
 
-  init({camera, timer}: {camera: THREE.Camera; timer: THREE.Timer}) {
+  private interaction!: Interaction;
+  private dwellTarget?: THREE.Object3D;
+  private armed = true;
+
+  init({
+    camera,
+    interaction,
+    timer,
+  }: {
+    camera: THREE.Camera;
+    interaction: Interaction;
+    timer: THREE.Timer;
+  }) {
     this.camera = camera;
+    this.interaction = interaction;
     this.timer = timer;
   }
 
@@ -95,9 +113,22 @@ export class GazeController
     super.update();
     this.updatePose();
     const delta = this.timer.getDelta();
+    const target = this.interaction.getResolvedRay(this)?.target;
+    if (target !== this.dwellTarget) {
+      this.dwellTarget = target;
+      this.activationAmount.value = 0;
+      this.armed = true;
+    }
+    if (!target || !this.armed) {
+      this.updateReticleScale();
+      this.lastReticlePosition.copy(this.reticle.position);
+      return;
+    }
+
     this.activationAmount.update(delta);
     const movement =
-      this.lastReticlePosition.distanceTo(this.reticle.position) / delta;
+      this.lastReticlePosition.distanceTo(this.reticle.position) /
+      Math.max(delta, Number.EPSILON);
     if (movement > PRESS_MOVEMENT_THRESHOLD) {
       this.activationAmount.value = 0.0;
       if (this.userData.selected) {
@@ -107,6 +138,8 @@ export class GazeController
     }
     if (this.activationAmount.value == 1.0 && !this.userData.selected) {
       this.callSelectStart();
+      this.callSelectEnd();
+      this.armed = false;
     }
     this.updateReticleScale();
     this.lastReticlePosition.copy(this.reticle.position);

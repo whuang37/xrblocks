@@ -1,7 +1,14 @@
 import * as THREE from 'three';
 
 import type {Controller} from '../../input/Controller';
-import {KeyEvent, Script, SelectEvent} from '../Script';
+import type {
+  GlobalInteractionHook,
+  InteractionCallbackDispatch,
+  InteractionSourceType,
+  TargetedInteractionHook,
+} from '../../interaction/InteractionTypes';
+import type {ManipulationEvent} from '../../interaction/manipulation/ManipulationTypes';
+import {KeyEvent, type ObjectTouchEvent, Script, SelectEvent} from '../Script';
 
 type MaybeScript = THREE.Object3D & {isXRScript?: boolean};
 
@@ -18,7 +25,10 @@ export type ScriptsManagerEventMap = THREE.Object3DEventMap & {
   };
 };
 
-export class ScriptsManager extends THREE.EventDispatcher<ScriptsManagerEventMap> {
+export class ScriptsManager
+  extends THREE.EventDispatcher<ScriptsManagerEventMap>
+  implements InteractionCallbackDispatch
+{
   /** The set of all currently initialized scripts. */
   scripts = new Set<Script>();
 
@@ -35,6 +45,62 @@ export class ScriptsManager extends THREE.EventDispatcher<ScriptsManagerEventMap
     super();
   }
 
+  isScript = (object: THREE.Object3D): boolean =>
+    (object as MaybeScript).isXRScript === true;
+
+  // The legacy UI merge is separate. Until then, every Script remains a
+  // logical interaction target, matching the current SDK behavior.
+  hasTargetHandler = (
+    object: THREE.Object3D,
+    _sourceType: InteractionSourceType
+  ): boolean => this.isScript(object);
+
+  invokeTarget = (
+    object: THREE.Object3D,
+    hook: TargetedInteractionHook,
+    argument: unknown
+  ): boolean => {
+    if (!this.isScript(object)) return false;
+    return this.callTargeted([object as Script], hook, (script) => {
+      if (hook === 'onObjectSelectStart') {
+        return script.onObjectSelectStart(argument as SelectEvent);
+      }
+      if (hook === 'onObjectSelectEnd') {
+        return script.onObjectSelectEnd(argument as SelectEvent);
+      }
+      if (hook === 'onObjectTouchStart') {
+        return script.onObjectTouchStart(argument as ObjectTouchEvent);
+      }
+      if (hook === 'onObjectTouching') {
+        return script.onObjectTouching(argument as ObjectTouchEvent);
+      }
+      if (hook === 'onObjectTouchEnd') {
+        return script.onObjectTouchEnd(argument as ObjectTouchEvent);
+      }
+      const controller = argument as Controller;
+      if (hook === 'onHoverEnter') return script.onHoverEnter(controller);
+      if (hook === 'onHoverExit') return script.onHoverExit(controller);
+      return script.onHovering(controller);
+    });
+  };
+
+  invokeGlobal = (hook: GlobalInteractionHook, event: SelectEvent): void => {
+    if (hook === 'onSelectStart') {
+      this.callSelectStart(event);
+    } else if (hook === 'onSelecting') {
+      this.callSelecting(event.target);
+    } else if (hook === 'onSelect') {
+      this.callSelect(event);
+    } else {
+      this.callSelectEnd(event);
+    }
+  };
+
+  invokeManipulation = (script: Script, event: ManipulationEvent): boolean =>
+    this.callTargeted([script], 'onObjectManipulate', (target) =>
+      target.onObjectManipulate(event)
+    );
+
   private handleException(error: Error, script: Script, context: string) {
     console.error(
       `An error occurred in script ${
@@ -50,6 +116,36 @@ export class ScriptsManager extends THREE.EventDispatcher<ScriptsManagerEventMap
       error,
       timestamp: performance.now(),
     });
+  }
+
+  /**
+   * Calls one targeted hook along a captured Script path. Only a literal true
+   * return value stops propagation. Developer errors use the same exception
+   * policy as global Script callbacks.
+   */
+  callTargeted(
+    path: readonly Script[],
+    context: string,
+    callback: (script: Script) => boolean | void
+  ): boolean {
+    const catchExceptions = this.catchExceptions;
+    for (const script of path) {
+      if (!catchExceptions) {
+        if (callback(script) === true) return true;
+        continue;
+      }
+
+      try {
+        if (callback(script) === true) return true;
+      } catch (error: unknown) {
+        this.handleException(
+          error instanceof Error ? error : new Error(String(error)),
+          script,
+          context
+        );
+      }
+    }
+    return false;
   }
 
   /**

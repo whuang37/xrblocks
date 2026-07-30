@@ -16,9 +16,6 @@ export class Reticle extends THREE.Mesh<
   name = 'Reticle';
   editorIcon = 'target';
 
-  /** Prevents the reticle itself from being a target for raycasting. */
-  ignoreReticleRaycast = true;
-
   /** The world-space direction vector of the ray that hit the target. */
   direction = new THREE.Vector3();
 

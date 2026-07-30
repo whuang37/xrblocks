@@ -4,27 +4,33 @@ import type {GLTF} from 'three/addons/loaders/GLTFLoader.js';
 
 import {OCCLUDABLE_ITEMS_LAYER} from '../../constants';
 import {Script} from '../../core/Script';
+import {Registry} from '../../core/components/Registry';
 import {Depth} from '../../depth/Depth';
 import {OcclusionUtils} from '../../depth/occlusion/OcclusionUtils';
+import {
+  ManipulationAction,
+  type ManipulationOptions,
+  type XBObjectOptions,
+} from '../../interaction/manipulation/ManipulationTypes';
 import {BACK, LEFT} from '../../utils/HelperConstants';
 import {ModelLoader} from '../../utils/ModelLoader';
 import {getGroupBoundingBox} from '../../utils/ModelUtils';
+import {SparkRendererHolder} from '../../utils/SparkRendererHolder';
 import type {Shader} from '../../utils/Types';
-import {
-  Draggable,
-  DragManager,
-  DragMode,
-  HasDraggingMode,
-} from '../../ux/DragManager';
 
 import {ModelViewerPlatform} from './ModelViewerPlatform';
-import {SparkRendererHolder} from '../../utils/SparkRendererHolder';
-import {Registry} from '../../core/components/Registry';
 
 const defaultPlatformMargin = new THREE.Vector2(0.2, 0.2);
 const vector3 = new THREE.Vector3();
 const quaternion = new THREE.Quaternion();
 const quaternion2 = new THREE.Quaternion();
+
+function createRaycastProxyMaterial() {
+  return new THREE.MeshBasicMaterial({
+    colorWrite: false,
+    depthWrite: false,
+  });
+}
 
 export interface GLTFData {
   model: string;
@@ -45,8 +51,17 @@ export interface SplatData {
   horizontallyAlignObject?: boolean;
 }
 
-export class SplatAnchor extends THREE.Object3D implements HasDraggingMode {
-  draggingMode = DragMode.ROTATING;
+export interface ModelViewerOptions {
+  castShadow?: boolean;
+  receiveShadow?: boolean;
+  raycastToChildren?: boolean;
+  manipulation?: boolean | ManipulationOptions;
+}
+
+export class SplatAnchor extends THREE.Object3D {
+  xb: XBObjectOptions = {
+    manipulationHandle: {action: ManipulationAction.Rotate},
+  };
 }
 
 export class RotationRaycastMesh extends THREE.Mesh<
@@ -56,7 +71,9 @@ export class RotationRaycastMesh extends THREE.Mesh<
   constructor(geometry: THREE.BufferGeometry, material: THREE.Material) {
     super(geometry, material);
   }
-  draggingMode = DragMode.ROTATING;
+  xb: XBObjectOptions = {
+    manipulationHandle: {action: ManipulationAction.Rotate},
+  };
 }
 
 /**
@@ -65,7 +82,7 @@ export class RotationRaycastMesh extends THREE.Mesh<
  * automatically creates an interactive platform for translation and provides
  * mechanisms for rotation and scaling in both desktop and XR.
  */
-export class ModelViewer extends Script implements Draggable {
+export class ModelViewer extends Script {
   static dependencies = {
     camera: THREE.Camera,
     depth: Depth,
@@ -75,9 +92,6 @@ export class ModelViewer extends Script implements Draggable {
     timer: THREE.Timer,
   };
 
-  draggable = true;
-  rotatable = true;
-  scalable = true;
   platformAnimationSpeed = 2;
   platformThickness = 0.02;
   isOneOneScale = false;
@@ -110,8 +124,15 @@ export class ModelViewer extends Script implements Draggable {
     castShadow = true,
     receiveShadow = true,
     raycastToChildren = false,
-  }) {
+    manipulation,
+  }: ModelViewerOptions = {}) {
     super();
+    this.xb = {
+      manipulation: manipulation ?? {
+        actions: {translate: true, rotate: true, scale: true},
+        handle: {action: ManipulationAction.Rotate},
+      },
+    };
     this.castShadow = castShadow;
     this.receiveShadow = receiveShadow;
     this.raycastToChildren = raycastToChildren;
@@ -250,8 +271,9 @@ export class ModelViewer extends Script implements Draggable {
         this.clipActions.push(animationMixer.clipAction(clip));
       }
     });
-    (gltf.scene as unknown as HasDraggingMode).draggingMode =
-      DragManager.ROTATING;
+    gltf.scene.xb = {
+      manipulationHandle: {action: ManipulationAction.Rotate},
+    };
     this.gltfMesh = gltf;
     this.animationMixer = animationMixer;
     // Set the initial scale
@@ -268,8 +290,6 @@ export class ModelViewer extends Script implements Draggable {
     if (data.position) {
       gltf.scene.position.copy(data.position);
     }
-    (gltf.scene as unknown as HasDraggingMode).draggingMode =
-      DragManager.ROTATING;
     this.add(gltf.scene);
     await this.setupBoundingBox(
       data.verticallyAlignObject !== false,
@@ -385,11 +405,10 @@ export class ModelViewer extends Script implements Draggable {
     const radius = 0.05 + 0.5 * Math.min(bboxSize.x, bboxSize.z);
     const rotationRaycastMesh = new RotationRaycastMesh(
       new THREE.CylinderGeometry(radius, radius, bboxSize.y),
-      new THREE.MeshBasicMaterial({color: 0x990000, wireframe: true})
+      createRaycastProxyMaterial()
     );
     this.bbox.getCenter(rotationRaycastMesh.position);
     this.rotationRaycastMesh = rotationRaycastMesh;
-    this.rotationRaycastMesh.visible = false;
     this.add(this.rotationRaycastMesh);
   }
 
@@ -404,11 +423,10 @@ export class ModelViewer extends Script implements Draggable {
 
     const rotationRaycastMesh = new RotationRaycastMesh(
       new THREE.BoxGeometry(bboxSize.x, bboxSize.y, bboxSize.z),
-      new THREE.MeshBasicMaterial({color: 0x990000, wireframe: true})
+      createRaycastProxyMaterial()
     );
     this.bbox.getCenter(rotationRaycastMesh.position);
     this.rotationRaycastMesh = rotationRaycastMesh;
-    this.rotationRaycastMesh.visible = false;
     this.add(this.rotationRaycastMesh);
   }
 
@@ -466,14 +484,6 @@ export class ModelViewer extends Script implements Draggable {
         distanceToCamera / this.scale.z
       );
     }
-  }
-
-  onObjectSelectStart() {
-    return this.draggable || this.rotatable || this.scalable;
-  }
-
-  onObjectSelectEnd() {
-    return this.draggable || this.rotatable || this.scalable;
   }
 
   onHoverEnter(controller: THREE.Object3D) {

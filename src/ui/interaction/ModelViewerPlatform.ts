@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 
-import {DragManager} from '../../ux/DragManager.js';
+import {
+  ManipulationAction,
+  type XBObjectOptions,
+} from '../../interaction/manipulation/ManipulationTypes';
 
 import {AnimatableNumber} from './AnimatableNumber.js';
 import {createPlatformGeometry} from './ModelViewerPlatformGeometry.js';
@@ -8,14 +11,15 @@ import {createPlatformGeometry} from './ModelViewerPlatformGeometry.js';
 /**
  * A specialized `THREE.Mesh` that serves as the interactive base for
  * a `ModelViewer`. It has a distinct visual appearance and handles the logic
- * for fading in and out on hover. Its `draggingMode` is set to `TRANSLATING` to
- * enable movement.
+ * for fading in and out on hover. It is the translation handle for its viewer.
  */
 export class ModelViewerPlatform extends THREE.Mesh<
   THREE.BufferGeometry,
   THREE.Material[]
 > {
-  draggingMode = DragManager.TRANSLATING;
+  xb: XBObjectOptions = {
+    manipulationHandle: {action: ManipulationAction.Translate},
+  };
   opacity: AnimatableNumber;
 
   constructor(width: number, depth: number, thickness: number) {

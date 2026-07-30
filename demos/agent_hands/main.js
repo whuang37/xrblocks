@@ -598,9 +598,9 @@ class AgentHandsDemo extends xb.Script {
 
   // The depth mesh (scanned walls/floor) is in the scene for occlusion, so both
   // the SDK reticle and the spatial-UI hover raycast hit it; standing close to a
-  // wall it steals hover from the control panel. No-op its raycast so every
-  // raycaster skips it (ignoreReticleRaycast only covers the reticle, not the UI
-  // hover). AgentWorld restores it briefly for object grounding.
+  // wall it steals hover from the control panel. No-op its raycast so the
+  // spatial-UI raycaster skips it. AgentWorld restores it briefly for object
+  // grounding.
   ensureDepthMeshNonInteractive_() {
     const mesh = xb.core.depth?.depthMesh;
     if (!mesh || mesh.__reticleNooped) return;

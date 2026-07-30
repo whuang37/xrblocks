@@ -53,7 +53,7 @@ export class MeasureScene extends xb.Script {
         .filter((intersection) => {
           let target = intersection.object;
           while (target) {
-            if (target.ignoreReticleRaycast === true) {
+            if (target.pointerEvents === 'none') {
               return false;
             }
             target = target.parent;

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 export class TorusKnotLoadingAnimation extends THREE.Points {
-  ignoreReticleRaycast = true;
+  pointerEvents = 'none';
 
   constructor() {
     const baseGeometry = new THREE.TorusKnotGeometry(0.15, 0.04, 200, 40);

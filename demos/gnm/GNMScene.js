@@ -155,7 +155,7 @@ export class GNMScene extends xb.Script {
     // Overlay: never a reticle target — lines return no surface normal, which
     // would otherwise trap the reticle at the origin (it also occludes the head
     // because THREE raycasts objects even while hidden).
-    this.wireframe.ignoreReticleRaycast = true;
+    this.wireframe.pointerEvents = 'none';
     this.anchor.add(this.wireframe);
 
     // ---- Landmarks -------------------------------------------------------
@@ -168,7 +168,7 @@ export class GNMScene extends xb.Script {
     );
     this.landmarkMesh.frustumCulled = false;
     this.landmarkMesh.visible = false;
-    this.landmarkMesh.ignoreReticleRaycast = true; // overlay, not a target
+    this.landmarkMesh.pointerEvents = 'none'; // overlay, not a target
     this.anchor.add(this.landmarkMesh);
 
     // ---- Skeleton --------------------------------------------------------
@@ -193,7 +193,7 @@ export class GNMScene extends xb.Script {
     this.skeletonGroup = new THREE.Group();
     this.skeletonGroup.add(this.jointMesh, this.boneLines);
     this.skeletonGroup.visible = false;
-    this.skeletonGroup.ignoreReticleRaycast = true; // overlay, not a target
+    this.skeletonGroup.pointerEvents = 'none'; // overlay, not a target
     this.anchor.add(this.skeletonGroup);
 
     // ---- Lights ----------------------------------------------------------

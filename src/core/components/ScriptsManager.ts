@@ -10,6 +10,7 @@ import type {
 import type {ManipulationEvent} from '../../interaction/manipulation/ManipulationTypes';
 import {
   KeyEvent,
+  type LongSelectEvent,
   type ObjectGrabEvent,
   type ObjectTouchEvent,
   Script,
@@ -54,8 +55,6 @@ export class ScriptsManager
   isScript = (object: THREE.Object3D): boolean =>
     (object as MaybeScript).isXRScript === true;
 
-  // The legacy UI merge is separate. Until then, every Script remains a
-  // logical interaction target, matching the current SDK behavior.
   hasTargetHandler = (
     object: THREE.Object3D,
     _sourceType: InteractionSourceType
@@ -73,6 +72,9 @@ export class ScriptsManager
       }
       if (hook === 'onObjectSelectEnd') {
         return script.onObjectSelectEnd(argument as SelectEvent);
+      }
+      if (hook === 'onObjectLongSelect') {
+        return script.onObjectLongSelect(argument as LongSelectEvent);
       }
       if (hook === 'onObjectTouchStart') {
         return script.onObjectTouchStart(argument as ObjectTouchEvent);
@@ -228,25 +230,6 @@ export class ScriptsManager
 
     return Promise.allSettled(this.syncPromises);
   }
-
-  resetUX = () => {
-    const catchExceptions = this.catchExceptions;
-    for (const script of this.scripts) {
-      if (catchExceptions) {
-        try {
-          script.ux.reset();
-        } catch (error: unknown) {
-          this.handleException(
-            error instanceof Error ? error : new Error(String(error)),
-            script,
-            'ux.reset'
-          );
-        }
-      } else {
-        script.ux.reset();
-      }
-    }
-  };
 
   callSelecting = (controller: Controller) => {
     const catchExceptions = this.catchExceptions;

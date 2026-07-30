@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 import type {Controller} from '../input/Controller.js';
-import {Reticle} from '../ui/core/Reticle.js';
+import {Reticle} from './reticle/Reticle.js';
 import {Interaction} from './Interaction.js';
 import {
   GlobalInteractionHook,
@@ -18,7 +18,6 @@ class TestObject extends THREE.Object3D {
   declare pointerEvents?: 'auto' | 'none';
   declare interactionEnabled?: boolean;
   declare reticleMode?: 'auto' | 'surface' | 'hidden';
-  declare ux?: {update: ReturnType<typeof vi.fn>};
 }
 
 function hit(object: THREE.Object3D, distance = 1): THREE.Intersection {
@@ -50,6 +49,7 @@ function input(
 
 class TestCallbacks implements InteractionCallbackDispatch {
   readonly calls: string[] = [];
+  readonly arguments: Array<{key: string; argument: unknown}> = [];
   readonly scripts = new Set<THREE.Object3D>();
   readonly targets = new Set<THREE.Object3D>();
   readonly returns = new Map<string, unknown>();
@@ -65,6 +65,7 @@ class TestCallbacks implements InteractionCallbackDispatch {
   ): unknown {
     const key = `${script.name}:${hook}`;
     this.calls.push(key);
+    this.arguments.push({key, argument});
     if (hook === 'onObjectTouchStart' && this.preventTouch) {
       (argument as {preventDefault(): void}).preventDefault();
     }
@@ -235,6 +236,58 @@ describe('Interaction', () => {
       'update',
       'end',
     ]);
+  });
+
+  it('fires long select once on the captured target path', () => {
+    const target = new TestObject();
+    target.name = 'target';
+    callbacks.scripts.add(target);
+    callbacks.targets.add(target);
+
+    interaction.updateRaySources([input(source, [hit(target)])]);
+    callbacks.calls.length = 0;
+    callbacks.arguments.length = 0;
+
+    interaction.updateRaySources([input(source, [hit(target)], true)], 0.25);
+    expect(callbacks.calls).not.toContain('target:onObjectLongSelect');
+
+    interaction.updateRaySources([input(source, [], true)], 0.5);
+    interaction.updateRaySources([input(source, [], true)], 1);
+
+    expect(
+      callbacks.calls.filter((call) => call === 'target:onObjectLongSelect')
+    ).toHaveLength(1);
+    expect(
+      callbacks.arguments.find(({key}) => key === 'target:onObjectLongSelect')
+        ?.argument
+    ).toEqual({target: source, duration: 0.75});
+  });
+
+  it('cancels long select when the source releases before the delay', () => {
+    const target = new TestObject();
+    target.name = 'target';
+    callbacks.scripts.add(target);
+    callbacks.targets.add(target);
+
+    interaction.updateRaySources([input(source, [hit(target)])]);
+    interaction.updateRaySources([input(source, [hit(target)], true)], 0.25);
+    interaction.updateRaySources([input(source, [hit(target)])], 1);
+
+    expect(callbacks.calls).not.toContain('target:onObjectLongSelect');
+  });
+
+  it('does not fire long select when manipulation claims the capture', () => {
+    const target = new TestObject();
+    target.name = 'target';
+    callbacks.scripts.add(target);
+    callbacks.targets.add(target);
+    manipulation.resolution = {owner: target};
+
+    interaction.updateRaySources([input(source, [hit(target)])]);
+    interaction.updateRaySources([input(source, [hit(target)], true)], 1);
+
+    expect(manipulation.calls).toContain('start');
+    expect(callbacks.calls).not.toContain('target:onObjectLongSelect');
   });
 
   it('orders manipulation between targeted and global Select callbacks', () => {
@@ -543,12 +596,11 @@ describe('Interaction', () => {
     expect(manipulation.calls).toContain('end');
   });
 
-  it('presents only resolved hits and keeps legacy UX as presentation state', () => {
+  it('presents only resolved hits', () => {
     const reticle = new Reticle(0);
     source.reticle = reticle;
     const target = new TestObject();
     target.name = 'target';
-    target.ux = {update: vi.fn()};
     callbacks.scripts.add(target);
     callbacks.targets.add(target);
 
@@ -556,8 +608,6 @@ describe('Interaction', () => {
     expect(reticle.visible).toBe(true);
     expect(reticle.targetObject).toBe(target);
     expect(reticle.position.toArray()).toEqual([0, 0, -1]);
-    expect(target.ux.update).toHaveBeenCalledOnce();
-
     target.reticleMode = 'hidden';
     interaction.updateRaySources([input(source, [hit(target)])]);
     expect(reticle.visible).toBe(false);

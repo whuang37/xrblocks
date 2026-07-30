@@ -76,6 +76,7 @@ export interface ManipulationResolution {
 export type TargetedInteractionHook =
   | 'onObjectSelectStart'
   | 'onObjectSelectEnd'
+  | 'onObjectLongSelect'
   | 'onObjectTouchStart'
   | 'onObjectTouching'
   | 'onObjectTouchEnd'
@@ -145,4 +146,5 @@ export interface InteractionDependencies {
   manipulation?: InteractionManipulation;
   reticle?: ReticlePresentationObserver;
   defaultReticleDistance?: number;
+  longSelectDuration?: number;
 }

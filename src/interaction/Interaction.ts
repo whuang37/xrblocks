@@ -17,14 +17,18 @@ import {
 import {dispatchInteractionPath, isSelectionValid} from './InteractionUtils.js';
 import {ReticlePresenter} from './ReticlePresenter.js';
 
-type ActiveCapture =
-  | {kind: 'none'}
-  | {kind: 'auxiliary'}
-  | {
-      kind: 'target';
-      selection: SelectionCapture;
-      ancestry: readonly THREE.Object3D[];
-    };
+interface TargetCapture {
+  kind: 'target';
+  selection: SelectionCapture;
+  ancestry: readonly THREE.Object3D[];
+  longSelectDuration: number;
+  longSelectFired: boolean;
+  automaticActionClaimed: boolean;
+}
+
+type ActiveCapture = {kind: 'none'} | {kind: 'auxiliary'} | TargetCapture;
+
+const DEFAULT_LONG_SELECT_DURATION = 0.75;
 
 const NO_MANIPULATION: InteractionManipulation = {
   resolve: () => undefined,
@@ -42,6 +46,7 @@ export class Interaction {
   private readonly reticle;
   private readonly resolver;
   private readonly directTouch;
+  private readonly longSelectDuration;
   private readonly gazeDwell = new GazeDwell();
   private readonly snapshots = new Map<Controller, InteractionSourceSnapshot>();
   private readonly resolvedRays = new Map<Controller, ResolvedRay>();
@@ -58,6 +63,8 @@ export class Interaction {
     this.reticle =
       dependencies.reticle ??
       new ReticlePresenter(dependencies.defaultReticleDistance);
+    this.longSelectDuration =
+      dependencies.longSelectDuration ?? DEFAULT_LONG_SELECT_DURATION;
     this.resolver = new HitResolver(this.callbacks, this.manipulation);
     this.directTouch = new DirectTouch({
       callbacks: this.callbacks,
@@ -135,6 +142,7 @@ export class Interaction {
     this.manipulation.update(frameSnapshots);
     for (const snapshot of frameSnapshots) {
       if (snapshot.selected && this.captures.has(snapshot.controller)) {
+        this.updateLongSelect(snapshot.controller, deltaSeconds);
         this.callbacks.invokeGlobal('onSelecting', {
           target: snapshot.controller,
         });
@@ -172,11 +180,15 @@ export class Interaction {
       point: resolved.intersection.point.clone(),
       scriptPath: Object.freeze([...resolved.scriptPath]),
     };
-    this.captures.set(controller, {
+    const capture: TargetCapture = {
       kind: 'target',
       selection,
       ancestry: Object.freeze([...resolved.objectPath]),
-    });
+      longSelectDuration: 0,
+      longSelectFired: false,
+      automaticActionClaimed: false,
+    };
+    this.captures.set(controller, capture);
     dispatchInteractionPath(
       this.callbacks,
       selection.scriptPath,
@@ -184,7 +196,10 @@ export class Interaction {
       event
     );
     if (resolved.manipulation) {
-      this.manipulation.tryStart(selection, selectedSnapshot);
+      capture.automaticActionClaimed = this.manipulation.tryStart(
+        selection,
+        selectedSnapshot
+      );
     }
     this.callbacks.invokeGlobal('onSelectStart', event);
   }
@@ -379,6 +394,30 @@ export class Interaction {
     capture: Extract<ActiveCapture, {kind: 'target'}>
   ): boolean {
     return isSelectionValid(capture.selection, capture.ancestry);
+  }
+
+  private updateLongSelect(controller: Controller, deltaSeconds: number): void {
+    const capture = this.captures.get(controller);
+    if (
+      capture?.kind !== 'target' ||
+      capture.longSelectFired ||
+      capture.automaticActionClaimed
+    ) {
+      return;
+    }
+
+    if (Number.isFinite(deltaSeconds) && deltaSeconds > 0) {
+      capture.longSelectDuration += deltaSeconds;
+    }
+    if (capture.longSelectDuration < this.longSelectDuration) return;
+
+    capture.longSelectFired = true;
+    dispatchInteractionPath(
+      this.callbacks,
+      capture.selection.scriptPath,
+      'onObjectLongSelect',
+      {target: controller, duration: capture.longSelectDuration}
+    );
   }
 
   private suspendRayForDirectTouch(controller: Controller): void {

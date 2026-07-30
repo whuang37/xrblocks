@@ -5,10 +5,15 @@ import type {ManipulationEvent} from '../interaction/manipulation/ManipulationTy
 import type {Physics} from '../physics/Physics';
 import type {Injectable} from '../utils/DependencyInjection';
 import type {Constructor} from '../utils/Types';
-import {UX} from '../ux/UX';
 
 export interface SelectEvent {
   target: Controller;
+}
+
+/** Event sent after a captured selection is held past the long-select delay. */
+export interface LongSelectEvent extends SelectEvent {
+  /** How long the selection has been held, in seconds. */
+  duration: number;
 }
 
 export interface ObjectTouchEvent {
@@ -53,7 +58,6 @@ export function ScriptMixin<TBase extends Constructor<THREE.Object3D>>(
   base: TBase
 ) {
   return class extends base implements Injectable {
-    ux = new UX(this);
     isXRScript = true;
 
     /**
@@ -151,6 +155,13 @@ export function ScriptMixin<TBase extends Constructor<THREE.Object3D>>(
      */
     onObjectSelectEnd(_event: SelectEvent): boolean | void {}
     /**
+     * Called once when a captured selection is held for the long-select delay.
+     * Manipulation captures do not emit this callback.
+     * @param _event - The controller and completed hold duration.
+     * @returns Whether the event was handled. If true, the event will not bubble up.
+     */
+    onObjectLongSelect(_event: LongSelectEvent): boolean | void {}
+    /**
      * Called for each phase of an automatic object manipulation.
      * Returning true stops propagation to later Script ancestors. Calling
      * preventDefault() on a start event suppresses the automatic action.
@@ -217,9 +228,7 @@ export class Script<
 /**
  * MeshScript can be constructed with geometry and materials, with
  * `super(geometry, material)`; for direct access to its geometry.
- * MeshScripts hold a UX object that contains its interaction information such
- * as which controller is selecting or touching this object, as well as the
- * exact selected UV / xyz of the reticle, or touched point.
+ * MeshScripts hold geometry and materials while using the Script lifecycle.
  */
 const ScriptMixinMeshScript = ScriptMixin(THREE.Mesh);
 export class MeshScript<

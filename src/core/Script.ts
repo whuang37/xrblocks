@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 
 import type {Controller} from '../input/Controller';
+import type {ManipulationEvent} from '../interaction/manipulation/ManipulationTypes';
 import type {Physics} from '../physics/Physics';
 import type {Injectable} from '../utils/DependencyInjection';
 import type {Constructor} from '../utils/Types';
@@ -13,6 +14,8 @@ export interface SelectEvent {
 export interface ObjectTouchEvent {
   handIndex: number;
   touchPosition: THREE.Vector3;
+  readonly defaultPrevented: boolean;
+  preventDefault(): void;
 }
 
 export interface ObjectGrabEvent {
@@ -148,6 +151,12 @@ export function ScriptMixin<TBase extends Constructor<THREE.Object3D>>(
      */
     onObjectSelectEnd(_event: SelectEvent): boolean | void {}
     /**
+     * Called for each phase of an automatic object manipulation.
+     * Returning true stops propagation to later Script ancestors. Calling
+     * preventDefault() on a start event suppresses the automatic action.
+     */
+    onObjectManipulate(_event: ManipulationEvent): boolean | void {}
+    /**
      * Called when the controller starts hovering over this object with reticle.
      * @param _controller - An XR controller.
      * @returns Whether the event was handled. If true, the event will not bubble up.
@@ -168,15 +177,15 @@ export function ScriptMixin<TBase extends Constructor<THREE.Object3D>>(
     /**
      * Called when a hand's index finger starts touching this object.
      */
-    onObjectTouchStart(_event: ObjectTouchEvent) {}
+    onObjectTouchStart(_event: ObjectTouchEvent): boolean | void {}
     /**
      * Called every frame that a hand's index finger is touching this object.
      */
-    onObjectTouching(_event: ObjectTouchEvent) {}
+    onObjectTouching(_event: ObjectTouchEvent): boolean | void {}
     /**
      * Called when a hand's index finger stops touching this object.
      */
-    onObjectTouchEnd(_event: ObjectTouchEvent) {}
+    onObjectTouchEnd(_event: ObjectTouchEvent): boolean | void {}
     /**
      * Called when a hand starts grabbing this object (touching + pinching).
      */

@@ -28,6 +28,7 @@ import {Core} from './Core';
 import {Options} from './Options';
 import {Script, SelectEvent} from './Script';
 import {Controller} from '../input/Controller';
+import type {ManipulationEvent} from '../interaction/manipulation/ManipulationTypes';
 import {Physics} from '../physics/Physics';
 import {
   ScriptsManagerEventType,
@@ -74,6 +75,78 @@ describe('Core and ScriptsManager exception handling via EventDispatcher', () =>
   describe('catchScriptExceptions defaults to true', () => {
     it('should have catchScriptExceptions enabled by default', () => {
       expect(core.options.catchScriptExceptions).toBe(true);
+    });
+  });
+
+  describe('targeted callbacks', () => {
+    it('routes interaction hooks through ScriptsManager', () => {
+      const script = new Script();
+      const controller = new THREE.Object3D() as Controller;
+      const selectStart = vi
+        .spyOn(script, 'onObjectSelectStart')
+        .mockReturnValue(true);
+
+      expect(
+        core.scriptsManager.invokeTarget(script, 'onObjectSelectStart', {
+          target: controller,
+        })
+      ).toBe(true);
+      expect(selectStart).toHaveBeenCalledWith({target: controller});
+    });
+
+    it('routes global and manipulation hooks through ScriptsManager', () => {
+      const script = new Script();
+      const controller = new THREE.Object3D() as Controller;
+      const selectEnd = vi.spyOn(script, 'onSelectEnd');
+      const manipulate = vi
+        .spyOn(script, 'onObjectManipulate')
+        .mockReturnValue(true);
+      const manipulationEvent = {} as ManipulationEvent;
+      core.scriptsManager.scripts.add(script);
+
+      core.scriptsManager.invokeGlobal('onSelectEnd', {target: controller});
+      expect(selectEnd).toHaveBeenCalledWith({target: controller});
+      expect(
+        core.scriptsManager.invokeManipulation(script, manipulationEvent)
+      ).toBe(true);
+      expect(manipulate).toHaveBeenCalledWith(manipulationEvent);
+    });
+
+    it('stops only when a callback returns literal true', () => {
+      const first = new Script();
+      const second = new Script();
+      const firstCallback = vi.fn(() => true);
+      const secondCallback = vi.fn();
+
+      core.scriptsManager.callTargeted([first, second], 'targeted', (script) =>
+        script === first ? firstCallback() : secondCallback()
+      );
+
+      expect(firstCallback).toHaveBeenCalledOnce();
+      expect(secondCallback).not.toHaveBeenCalled();
+    });
+
+    it('isolates a targeted callback error and continues the path', () => {
+      const first = new Script();
+      const second = new Script();
+      const secondCallback = vi.fn();
+
+      core.scriptsManager.callTargeted(
+        [first, second],
+        'onObjectSelectStart',
+        (script) => {
+          if (script === first) throw new Error('targeted callback failed');
+          secondCallback();
+        }
+      );
+
+      expect(secondCallback).toHaveBeenCalledOnce();
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'An error occurred in script Script [onObjectSelectStart]'
+        ),
+        expect.any(Error)
+      );
     });
   });
 
@@ -205,15 +278,7 @@ describe('Core and ScriptsManager exception handling via EventDispatcher', () =>
 
       core.scriptsManager.scripts = new Set([script1, script2]);
 
-      // Set up mock controllers to trigger selection and squeezing callbacks
-      core.input.controllers = [
-        {
-          userData: {
-            selected: true,
-            squeezing: true,
-          },
-        },
-      ] as unknown as Controller[];
+      const controller = new THREE.Object3D() as Controller;
 
       const events: ExceptionEvent[] = [];
       core.scriptsManager.addEventListener(
@@ -222,6 +287,9 @@ describe('Core and ScriptsManager exception handling via EventDispatcher', () =>
           events.push(event);
         }
       );
+
+      core.scriptsManager.callSelecting(controller);
+      core.scriptsManager.callSqueezing(controller);
 
       expect(() => {
         (
@@ -241,9 +309,9 @@ describe('Core and ScriptsManager exception handling via EventDispatcher', () =>
       // Three events are dispatched
       expect(events.length).toBe(3);
       expect(events.map((e) => e.context)).toEqual([
-        'ux.reset',
         'onSelecting',
         'onSqueezing',
+        'ux.reset',
       ]);
     });
   });

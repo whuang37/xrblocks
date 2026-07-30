@@ -17,6 +17,11 @@ import {HeadGestureRecognitionOptions} from '../input/headGestures/HeadGestureRe
 import type {PoseEstimator} from '../input/gestures/GestureTypes';
 import {StrokeRecognitionOptions} from '../input/strokes/StrokeRecognitionOptions';
 import {Input} from '../input/Input';
+import type {Controller, ControllerEvent} from '../input/Controller';
+import {Interaction} from '../interaction/Interaction';
+import type {RaySourceInput} from '../interaction/InteractionTypes';
+import {ManipulationManager} from '../interaction/manipulation/ManipulationManager';
+import {ReticlePresenter} from '../interaction/ReticlePresenter';
 import {Lighting} from '../lighting/Lighting';
 import {Physics} from '../physics/Physics';
 import {Simulator} from '../simulator/Simulator';
@@ -27,7 +32,6 @@ import {UI} from '../ui/UI';
 import {callInitWithDependencyInjection} from '../utils/DependencyInjection';
 import {loadingSpinnerManager} from '../utils/LoadingSpinnerManager';
 import {traverseUtil} from '../utils/SceneGraphUtils';
-import {DragManager} from '../ux/DragManager';
 import {World} from '../world/World';
 import {WorldOptions} from '../world/WorldOptions';
 import {MeshDetectionOptions} from '../world/mesh/MeshDetectionOptions';
@@ -105,8 +109,11 @@ export class Core {
   /** Manages the desktop XR simulator. */
   simulator = new Simulator(this.renderSceneCallback);
 
-  /** Manages drag-and-drop interactions. */
-  dragManager = new DragManager();
+  /** Private interaction and manipulation runtime. */
+  private interaction!: Interaction;
+  private manipulationManager!: ManipulationManager;
+  private reticlePresenter = new ReticlePresenter();
+  private interactionSources = new Set<Controller>();
 
   /** Manages real-world understanding: planes, meshes, objects, and sounds. */
   world = new World();
@@ -215,12 +222,21 @@ export class Core {
     }
     Core.instance = this;
 
+    this.manipulationManager = new ManipulationManager(
+      this.scriptsManager.invokeManipulation,
+      this.camera
+    );
+    this.interaction = new Interaction({
+      callbacks: this.scriptsManager,
+      manipulation: this.manipulationManager,
+      reticle: this.reticlePresenter,
+    });
+
     this.scene.name = 'XR Blocks Scene';
 
     this.scene.add(this.xrSystemsGroup);
     this.xrSystemsGroup.add(
       this.user,
-      this.dragManager,
       this.ui,
       this.sound,
       this.world,
@@ -236,9 +252,9 @@ export class Core {
     this.registry.register(this.timer);
     this.registry.register(this.input);
     this.registry.register(this.user);
+    this.registry.register(this.interaction);
     this.registry.register(this.ui);
     this.registry.register(this.sound);
-    this.registry.register(this.dragManager);
     this.registry.register(this.simulator);
     this.registry.register(this.simulator.navMesh);
     this.registry.register(this.scriptsManager);
@@ -249,6 +265,10 @@ export class Core {
   }
 
   dispose() {
+    for (const controller of this.interactionSources) {
+      this.interaction.removeSource(controller);
+    }
+    this.interactionSources.clear();
     this.input.dispose();
     window.removeEventListener('resize', this.onWindowResize);
   }
@@ -339,6 +359,7 @@ export class Core {
     }
 
     this.options = options;
+    this.reticlePresenter.defaultDistance = options.reticles.defaultDistance;
     this.scriptsManager.catchExceptions = options.catchScriptExceptions;
 
     // Sets up input. Head gestures are camera-only and do not require controllers.
@@ -349,9 +370,8 @@ export class Core {
       renderer: this.renderer,
     });
     if (options.controllers.enabled) {
-      this.input.bindSelectStart(this.scriptsManager.callSelectStart);
-      this.input.bindSelectEnd(this.scriptsManager.callSelectEnd);
-      this.input.bindSelect(this.scriptsManager.callSelect);
+      this.input.bindSelectStart(this.onSelectStart);
+      this.input.bindSelectEnd(this.onSelectEnd);
       this.input.bindSqueezeStart(this.scriptsManager.callSqueezeStart);
       this.input.bindSqueezeEnd(this.scriptsManager.callSqueezeEnd);
       this.input.bindSqueeze(this.scriptsManager.callSqueeze);
@@ -533,6 +553,60 @@ export class Core {
    * @param time - The current time in milliseconds.
    * @param frame - The WebXR frame object, if in an XR session.
    */
+  private getRaySourceType(
+    controller: Controller
+  ): RaySourceInput['sourceType'] {
+    if (controller === this.input.mouseController) return 'mouse';
+    if (controller === this.input.gazeController) return 'gaze';
+    if (controller.inputSource?.hand) return 'hand-ray';
+    return 'controller-ray';
+  }
+
+  private updateInteractionSources() {
+    const sources: RaySourceInput[] = [];
+    const nextSources = new Set<Controller>();
+    if (this.input.controllersEnabled) {
+      for (const controller of this.input.controllers) {
+        if (controller.userData.connected === false) continue;
+        const position = controller.getWorldPosition(new THREE.Vector3());
+        const orientation = controller.getWorldQuaternion(
+          new THREE.Quaternion()
+        );
+        sources.push({
+          controller,
+          sourceType: this.getRaySourceType(controller),
+          ray: new THREE.Ray(
+            position,
+            new THREE.Vector3(0, 0, -1).applyQuaternion(orientation).normalize()
+          ),
+          intersections:
+            this.input.intersectionsForController.get(controller) ?? [],
+          selected: controller.userData.selected === true,
+          position,
+          orientation,
+        });
+        nextSources.add(controller);
+      }
+    }
+
+    for (const controller of this.interactionSources) {
+      if (!nextSources.has(controller))
+        this.interaction.removeSource(controller);
+    }
+    this.interactionSources = nextSources;
+    this.interaction.updateRaySources(sources);
+  }
+
+  private onSelectStart = (event: ControllerEvent) => {
+    this.updateInteractionSources();
+    this.interaction.selectStart(event.target);
+  };
+
+  private onSelectEnd = (event: ControllerEvent) => {
+    this.updateInteractionSources();
+    this.interaction.selectEnd(event.target);
+  };
+
   private update = (time: number, frame: XRFrame) => {
     if (this._isPaused && !this.isSteppingFrame) {
       return;
@@ -567,14 +641,9 @@ export class Core {
     // Updates reticles and UIs.
     this.scriptsManager.resetUX();
     this.input.update();
+    this.updateInteractionSources();
 
     // Updates scripts with user interactions.
-    for (const controller of this.input.controllers) {
-      if (controller.userData.selected) {
-        this.scriptsManager.callSelecting(controller);
-      }
-    }
-
     for (const controller of this.input.controllers) {
       if (controller.userData.squeezing) {
         this.scriptsManager.callSqueezing(controller);

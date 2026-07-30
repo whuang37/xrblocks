@@ -4,7 +4,7 @@ import {XRHandModelFactory} from 'three/addons/webxr/XRHandModelFactory.js';
 
 import {NUM_HANDS} from '../constants';
 import {Options} from '../core/Options.js';
-import {KeyEvent, Script} from '../core/Script';
+import {KeyEvent} from '../core/Script';
 import {Reticle} from '../ui/core/Reticle.js';
 import {Raycaster} from '../core/components/Raycaster';
 
@@ -30,12 +30,6 @@ export class Reticles extends THREE.Group {
   type = 'Reticles';
   name = 'Reticles';
 }
-
-export type HasIgnoreReticleRaycast = {
-  /** Excludes this object and its descendants from reticle targeting and context visibility occlusion. */
-  ignoreReticleRaycast: boolean;
-};
-export type MaybeHasIgnoreReticleRaycast = Partial<HasIgnoreReticleRaycast>;
 
 // Reusable objects for performance.
 const MATRIX4 = new THREE.Matrix4();
@@ -145,8 +139,7 @@ export class Input {
                 this.hands[i],
                 'boxes'
               );
-              (handModel as MaybeHasIgnoreReticleRaycast).ignoreReticleRaycast =
-                true;
+              handModel.pointerEvents = 'none';
               this.hands[i].add(handModel);
             }
           }
@@ -158,8 +151,7 @@ export class Input {
                 this.hands[i],
                 'mesh'
               );
-              (handModel as MaybeHasIgnoreReticleRaycast).ignoreReticleRaycast =
-                true;
+              handModel.pointerEvents = 'none';
               this.hands[i].add(handModel);
             }
           }
@@ -484,7 +476,6 @@ export class Input {
     if (this.options.controllers.performRaycastOnUpdate) {
       this.setRaycasterFromController(controller);
       this.performRaycastOnScene(controller);
-      this.updateReticleFromIntersections(controller);
     }
   }
 
@@ -501,55 +492,6 @@ export class Input {
       .set(0, 0, -1)
       .applyMatrix4(MATRIX4)
       .normalize();
-  }
-
-  updateReticleFromIntersections(controller: Controller) {
-    if (!controller.reticle) return;
-    const reticle = controller.reticle;
-    const intersection = this.intersectionsForController
-      .get(controller)
-      ?.find((intersection) => {
-        let target: THREE.Object3D | null = intersection.object;
-        while (target) {
-          if (
-            (target as MaybeHasIgnoreReticleRaycast).ignoreReticleRaycast ===
-            true
-          ) {
-            return false;
-          }
-          target = target.parent;
-        }
-        return true;
-      });
-    if (!intersection) {
-      const fallback = this.options.reticles.defaultDistance;
-      if (fallback > 0) {
-        reticle.visible = true;
-        reticle.position
-          .copy(this.raycaster.ray.origin)
-          .addScaledVector(this.raycaster.ray.direction, fallback);
-        reticle.quaternion.identity();
-      } else {
-        reticle.visible = false;
-      }
-      return;
-    }
-    reticle.visible = true;
-
-    // Here isXRScript is semantically equals to isInteractable.
-    if ((intersection.object as Partial<Script>)?.isXRScript) {
-      (intersection.object as Script).ux.update(controller, intersection);
-    } else if ((intersection.object?.parent as Partial<Script>)?.isXRScript) {
-      (intersection.object.parent as Script).ux.update(
-        controller,
-        intersection
-      );
-    }
-
-    reticle.intersection = intersection;
-    reticle.direction.copy(this.raycaster.ray.direction).normalize();
-    reticle.setPoseFromIntersection(intersection);
-    reticle.setPressed(controller.userData.selected);
   }
 
   enableGazeController() {

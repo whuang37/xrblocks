@@ -148,7 +148,7 @@ export function getElapsedTime() {
  */
 export function showReticleOnDepthMesh(value: boolean) {
   if (core.depth.depthMesh) {
-    core.depth.depthMesh.ignoreReticleRaycast = !value;
+    core.depth.depthMesh.pointerEvents = value ? 'auto' : 'none';
   }
 }
 

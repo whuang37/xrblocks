@@ -2,6 +2,10 @@ import * as THREE from 'three';
 
 import type {Script} from '../../core/Script';
 import type {Controller} from '../../input/Controller';
+import {
+  resumeTransformScripts,
+  suspendTransformScripts,
+} from '../../spatial/TransformScript';
 import {UP} from '../../utils/HelperConstants';
 import {objectIsDescendantOf} from '../../utils/SceneGraphUtils';
 import type {
@@ -212,6 +216,7 @@ export class ManipulationManager {
     if (session.primaryAction && !baseline) return false;
 
     this.sessions.set(session.owner, session);
+    suspendTransformScripts(session.owner);
     this.roles.set(snapshot.controller, session);
     if (
       session.primaryAction &&
@@ -431,6 +436,7 @@ export class ManipulationManager {
 
   private removeSession(session: Session, suppressAuxiliary: boolean): void {
     this.sessions.delete(session.owner);
+    resumeTransformScripts(session.owner);
     this.roles.delete(session.primary.snapshot.controller);
     if (session.auxiliary) {
       this.roles.delete(session.auxiliary.controller);

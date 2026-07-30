@@ -2,6 +2,7 @@ import type * as THREE from 'three';
 
 import type {Script} from '../../core/Script';
 import type {Controller} from '../../input/Controller';
+import type {InteractionSourceType} from '../InteractionTypes';
 
 export const ManipulationAction = {
   Translate: 'translate',
@@ -69,7 +70,7 @@ export interface BaseManipulationEvent {
   readonly action: ManipulationAction;
   readonly target: Controller;
   readonly controllers: readonly Controller[];
-  readonly sourceType: string;
+  readonly sourceType: InteractionSourceType;
   readonly surface: THREE.Object3D;
   readonly owner: THREE.Object3D;
   readonly currentTarget: Script;

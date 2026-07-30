@@ -6,7 +6,6 @@ import {
   resumeTransformScripts,
   suspendTransformScripts,
 } from '../../placement/TransformScript';
-import {UP} from '../../utils/HelperConstants';
 import {objectIsDescendantOf} from '../../utils/SceneGraphUtils';
 import type {
   InteractionSourceSnapshot,
@@ -15,9 +14,26 @@ import type {
   SelectionCapture,
 } from '../InteractionTypes';
 import {
+  cloneScaleOptions,
+  isHandleAction,
+  isManipulationActionEnabled,
+  normalizeManipulationConfig,
+  normalizeRotationAxis,
+  type NormalizedManipulationConfig,
+} from './ManipulationConfig';
+import {
+  clampScaleFactor,
+  faceCameraQuaternion,
+  isFiniteQuaternion,
+  isFiniteVector,
+  isPositiveFinite,
+  isPositiveVector,
+  worldPositionToLocal,
+  worldQuaternionToLocal,
+} from './ManipulationMath';
+import {
   ManipulationAction,
   type ManipulationEvent,
-  type ManipulationOptions,
   type ManipulationPhase,
   type RotateOptions,
   type ScaleOptions,
@@ -29,13 +45,6 @@ export type DispatchManipulationEvent = (
   event: ManipulationEvent
 ) => boolean | void;
 
-interface NormalizedConfig {
-  translate?: TranslateOptions;
-  rotate?: RotateOptions;
-  scale?: ScaleOptions;
-  handle?: ResolvedManipulationAction | typeof ManipulationAction.None;
-}
-
 interface PrimaryRole {
   capture: SelectionCapture;
   snapshot: InteractionSourceSnapshot;
@@ -44,7 +53,7 @@ interface PrimaryRole {
 interface Session {
   owner: THREE.Object3D;
   ownerParent: THREE.Object3D | null;
-  config: NormalizedConfig;
+  config: NormalizedManipulationConfig;
   primary: PrimaryRole;
   primaryAction?: ResolvedManipulationAction;
   auxiliary?: InteractionSourceSnapshot;
@@ -53,7 +62,6 @@ interface Session {
 
 interface TranslateBaseline {
   action: typeof ManipulationAction.Translate;
-  localPosition: THREE.Vector3;
   worldPosition: THREE.Vector3;
   sourcePosition: THREE.Vector3;
   rayDepth?: number;
@@ -113,8 +121,6 @@ type Proposal = ProposalBase &
       }
   );
 
-const EPSILON = 1e-8;
-
 /**
  * Private runtime used by Interaction. It does not observe input or raycast.
  * It is exported only so the sibling Interaction module can construct it.
@@ -156,13 +162,13 @@ export class ManipulationManager {
         ) {
           return undefined;
         }
-        const config = normalizeConfig(options.manipulation);
+        const config = normalizeManipulationConfig(options.manipulation);
         if (!config) return undefined;
 
         const requested = hasChildHandle ? childHandle : config.handle;
         if (requested === ManipulationAction.None) return undefined;
         if (requested !== undefined) {
-          return isEnabled(config, requested)
+          return isManipulationActionEnabled(config, requested)
             ? {owner: current, action: requested}
             : undefined;
         }
@@ -200,7 +206,9 @@ export class ManipulationManager {
 
     const resolution = this.resolve(capture.surface);
     if (!resolution || this.sessions.has(resolution.owner)) return false;
-    const config = normalizeConfig(resolution.owner.xb?.manipulation);
+    const config = normalizeManipulationConfig(
+      resolution.owner.xb?.manipulation
+    );
     if (!config) return false;
 
     const session: Session = {
@@ -276,7 +284,9 @@ export class ManipulationManager {
     }
     const resolution = this.resolve(capture.surface);
     if (!resolution || this.sessions.has(resolution.owner)) return false;
-    const config = normalizeConfig(resolution.owner.xb?.manipulation);
+    const config = normalizeManipulationConfig(
+      resolution.owner.xb?.manipulation
+    );
     if (!config?.scale || !isPositiveVector(resolution.owner.scale)) {
       return false;
     }
@@ -402,7 +412,7 @@ export class ManipulationManager {
   }
 
   private validate(session: Session): boolean {
-    const current = normalizeConfig(session.owner.xb?.manipulation);
+    const current = normalizeManipulationConfig(session.owner.xb?.manipulation);
     const resolution = this.resolve(session.primary.capture.surface);
     if (
       !current ||
@@ -426,7 +436,10 @@ export class ManipulationManager {
         this.startPhase(session, session.primaryAction);
       return false;
     }
-    if (session.primaryAction && !isEnabled(current, session.primaryAction)) {
+    if (
+      session.primaryAction &&
+      !isManipulationActionEnabled(current, session.primaryAction)
+    ) {
       this.cancelOwner(session.owner);
       return false;
     }
@@ -498,7 +511,6 @@ export class ManipulationManager {
       const snapshot = session.primary.snapshot;
       const baseline: TranslateBaseline = {
         action,
-        localPosition: owner.position.clone(),
         worldPosition: owner.getWorldPosition(new THREE.Vector3()),
         sourcePosition: snapshot.position.clone(),
         options: {...session.config.translate},
@@ -516,7 +528,7 @@ export class ManipulationManager {
 
     if (action === ManipulationAction.Rotate) {
       const raw = session.config.rotate ?? {};
-      const axis = axisVector(raw.axis);
+      const axis = normalizeRotationAxis(raw.axis);
       const sensitivity = raw.sensitivity ?? 10;
       if (!axis || !Number.isFinite(sensitivity)) return undefined;
       return {
@@ -579,9 +591,18 @@ export class ManipulationManager {
       point = session.primary.capture.point.clone().add(delta);
     }
     const worldPosition = baseline.worldPosition.clone().add(delta);
-    const localPosition = worldToParent(session.owner, worldPosition);
+    const parent = session.owner.parent;
+    parent?.updateWorldMatrix(true, false);
+    const localPosition = worldPositionToLocal(
+      worldPosition,
+      parent?.matrixWorld
+    );
     const localQuaternion = baseline.options.faceCamera
-      ? faceCameraQuaternion(session.owner, worldPosition, this.camera)
+      ? faceCameraQuaternion(
+          worldPosition,
+          this.camera?.getWorldPosition(new THREE.Vector3()),
+          parent?.getWorldQuaternion(new THREE.Quaternion())
+        )
       : undefined;
     if (
       !isFiniteVector(point) ||
@@ -634,7 +655,12 @@ export class ManipulationManager {
       quaternion = baseline.localQuaternion.clone().multiply(offset);
     } else {
       const world = offset.multiply(baseline.worldQuaternion);
-      quaternion = worldQuaternionToLocal(session.owner, world);
+      const parent = session.owner.parent;
+      parent?.updateWorldMatrix(true, false);
+      quaternion = worldQuaternionToLocal(
+        world,
+        parent?.getWorldQuaternion(new THREE.Quaternion())
+      );
     }
     if (!Number.isFinite(angle) || !isFiniteQuaternion(quaternion)) {
       return undefined;
@@ -693,61 +719,6 @@ export class ManipulationManager {
   }
 }
 
-function normalizeConfig(
-  value: boolean | ManipulationOptions | undefined
-): NormalizedConfig | undefined {
-  if (!value) return undefined;
-  if (value === true) {
-    return {
-      translate: {},
-      scale: {},
-      handle: ManipulationAction.Translate,
-    };
-  }
-  const translate = normalizeAction(value.actions?.translate);
-  const rotate = normalizeAction(value.actions?.rotate);
-  const scale = normalizeAction(value.actions?.scale);
-  const handle = value.handle?.action;
-  if (handle !== undefined && !isHandleAction(handle)) return undefined;
-  if (!translate && !rotate && !scale) return undefined;
-  return {
-    translate,
-    rotate,
-    scale,
-    handle,
-  };
-}
-
-function normalizeAction<T extends object>(
-  value: boolean | T | undefined
-): T | undefined {
-  return value === true ? ({} as T) : value || undefined;
-}
-
-function isEnabled(
-  config: NormalizedConfig,
-  action: ResolvedManipulationAction
-): boolean {
-  if (action === ManipulationAction.Translate) return !!config.translate;
-  if (action === ManipulationAction.Rotate) return !!config.rotate;
-  if (action === ManipulationAction.Scale) return !!config.scale;
-  return false;
-}
-
-function isHandleAction(value: unknown): value is ManipulationAction {
-  return value === ManipulationAction.None || isManipulationAction(value);
-}
-
-function isManipulationAction(
-  value: unknown
-): value is ResolvedManipulationAction {
-  return (
-    value === ManipulationAction.Translate ||
-    value === ManipulationAction.Rotate ||
-    value === ManipulationAction.Scale
-  );
-}
-
 function cloneSnapshot(
   snapshot: InteractionSourceSnapshot
 ): InteractionSourceSnapshot {
@@ -757,133 +728,6 @@ function cloneSnapshot(
     orientation: snapshot.orientation.clone(),
     ray: snapshot.ray?.clone(),
   };
-}
-
-function axisVector(axis: RotateOptions['axis']): THREE.Vector3 | undefined {
-  const vector =
-    axis === undefined || axis === 'y'
-      ? new THREE.Vector3(0, 1, 0)
-      : axis === 'x'
-        ? new THREE.Vector3(1, 0, 0)
-        : axis === 'z'
-          ? new THREE.Vector3(0, 0, 1)
-          : new THREE.Vector3(axis.x, axis.y, axis.z);
-  if (!isFiniteVector(vector) || vector.lengthSq() < EPSILON) return undefined;
-  return vector.normalize();
-}
-
-function worldToParent(
-  owner: THREE.Object3D,
-  worldPosition: THREE.Vector3
-): THREE.Vector3 {
-  if (!owner.parent) return worldPosition.clone();
-  owner.parent.updateWorldMatrix(true, false);
-  return owner.parent.worldToLocal(worldPosition.clone());
-}
-
-function worldQuaternionToLocal(
-  owner: THREE.Object3D,
-  worldQuaternion: THREE.Quaternion
-): THREE.Quaternion {
-  if (!owner.parent) return worldQuaternion.clone();
-  const parentWorld = owner.parent.getWorldQuaternion(new THREE.Quaternion());
-  return parentWorld.invert().multiply(worldQuaternion);
-}
-
-function faceCameraQuaternion(
-  owner: THREE.Object3D,
-  worldPosition: THREE.Vector3,
-  camera?: THREE.Camera
-): THREE.Quaternion | undefined {
-  if (!camera) return undefined;
-  const cameraPosition = camera.getWorldPosition(new THREE.Vector3());
-  cameraPosition.y = worldPosition.y;
-  if (cameraPosition.distanceToSquared(worldPosition) < EPSILON)
-    return undefined;
-  const matrix = new THREE.Matrix4().lookAt(cameraPosition, worldPosition, UP);
-  return worldQuaternionToLocal(
-    owner,
-    new THREE.Quaternion().setFromRotationMatrix(matrix)
-  );
-}
-
-function scaleLimitVector(
-  value: number | THREE.Vector3Like | undefined,
-  fallback: number,
-  allowInfinity: boolean
-): THREE.Vector3 | undefined {
-  if (value === undefined)
-    return new THREE.Vector3(fallback, fallback, fallback);
-  const result =
-    typeof value === 'number'
-      ? new THREE.Vector3(value, value, value)
-      : new THREE.Vector3(value.x, value.y, value.z);
-  const valid = [result.x, result.y, result.z].every(
-    (component) =>
-      component > 0 &&
-      (Number.isFinite(component) || (allowInfinity && component === Infinity))
-  );
-  return valid ? result : undefined;
-}
-
-function cloneScaleOptions(options: ScaleOptions | undefined): ScaleOptions {
-  const cloneLimit = (
-    value: number | THREE.Vector3Like | undefined
-  ): number | THREE.Vector3Like | undefined =>
-    typeof value === 'object' && value !== null
-      ? {x: value.x, y: value.y, z: value.z}
-      : value;
-  return {
-    minScale: cloneLimit(options?.minScale),
-    maxScale: cloneLimit(options?.maxScale),
-  };
-}
-
-function clampScaleFactor(
-  factor: number,
-  baseline: THREE.Vector3,
-  options: ScaleOptions
-): number {
-  const minimum = scaleLimitVector(options.minScale, EPSILON, false);
-  const maximum = scaleLimitVector(options.maxScale, Infinity, true);
-  if (!minimum || !maximum) return NaN;
-  const minimumFactor = Math.max(
-    minimum.x / baseline.x,
-    minimum.y / baseline.y,
-    minimum.z / baseline.z
-  );
-  const maximumFactor = Math.min(
-    maximum.x / baseline.x,
-    maximum.y / baseline.y,
-    maximum.z / baseline.z
-  );
-  if (minimumFactor > maximumFactor) return NaN;
-  return THREE.MathUtils.clamp(factor, minimumFactor, maximumFactor);
-}
-
-function isPositiveFinite(value: number): boolean {
-  return Number.isFinite(value) && value > EPSILON;
-}
-
-function isFiniteVector(value: THREE.Vector3): boolean {
-  return (
-    Number.isFinite(value.x) &&
-    Number.isFinite(value.y) &&
-    Number.isFinite(value.z)
-  );
-}
-
-function isPositiveVector(value: THREE.Vector3): boolean {
-  return isFiniteVector(value) && value.x > 0 && value.y > 0 && value.z > 0;
-}
-
-function isFiniteQuaternion(value: THREE.Quaternion): boolean {
-  return (
-    Number.isFinite(value.x) &&
-    Number.isFinite(value.y) &&
-    Number.isFinite(value.z) &&
-    Number.isFinite(value.w)
-  );
 }
 
 function createEvent(

@@ -318,10 +318,10 @@ describe('Interaction', () => {
       handIndex: 0,
       point: new THREE.Vector3(0, 0, -1),
       intersections: [hit(target)],
+      selected: false,
     };
 
     interaction.updateDirectTouches([touch]);
-    expect(interaction.getDirectTouchSurface(source)).toBe(target);
     interaction.updateDirectTouches([
       {...touch, point: new THREE.Vector3(0.2, 0, -1)},
     ]);
@@ -353,6 +353,7 @@ describe('Interaction', () => {
       handIndex: 0,
       point: new THREE.Vector3(0, 0, -1),
       intersections: [hit(target)],
+      selected: false,
     };
 
     interaction.updateDirectTouches([touch]);
@@ -377,6 +378,7 @@ describe('Interaction', () => {
         handIndex: 0,
         point: new THREE.Vector3(0, 0, -1),
         intersections: [hit(target)],
+        selected: false,
       },
     ]);
     callbacks.calls.length = 0;
@@ -390,7 +392,47 @@ describe('Interaction', () => {
       'global:onSelectEnd',
     ]);
     expect(manipulation.calls).toEqual(['cancel']);
-    expect(interaction.getDirectTouchSurface(source)).toBeUndefined();
+  });
+
+  it('dispatches a balanced grab while direct touch and pinch overlap', () => {
+    const target = new TestObject();
+    target.name = 'target';
+    callbacks.scripts.add(target);
+    callbacks.targets.add(target);
+    const hand = new THREE.Object3D();
+    const touch = {
+      controller: source,
+      handIndex: 0,
+      hand,
+      point: new THREE.Vector3(0, 0, -1),
+      intersections: [hit(target)],
+      selected: false,
+    };
+
+    interaction.updateDirectTouches([touch]);
+    interaction.updateDirectTouches([{...touch, selected: true}]);
+    interaction.updateDirectTouches([{...touch, selected: true}]);
+    interaction.updateDirectTouches([touch]);
+    interaction.updateDirectTouches([{...touch, intersections: []}]);
+
+    expect(callbacks.calls).toEqual([
+      'target:onObjectTouchStart',
+      'target:onObjectSelectStart',
+      'global:onSelectStart',
+      'target:onObjectTouching',
+      'target:onObjectGrabStart',
+      'global:onSelecting',
+      'target:onObjectTouching',
+      'target:onObjectGrabbing',
+      'global:onSelecting',
+      'target:onObjectTouching',
+      'target:onObjectGrabEnd',
+      'global:onSelecting',
+      'target:onObjectTouchEnd',
+      'target:onObjectSelectEnd',
+      'global:onSelect',
+      'global:onSelectEnd',
+    ]);
   });
 
   it('cancels capture when a new interaction barrier blocks its owner', () => {

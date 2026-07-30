@@ -15,6 +15,9 @@ export class FollowHead extends TransformScript {
   private timer?: THREE.Timer;
   private readonly offset: THREE.Vector3;
   private readonly target = new THREE.Vector3();
+  private readonly cameraWorldPosition = new THREE.Vector3();
+  private readonly cameraWorldQuaternion = new THREE.Quaternion();
+  private readonly objectWorldPosition = new THREE.Vector3();
   private readonly smoothing: number;
 
   constructor(options: FollowHeadOptions) {
@@ -32,10 +35,13 @@ export class FollowHead extends TransformScript {
     const object = this.parent;
     if (!this.canUpdate || !object || !this.camera || !this.timer) return;
 
+    this.camera.getWorldPosition(this.cameraWorldPosition);
+    this.camera.getWorldQuaternion(this.cameraWorldQuaternion);
     this.target
       .copy(this.offset)
-      .applyQuaternion(this.camera.quaternion)
-      .add(this.camera.position);
+      .applyQuaternion(this.cameraWorldQuaternion)
+      .add(this.cameraWorldPosition);
+    object.parent?.worldToLocal(this.target);
     const alpha = 1 - Math.exp(-this.smoothing * this.timer.getDelta() * 60);
     object.position.lerp(this.target, alpha);
   }
@@ -43,9 +49,12 @@ export class FollowHead extends TransformScript {
   protected rebase() {
     const object = this.parent;
     if (!object || !this.camera) return;
+    object.getWorldPosition(this.objectWorldPosition);
+    this.camera.getWorldPosition(this.cameraWorldPosition);
+    this.camera.getWorldQuaternion(this.cameraWorldQuaternion);
     this.offset
-      .copy(object.position)
-      .sub(this.camera.position)
-      .applyQuaternion(this.camera.quaternion.clone().invert());
+      .copy(this.objectWorldPosition)
+      .sub(this.cameraWorldPosition)
+      .applyQuaternion(this.cameraWorldQuaternion.invert());
   }
 }

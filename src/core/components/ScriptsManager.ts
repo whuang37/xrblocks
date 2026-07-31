@@ -52,9 +52,7 @@ type IndexedScriptHook =
 interface PendingInitialization {
   readonly script: Script;
   promise: Promise<void>;
-  canceled: boolean;
-  restartRequested: boolean;
-  restartPromise?: Promise<void>;
+  connection: 'connected' | 'disconnected' | 'reconnected';
 }
 
 type TargetDispatch = {
@@ -157,7 +155,6 @@ export class ScriptsManager
   implements InteractionCallbackDispatch
 {
   private activeScripts = new Set<Script>();
-  private indexedScripts = new Set<Script>();
   private readonly hookScripts = new Map<IndexedScriptHook, Set<Script>>();
   private readonly pendingInitializations = new Map<
     Script,
@@ -327,24 +324,16 @@ export class ScriptsManager
 
     const pending = this.pendingInitializations.get(script);
     if (pending) {
-      if (!pending.canceled) return pending.promise;
-      pending.restartRequested = true;
-      pending.restartPromise ??= pending.promise.then(
-        () =>
-          pending.restartRequested
-            ? this.initScript(script)
-            : Promise.resolve(),
-        () =>
-          pending.restartRequested ? this.initScript(script) : Promise.resolve()
-      );
-      return pending.restartPromise;
+      if (pending.connection === 'disconnected') {
+        pending.connection = 'reconnected';
+      }
+      return pending.promise;
     }
 
     const entry: PendingInitialization = {
       script,
       promise: Promise.resolve(),
-      canceled: false,
-      restartRequested: false,
+      connection: 'connected',
     };
     entry.promise = Promise.resolve().then(() =>
       this.finishInitialization(entry)
@@ -356,30 +345,33 @@ export class ScriptsManager
   private async finishInitialization(
     entry: PendingInitialization
   ): Promise<void> {
+    let failed = false;
     try {
       try {
         await this.initScriptFunction(entry.script);
       } catch (error: unknown) {
-        if (entry.canceled) {
-          this.disposeScript(entry.script);
-          return;
+        failed = true;
+        if (entry.connection === 'connected') {
+          this.failedScripts.add(entry.script);
+          this.handleScriptError(error, entry.script, 'init');
         }
-        this.failedScripts.add(entry.script);
-        this.handleScriptError(error, entry.script, 'init');
-        return;
       }
 
-      if (entry.canceled) {
+      if (entry.connection !== 'connected') {
         this.disposeScript(entry.script);
-        return;
+      } else if (!failed) {
+        this.activeScripts.add(entry.script);
+        this.failedScripts.delete(entry.script);
+        this.indexScript(entry.script);
       }
-      this.activeScripts.add(entry.script);
-      this.failedScripts.delete(entry.script);
-      this.indexScript(entry.script);
     } finally {
       if (this.pendingInitializations.get(entry.script) === entry) {
         this.pendingInitializations.delete(entry.script);
       }
+    }
+
+    if (entry.connection === 'reconnected') {
+      await this.initScript(entry.script);
     }
   }
 
@@ -392,8 +384,7 @@ export class ScriptsManager
   uninitScript(script: Script): void {
     const pending = this.pendingInitializations.get(script);
     if (pending) {
-      pending.canceled = true;
-      pending.restartRequested = false;
+      pending.connection = 'disconnected';
       return;
     }
     if (!this.activeScripts.delete(script)) return;
@@ -573,7 +564,6 @@ export class ScriptsManager
   }
 
   private indexScript(script: Script): void {
-    this.indexedScripts.add(script);
     for (const hook of INDEXED_HOOKS) {
       if (this.hasOverriddenHook(script, hook)) {
         this.getHookSet(hook).add(script);
@@ -582,23 +572,12 @@ export class ScriptsManager
   }
 
   private unindexScript(script: Script): void {
-    this.indexedScripts.delete(script);
     for (const scripts of this.hookScripts.values()) scripts.delete(script);
   }
 
   private rebuildHookIndex(): void {
-    this.indexedScripts.clear();
     this.hookScripts.clear();
     for (const script of this.activeScripts) this.indexScript(script);
-  }
-
-  private ensureHookIndex(): void {
-    if (
-      this.indexedScripts.size !== this.activeScripts.size ||
-      [...this.activeScripts].some((script) => !this.indexedScripts.has(script))
-    ) {
-      this.rebuildHookIndex();
-    }
   }
 }
 

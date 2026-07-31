@@ -106,7 +106,11 @@ export class DirectTouch {
           this.endContact(
             input.controller,
             input.selected,
-            resolved?.target ? 'target-changed' : 'released'
+            resolved?.target ? 'target-changed' : 'released',
+            snapshot,
+            input.handIndex,
+            input.hand,
+            input.point
           )
         );
       }
@@ -141,7 +145,11 @@ export class DirectTouch {
   private endContact(
     controller: Controller,
     selected: boolean,
-    endReason: NonNullable<DirectTouchContact['endReason']>
+    endReason: NonNullable<DirectTouchContact['endReason']>,
+    finalSnapshot?: InteractionSourceSnapshot,
+    handIndex?: number,
+    hand?: THREE.Object3D,
+    point?: THREE.Vector3
   ): DirectTouchContact {
     const previous = this.active.get(controller)!;
     this.active.delete(controller);
@@ -149,11 +157,11 @@ export class DirectTouch {
     return {
       phase: 'end',
       controller,
-      snapshot: previous.snapshot,
+      snapshot: finalSnapshot ?? previous.snapshot,
       previous: previous.resolved,
-      handIndex: previous.handIndex,
-      hand: previous.hand,
-      point: previous.point.clone(),
+      handIndex: handIndex ?? previous.handIndex,
+      hand: hand ?? previous.hand,
+      point: point?.clone() ?? previous.point.clone(),
       selected,
       endReason,
     };

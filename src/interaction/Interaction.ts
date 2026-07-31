@@ -23,7 +23,6 @@ import {
   type InteractionDependencies,
   type InteractionFrameInput,
   type InteractionHitPart,
-  type InteractionManipulation,
   type InteractionSourceSnapshot,
   type RaySourceInput,
   type ResolvedRay,
@@ -31,6 +30,7 @@ import {
 } from './InteractionTypes.js';
 import {dispatchInteractionPath, isSelectionValid} from './InteractionUtils.js';
 import {ReticlePresenter} from './ReticlePresenter.js';
+import {ManipulationManager} from './manipulation/ManipulationManager.js';
 import {
   getSemanticControl,
   isSemanticControlDisabled,
@@ -66,15 +66,6 @@ type ActiveCapture = {kind: 'none'} | {kind: 'auxiliary'} | TargetCapture;
 
 const DEFAULT_LONG_SELECT_DURATION = 0.75;
 
-const NO_MANIPULATION: InteractionManipulation = {
-  resolve: () => undefined,
-  tryClaimScale: () => false,
-  tryStart: () => false,
-  update: () => {},
-  end: () => false,
-  cancelSource: () => {},
-};
-
 /** Owns all logical target, hover, capture, completion, and cancellation state. */
 export class Interaction {
   private readonly callbacks;
@@ -100,7 +91,11 @@ export class Interaction {
 
   constructor(dependencies: InteractionDependencies) {
     this.callbacks = dependencies.callbacks;
-    this.manipulation = dependencies.manipulation ?? NO_MANIPULATION;
+    this.manipulation = new ManipulationManager(
+      (script, event) => this.callbacks.invokeManipulation(script, event),
+      dependencies.camera,
+      dependencies.timer
+    );
     this.reticleOptions = dependencies.reticleOptions ?? new ReticleOptions();
     this.reticle =
       dependencies.reticle ?? new ReticlePresenter(this.reticleOptions);
@@ -159,7 +154,7 @@ export class Interaction {
       if (
         (capture.kind === 'auxiliary' ||
           (capture.kind === 'target' && capture.action === 'manipulate')) &&
-        this.manipulation.isSourceActive?.(controller) === false
+        this.manipulation.isSourceActive(controller) === false
       ) {
         this.cancelCapture(controller, 'disabled');
       }
@@ -311,7 +306,7 @@ export class Interaction {
   }
 
   isManipulating(object: THREE.Object3D): boolean {
-    return this.manipulation.isManipulating?.(object) ?? false;
+    return this.manipulation.isManipulating(object);
   }
 
   applyScaleIntent(controller: Controller, factor: number): boolean {
@@ -324,12 +319,10 @@ export class Interaction {
       source,
       sourceType: 'simulator' as const,
     };
-    return (
-      this.manipulation.applyScaleIntent?.(
-        this.createSelection(controller, resolved),
-        intentSnapshot,
-        factor
-      ) ?? false
+    return this.manipulation.applyScaleIntent(
+      this.createSelection(controller, resolved),
+      intentSnapshot,
+      factor
     );
   }
 
@@ -508,7 +501,8 @@ export class Interaction {
   private endSelection(
     controller: Controller,
     reason: SelectionEndReason,
-    releasedTarget?: THREE.Object3D
+    releasedTarget?: THREE.Object3D,
+    finalSnapshot?: InteractionSourceSnapshot
   ): void {
     const capture = this.captures.get(controller);
     if (!capture) return;
@@ -525,13 +519,16 @@ export class Interaction {
     let completed = false;
     let endReason = reason;
     if (capture.kind === 'auxiliary') {
-      completed = this.manipulation.end(controller);
+      completed = this.manipulation.end(controller, finalSnapshot ?? snapshot);
     } else if (capture.kind === 'target') {
       const released = this.resolvedRays.get(controller);
       const sameTarget =
         (releasedTarget ?? released?.target) === capture.selection.target;
       if (capture.action === 'manipulate') {
-        completed = this.manipulation.end(controller);
+        completed = this.manipulation.end(
+          controller,
+          finalSnapshot ?? snapshot
+        );
       } else if (capture.action === 'semantic') {
         const slider = capture.semantic?.kind === 'slider';
         completed =
@@ -653,7 +650,8 @@ export class Interaction {
         this.endSelection(
           contact.controller,
           'released',
-          touch.selection.target
+          touch.selection.target,
+          contact.snapshot
         );
       } else {
         this.cancelCapture(

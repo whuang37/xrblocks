@@ -11,6 +11,7 @@ import type {Controller} from '../input/Controller.js';
 import type {
   ManipulationAction,
   ManipulationHandleOptions,
+  ManipulationEvent,
   ManipulationOptions,
 } from './manipulation/ManipulationTypes.js';
 
@@ -179,33 +180,7 @@ export interface InteractionCallbackDispatch {
     hook: Hook,
     event: GlobalInteractionEvent<Hook>
   ): void;
-}
-
-/** Structural seam implemented by the private manipulation module. */
-export interface InteractionManipulation {
-  resolve(
-    surface: THREE.Object3D,
-    eligiblePath: readonly THREE.Object3D[],
-    hitPart?: InteractionHitPart
-  ): ManipulationResolution | undefined;
-  tryClaimScale(
-    snapshot: InteractionSourceSnapshot,
-    resolved?: ResolvedRay
-  ): boolean;
-  tryStart(
-    capture: SelectionCapture,
-    snapshot: InteractionSourceSnapshot
-  ): boolean;
-  update(snapshots: Iterable<InteractionSourceSnapshot>): void;
-  end(source: Controller): boolean;
-  cancelSource(source: Controller): void;
-  isSourceActive?(source: Controller): boolean;
-  isManipulating?(object: THREE.Object3D): boolean;
-  applyScaleIntent?(
-    capture: SelectionCapture,
-    snapshot: InteractionSourceSnapshot,
-    factor: number
-  ): boolean;
+  invokeManipulation(script: Script, event: ManipulationEvent): boolean;
 }
 
 export interface ReticlePresentationObserver {
@@ -218,7 +193,8 @@ export interface ReticlePresentationObserver {
 
 export interface InteractionDependencies {
   callbacks: InteractionCallbackDispatch;
-  manipulation?: InteractionManipulation;
+  camera?: THREE.Camera;
+  timer?: THREE.Timer;
   reticle?: ReticlePresentationObserver;
   reticleOptions?: ReticleOptions;
   longSelectDuration?: number;

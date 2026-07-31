@@ -3,11 +3,11 @@ import * as THREE from 'three';
 import type {Script} from '../core/Script.js';
 import type {
   InteractionCallbackDispatch,
-  InteractionManipulation,
   InteractionSourceType,
   ResolvedRay,
 } from './InteractionTypes.js';
 import {HitRegistry} from './HitRegistry.js';
+import type {ManipulationManager} from './manipulation/ManipulationManager.js';
 import {isSemanticControl} from './SemanticControl.js';
 
 function cloneIntersection(
@@ -26,7 +26,7 @@ function cloneIntersection(
 export class HitResolver {
   constructor(
     private readonly callbacks: InteractionCallbackDispatch,
-    private readonly manipulation?: InteractionManipulation,
+    private readonly manipulation: ManipulationManager,
     private readonly registry = new HitRegistry()
   ) {}
 
@@ -48,7 +48,7 @@ export class HitResolver {
 
       const eligiblePath = this.getEligiblePath(objectPath);
       const hitPart = withCorner(registered.part, rawIntersection.uv);
-      const manipulation = this.manipulation?.resolve(
+      const manipulation = this.manipulation.resolve(
         surface,
         eligiblePath,
         hitPart

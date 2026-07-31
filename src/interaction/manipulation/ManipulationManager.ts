@@ -190,7 +190,10 @@ export class ManipulationManager {
       ownerParent: resolution.owner.parent,
       config,
       primary: {capture, snapshot: cloneSnapshot(snapshot)},
-      primaryAction: resolution.action,
+      primaryAction:
+        resolution.action === ManipulationAction.Scale
+          ? undefined
+          : resolution.action,
     };
     const edge = getCardEdge(session.owner);
     const corner =

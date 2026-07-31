@@ -6,9 +6,9 @@ import {
 import {effect} from '@preact/signals-core';
 import * as THREE from 'three';
 
+import {ScriptMixin} from '../../core/Script';
 import {ManipulationAction} from '../../interaction/manipulation/ManipulationTypes';
 import {User} from '../../core/User';
-import {XRUI} from '../mixins/XRUI';
 import {UIManipulationHandleFragmentShader} from '../shaders/UIManipulationHandle.frag';
 import {parseColorWithAlpha} from '../utils/ColorUtils';
 import {
@@ -23,7 +23,6 @@ const DEFAULT_HANDLE_PROPERTIES = {
   margin: 50,
   cornerRadius: 40,
   edgeWidth: 2,
-  edgeColor: 'rgba(255, 255, 255, 1)',
   spotlightColor: 'rgba(255, 255, 255, 1)',
   spotlightRadius: 20,
   spotlightBlur: 40,
@@ -32,15 +31,13 @@ const DEFAULT_HANDLE_PROPERTIES = {
 
 /** Visual and hit-area settings for a card manipulation edge. */
 export interface UIManipulationHandleProperties {
-  /** Distance in layout pixels between the card content and outer edge. */
+  /** Width of the manipulation band extending outward from the card edge. */
   margin?: number;
   /** Outer edge corner radius in layout pixels. */
   cornerRadius?: number;
   /** Visible shader edge width in layout pixels. */
   edgeWidth?: number;
-  /** Visible shader edge color. */
-  edgeColor?: THREE.ColorRepresentation;
-  /** Cursor spotlight color. */
+  /** Color shared by the cursor spotlight and illuminated outline. */
   spotlightColor?: THREE.ColorRepresentation;
   /** Cursor spotlight radius in layout pixels. */
   spotlightRadius?: number;
@@ -51,12 +48,12 @@ export interface UIManipulationHandleProperties {
 }
 
 type HandleLayerProperties = PanelLayerProperties & {
-  u_corner_radius?: number;
-  u_edge_width?: number;
-  u_edge_color?: THREE.ColorRepresentation;
-  u_spotlight_color?: THREE.ColorRepresentation;
-  u_spotlight_radius?: number;
-  u_spotlight_blur?: number;
+  u_manipulation_margin?: number;
+  u_manipulation_corner_radius?: number;
+  u_manipulation_edge_width?: number;
+  u_cursor_spotlight_color?: THREE.ColorRepresentation;
+  u_cursor_radius?: number;
+  u_cursor_spotlight_blur?: number;
   u_cursor_uv?: THREE.Vector2;
   u_show_glow?: number;
   u_cursor_uv_2?: THREE.Vector2;
@@ -93,26 +90,38 @@ class UIManipulationHandleLayer extends PanelLayer<HandleLayerProperties> {
       ).signal;
       setNumber(
         this.material,
-        'u_corner_radius',
-        signals.u_corner_radius?.value
+        'u_manipulation_margin',
+        signals.u_manipulation_margin?.value
       );
-      setNumber(this.material, 'u_edge_width', signals.u_edge_width?.value);
-      setColor(this.material, 'u_edge_color', signals.u_edge_color?.value);
+      setNumber(
+        this.material,
+        'u_manipulation_corner_radius',
+        signals.u_manipulation_corner_radius?.value
+      );
+      setNumber(
+        this.material,
+        'u_manipulation_edge_width',
+        signals.u_manipulation_edge_width?.value
+      );
       setColor(
         this.material,
-        'u_spotlight_color',
-        signals.u_spotlight_color?.value
+        'u_cursor_spotlight_color',
+        signals.u_cursor_spotlight_color?.value
       );
       setNumber(
         this.material,
-        'u_spotlight_radius',
-        signals.u_spotlight_radius?.value
+        'u_cursor_radius',
+        signals.u_cursor_radius?.value
       );
       setNumber(
         this.material,
-        'u_spotlight_blur',
-        signals.u_spotlight_blur?.value
+        'u_cursor_spotlight_blur',
+        signals.u_cursor_spotlight_blur?.value
       );
+      setVector2(this.material, 'u_cursor_uv', signals.u_cursor_uv?.value);
+      setNumber(this.material, 'u_show_glow', signals.u_show_glow?.value);
+      setVector2(this.material, 'u_cursor_uv_2', signals.u_cursor_uv_2?.value);
+      setNumber(this.material, 'u_show_glow_2', signals.u_show_glow_2?.value);
       setNumber(this.material, 'u_debug', signals.u_debug?.value);
     });
   }
@@ -130,7 +139,7 @@ class UIManipulationHandleLayer extends PanelLayer<HandleLayerProperties> {
   }
 }
 
-const ManipulationHandleScript = XRUI(UIManipulationHandleLayer);
+const ManipulationHandleScript = ScriptMixin(UIManipulationHandleLayer);
 
 /** Shader-backed edge that requests translation from its manipulation owner. */
 export class UIManipulationHandle extends ManipulationHandleScript {
@@ -138,26 +147,30 @@ export class UIManipulationHandle extends ManipulationHandleScript {
 
   name = 'UIManipulationHandle';
   readonly margin: number;
+  readonly cornerRadius: number;
   private user?: User;
   private readonly cursorSlots = new Map<THREE.Object3D, 0 | 1>();
 
   constructor(properties: UIManipulationHandleProperties = {}) {
     const resolved = {...DEFAULT_HANDLE_PROPERTIES, ...properties};
     const margin = Math.max(0, resolved.margin);
+    const cornerRadius = Math.max(0, resolved.cornerRadius);
     super({
       positionType: 'absolute',
       positionTop: -margin,
       positionRight: -margin,
       positionBottom: -margin,
       positionLeft: -margin,
+      width: 'auto',
+      height: 'auto',
       pointerEvents: 'auto',
       zIndexOffset: -20,
-      u_corner_radius: resolved.cornerRadius,
-      u_edge_width: resolved.edgeWidth,
-      u_edge_color: resolved.edgeColor,
-      u_spotlight_color: resolved.spotlightColor,
-      u_spotlight_radius: resolved.spotlightRadius,
-      u_spotlight_blur: resolved.spotlightBlur,
+      u_manipulation_margin: margin,
+      u_manipulation_corner_radius: cornerRadius,
+      u_manipulation_edge_width: resolved.edgeWidth,
+      u_cursor_spotlight_color: resolved.spotlightColor,
+      u_cursor_radius: resolved.spotlightRadius,
+      u_cursor_spotlight_blur: resolved.spotlightBlur,
       u_cursor_uv: new THREE.Vector2(0.5, 0.5),
       u_show_glow: 0,
       u_cursor_uv_2: new THREE.Vector2(0.5, 0.5),
@@ -165,6 +178,7 @@ export class UIManipulationHandle extends ManipulationHandleScript {
       u_debug: resolved.debug ? 1 : 0,
     });
     this.margin = margin;
+    this.cornerRadius = cornerRadius;
     this.xb = {
       manipulationHandle: {action: ManipulationAction.Translate},
     };
@@ -181,7 +195,11 @@ export class UIManipulationHandle extends ManipulationHandleScript {
         index--
       ) {
         const uv = intersections[index].uv;
-        if (!size || !uv || !isEdgeHit(uv, size, this.margin)) {
+        if (
+          !size ||
+          !uv ||
+          !isOuterEdgeHit(uv, size, this.margin, this.cornerRadius)
+        ) {
           intersections.splice(index, 1);
         }
       }
@@ -212,7 +230,7 @@ export class UIManipulationHandle extends ManipulationHandleScript {
 
   override dispose(): void {
     this.cursorSlots.clear();
-    super.dispose();
+    UIManipulationHandleLayer.prototype.dispose.call(this);
   }
 
   private assignCursorSlot(controller: THREE.Object3D): 0 | 1 | undefined {
@@ -238,12 +256,12 @@ export class UIManipulationHandle extends ManipulationHandleScript {
 
 function createUniforms(): Record<string, THREE.IUniform> {
   return {
-    u_corner_radius: {value: 0},
-    u_edge_width: {value: 0},
-    u_edge_color: {value: new THREE.Vector4(1, 1, 1, 1)},
-    u_spotlight_color: {value: new THREE.Vector4(1, 1, 1, 1)},
-    u_spotlight_radius: {value: 0},
-    u_spotlight_blur: {value: 0},
+    u_manipulation_margin: {value: 0},
+    u_manipulation_corner_radius: {value: 0},
+    u_manipulation_edge_width: {value: 0},
+    u_cursor_spotlight_color: {value: new THREE.Vector4(1, 1, 1, 1)},
+    u_cursor_radius: {value: 0},
+    u_cursor_spotlight_blur: {value: 0},
     u_cursor_uv: {value: new THREE.Vector2(0.5, 0.5)},
     u_show_glow: {value: 0},
     u_cursor_uv_2: {value: new THREE.Vector2(0.5, 0.5)},
@@ -270,16 +288,50 @@ function setColor(
   material.uniforms[name].value.set(color.r, color.g, color.b, opacity);
 }
 
-function isEdgeHit(
+function setVector2(
+  material: THREE.ShaderMaterial,
+  name: string,
+  value: THREE.Vector2 | undefined
+): void {
+  if (value !== undefined) material.uniforms[name].value.copy(value);
+}
+
+function isOuterEdgeHit(
   uv: THREE.Vector2,
   size: readonly [number, number],
-  margin: number
+  margin: number,
+  cornerRadius: number
 ): boolean {
-  const x = uv.x * size[0];
-  const y = uv.y * size[1];
-  const edgeX = Math.min(margin, size[0] / 2);
-  const edgeY = Math.min(margin, size[1] / 2);
+  const halfWidth = size[0] / 2;
+  const halfHeight = size[1] / 2;
+  const x = uv.x * size[0] - halfWidth;
+  const y = uv.y * size[1] - halfHeight;
+  const innerHalfWidth = Math.max(0, halfWidth - margin);
+  const innerHalfHeight = Math.max(0, halfHeight - margin);
+  const outerRadius = Math.min(cornerRadius, halfWidth, halfHeight);
+  const innerRadius = Math.min(
+    Math.max(0, outerRadius - margin),
+    innerHalfWidth,
+    innerHalfHeight
+  );
   return (
-    x <= edgeX || x >= size[0] - edgeX || y <= edgeY || y >= size[1] - edgeY
+    roundedBoxDistance(x, y, halfWidth, halfHeight, outerRadius) <= 0 &&
+    roundedBoxDistance(x, y, innerHalfWidth, innerHalfHeight, innerRadius) >= 0
+  );
+}
+
+function roundedBoxDistance(
+  x: number,
+  y: number,
+  halfWidth: number,
+  halfHeight: number,
+  radius: number
+): number {
+  const qx = Math.abs(x) - halfWidth + radius;
+  const qy = Math.abs(y) - halfHeight + radius;
+  return (
+    Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) +
+    Math.min(Math.max(qx, qy), 0) -
+    radius
   );
 }

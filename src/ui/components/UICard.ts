@@ -2,10 +2,7 @@ import {Container} from '@pmndrs/uikit';
 import * as THREE from 'three';
 
 import {ScriptMixin} from '../../core/Script';
-import {
-  ManipulationAction,
-  type ManipulationOptions,
-} from '../../interaction/manipulation/ManipulationTypes';
+import type {ManipulationOptions} from '../../interaction/manipulation/ManipulationTypes';
 import {DEFAULT_CARD_PROPS} from '../constants/UICardConstants';
 import {
   GradientPanel,
@@ -15,12 +12,6 @@ import {
   UIManipulationHandle,
   type UIManipulationHandleProperties,
 } from './UIManipulationHandle';
-
-/** Manipulation actions and optional shader edge for a UI card. */
-export type UICardManipulationOptions = ManipulationOptions & {
-  /** Adds the edge handle. The edge is enabled by default for UI cards. */
-  edge?: boolean | UIManipulationHandleProperties;
-};
 
 const ScriptedGradientPanel = ScriptMixin(GradientPanel);
 
@@ -38,7 +29,10 @@ export type UICardOutProperties = Omit<
   anchorX?: 'left' | 'right' | 'center' | number;
   anchorY?: 'bottom' | 'top' | 'center' | number;
   pixelSize?: number;
-  manipulation?: boolean | UICardManipulationOptions;
+  /** Enables card manipulation. Translation faces the camera unless explicitly disabled. */
+  manipulation?: boolean | ManipulationOptions;
+  /** Adds an outward shader edge that can act as a manipulation handle. */
+  manipulationEdge?: boolean | UIManipulationHandleProperties;
 };
 
 /** A UIKit flex container anchored in world space. */
@@ -55,7 +49,7 @@ export class UICard extends ScriptedGradientPanel {
   readonly anchorX: number;
   readonly anchorY: number;
   readonly basePosition: THREE.Vector3;
-  readonly manipulationHandle?: UIManipulationHandle;
+  readonly manipulationEdge?: UIManipulationHandle;
   private timer?: THREE.Timer;
 
   constructor(config: UICardOutProperties = {}) {
@@ -65,6 +59,7 @@ export class UICard extends ScriptedGradientPanel {
       rotation,
       visible,
       manipulation,
+      manipulationEdge,
       pixelSize,
       sizeX,
       sizeY,
@@ -102,14 +97,13 @@ export class UICard extends ScriptedGradientPanel {
     if (rotation) this.quaternion.copy(rotation);
     if (visible !== undefined) this.visible = visible;
     if (manipulation !== undefined) {
-      const resolved = resolveCardManipulation(manipulation);
-      this.xb = {manipulation: resolved.owner};
-      if (resolved.edge !== false) {
-        this.manipulationHandle = new UIManipulationHandle(
-          resolved.edge === true ? {} : resolved.edge
-        );
-        this.add(this.manipulationHandle);
-      }
+      this.xb = {manipulation: resolveCardManipulation(manipulation)};
+    }
+    if (manipulationEdge) {
+      this.manipulationEdge = new UIManipulationHandle(
+        manipulationEdge === true ? {} : manipulationEdge
+      );
+      this.add(this.manipulationEdge);
     }
 
     // UIKit containers coordinate their own private hit surfaces. The public
@@ -144,38 +138,43 @@ export class UICard extends ScriptedGradientPanel {
   }
 }
 
-function resolveCardManipulation(value: boolean | UICardManipulationOptions): {
-  owner: boolean | ManipulationOptions;
-  edge: boolean | UIManipulationHandleProperties;
-} {
-  if (value === false) {
-    return {owner: false, edge: false};
-  }
+function resolveCardManipulation(
+  value: boolean | ManipulationOptions
+): boolean | ManipulationOptions {
+  if (value === false) return false;
   if (value === true) {
-    return {
-      owner: {
-        actions: {translate: true, scale: true},
-        handle: {action: ManipulationAction.None},
-      },
-      edge: true,
-    };
+    return {actions: defaultCardManipulationActions()};
   }
 
-  const {edge = true, ...options} = value;
-  const actions = options.actions ?? {translate: true, scale: true};
   return {
-    owner: {
-      ...options,
-      actions,
-      handle: {
-        action:
-          edge === false
-            ? (options.handle?.action ?? ManipulationAction.Translate)
-            : ManipulationAction.None,
-      },
-    },
-    edge,
+    ...value,
+    actions: resolveCardManipulationActions(value.actions),
   };
+}
+
+function defaultCardManipulationActions(): NonNullable<
+  ManipulationOptions['actions']
+> {
+  return {
+    translate: {faceCamera: true},
+    scale: true,
+  };
+}
+
+function resolveCardManipulationActions(
+  actions: ManipulationOptions['actions']
+): NonNullable<ManipulationOptions['actions']> {
+  if (!actions) return defaultCardManipulationActions();
+  if (actions.translate === true) {
+    return {...actions, translate: {faceCamera: true}};
+  }
+  if (actions.translate && typeof actions.translate === 'object') {
+    return {
+      ...actions,
+      translate: {faceCamera: true, ...actions.translate},
+    };
+  }
+  return actions;
 }
 
 function resolveHorizontalAnchor(

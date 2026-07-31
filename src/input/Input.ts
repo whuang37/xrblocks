@@ -62,6 +62,8 @@ export class Input {
     Controller,
     THREE.Intersection[]
   >();
+  private selectedControllers = new Set<Controller>();
+  private releasedControllers = new Set<Controller>();
   activeControllers = new ActiveControllers();
   leftController?: Controller;
   rightController?: Controller;
@@ -240,8 +242,6 @@ export class Input {
   defaultOnSelectStart(event: ControllerEvent) {
     const controller = event.target;
     controller.userData.selected = true;
-    this.setRaycasterFromController(controller);
-    this.performRaycastOnScene(controller);
   }
 
   /**
@@ -251,6 +251,7 @@ export class Input {
   defaultOnSelectEnd(event: ControllerEvent) {
     const controller = event.target;
     controller.userData.selected = false;
+    this.releasedControllers.add(controller);
   }
 
   defaultOnSqueezeStart(event: ControllerEvent) {
@@ -295,6 +296,9 @@ export class Input {
     if (controller.reticle) {
       controller.reticle.visible = false;
     }
+    this.clearIntersections(controller);
+    this.selectedControllers.delete(controller);
+    this.releasedControllers.delete(controller);
     delete controller?.gamepad;
     switch (event.data?.handedness) {
       case 'left':
@@ -477,7 +481,7 @@ export class Input {
     const raySources: RaySourceInput[] = [];
     if (this.controllersEnabled) {
       for (const controller of this.controllers) {
-        if (controller.userData.connected === false) continue;
+        if (controller.userData.connected !== true) continue;
         const position = controller.getWorldPosition(new THREE.Vector3());
         const orientation = controller.getWorldQuaternion(
           new THREE.Quaternion()
@@ -526,20 +530,37 @@ export class Input {
   }
 
   updateController(controller: Controller) {
-    if (controller.userData.connected === false) {
+    if (controller.userData.connected !== true) {
+      this.clearIntersections(controller);
+      this.selectedControllers.delete(controller);
+      this.releasedControllers.delete(controller);
       return;
     }
     controller.updatePose?.();
     controller.updateMatrixWorld();
     this.pinchFilter.updateController(
       controller,
-      this.dispatchEvent.bind(this),
-      this.setRaycasterFromController.bind(this),
-      this.performRaycastOnScene.bind(this)
+      this.dispatchEvent.bind(this)
     );
-    if (this.options.controllers.performRaycastOnUpdate) {
+    const selected = controller.userData.selected === true;
+    const wasSelected = this.selectedControllers.has(controller);
+    const wasReleased = this.releasedControllers.delete(controller);
+    if (selected) {
+      this.selectedControllers.add(controller);
+    } else {
+      this.selectedControllers.delete(controller);
+    }
+    if (
+      this.options.interaction.raycastMode === 'continuous' ||
+      controller === this.gazeController ||
+      selected ||
+      wasSelected ||
+      wasReleased
+    ) {
       this.setRaycasterFromController(controller);
       this.performRaycastOnScene(controller);
+    } else {
+      this.clearIntersections(controller);
     }
   }
 
@@ -596,6 +617,9 @@ export class Input {
     this.controllersEnabled = false;
     for (const controller of this.controllers) {
       controller.userData.selected = false;
+      this.clearIntersections(controller);
+      this.selectedControllers.delete(controller);
+      this.releasedControllers.delete(controller);
       if (controller.reticle) {
         controller.reticle.visible = false;
         controller.reticle.targetObject = undefined;
@@ -622,6 +646,10 @@ export class Input {
     intersections.length = 0;
     this.raycaster.intersectObject(this.scene, true, intersections);
     intersections.sort(compareIntersections);
+  }
+
+  private clearIntersections(controller: Controller) {
+    this.intersectionsForController.get(controller)?.splice(0);
   }
 }
 

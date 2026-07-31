@@ -77,9 +77,7 @@ export class PinchFilter {
 
   updateController(
     controller: Controller,
-    dispatchEventFn: (event: ControllerEvent) => void,
-    setRaycasterFn: (c: Controller) => void,
-    performRaycastFn: (c: Controller) => void
+    dispatchEventFn: (event: ControllerEvent) => void
   ) {
     if (controller.gamepad && controller.gamepad.buttons[0] !== undefined) {
       const pinchValue = controller.gamepad.buttons[0].value;
@@ -88,8 +86,6 @@ export class PinchFilter {
 
       if (isPinching && !wasPinching) {
         controller.userData.selected = true;
-        setRaycasterFn(controller);
-        performRaycastFn(controller);
         dispatchEventFn({
           type: 'selectstart',
           target: controller,

@@ -64,6 +64,7 @@ export type {
   InteractionSourceType,
   PointerEvents,
   ReticleMode,
+  XBObjectOptions,
 } from './interaction/InteractionTypes';
 export * from './interaction/manipulation/ManipulationTypes';
 export * from './lighting/Lighting';

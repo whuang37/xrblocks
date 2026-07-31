@@ -126,7 +126,7 @@ function createNode(
         (style.color as THREE.ColorRepresentation | undefined) ??
         theme.colors.text,
       ...style,
-      pointerEvents: element.pointerEvents,
+      pointerEvents: element.xb?.pointerEvents ?? 'auto',
     });
   } else if (kind === 'image') {
     const image = element as UIImage;
@@ -136,14 +136,14 @@ function createNode(
           ? images.get(image.src, () => invalidateUIElement(image))
           : image.src,
       ...style,
-      pointerEvents: element.pointerEvents,
+      pointerEvents: element.xb?.pointerEvents ?? 'auto',
     });
   } else if (kind === 'icon') {
     const icon = (element as UIIcon).icon || 'question_mark';
     node = new Svg({
       content: icons.get(icon, () => invalidateUIElement(element)),
       ...style,
-      pointerEvents: element.pointerEvents,
+      pointerEvents: element.xb?.pointerEvents ?? 'auto',
     });
   } else {
     const panelStyle = panelDefaults(element, theme, style, viewport);
@@ -251,7 +251,7 @@ function panelDefaults(
             ? 'rgba(255, 255, 255, 0)'
             : 'rgba(0, 0, 0, 0)',
     cornerRadius: theme.borderRadius,
-    pointerEvents: element.pointerEvents,
+    pointerEvents: element.xb?.pointerEvents ?? 'auto',
     ...style,
   };
   if (kind === 'card') {

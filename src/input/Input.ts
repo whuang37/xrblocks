@@ -149,7 +149,7 @@ export class Input {
                 this.hands[i],
                 'boxes'
               );
-              handModel.pointerEvents = 'none';
+              handModel.xb = {...handModel.xb, pointerEvents: 'none'};
               this.hands[i].add(handModel);
             }
           }
@@ -161,7 +161,7 @@ export class Input {
                 this.hands[i],
                 'mesh'
               );
-              handModel.pointerEvents = 'none';
+              handModel.xb = {...handModel.xb, pointerEvents: 'none'};
               this.hands[i].add(handModel);
             }
           }

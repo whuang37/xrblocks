@@ -52,17 +52,6 @@ export interface ManipulationOptions {
   handle?: ManipulationHandleOptions;
 }
 
-export interface XBObjectOptions {
-  manipulation?: boolean | ManipulationOptions;
-  manipulationHandle?: ManipulationHandleOptions | 'none';
-}
-
-declare module 'three' {
-  interface Object3D {
-    xb?: XBObjectOptions;
-  }
-}
-
 export type ManipulationPhase = 'start' | 'update' | 'end' | 'cancel';
 
 export interface BaseManipulationEvent {

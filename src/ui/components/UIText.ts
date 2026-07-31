@@ -13,7 +13,6 @@ export class UIText extends UIElement {
     if (typeof text !== 'string') throw new Error('UIText requires text.');
     super('text', options);
     this._text = text;
-    this.pointerEvents = options.pointerEvents ?? 'auto';
   }
 
   get text(): string {

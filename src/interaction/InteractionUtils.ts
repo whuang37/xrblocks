@@ -25,9 +25,9 @@ export function isSelectionValid(
   if (ownerIndex < 0) return false;
   for (let index = 0; index < ancestry.length; index++) {
     const object = ancestry[index];
-    if (object.visible === false || object.pointerEvents === 'none')
+    if (object.visible === false || object.xb?.pointerEvents === 'none')
       return false;
-    if (index <= ownerIndex && object.interactionEnabled === false)
+    if (index <= ownerIndex && object.xb?.interactionEnabled === false)
       return false;
     if (index + 1 < ancestry.length && object.parent !== ancestry[index + 1]) {
       return false;

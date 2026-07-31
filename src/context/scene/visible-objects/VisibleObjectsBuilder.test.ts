@@ -13,7 +13,7 @@ describe('createVisibleObjectsContext', () => {
     const occluder = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.1));
     target.position.z = -2;
     occluder.position.z = -1;
-    occluderRoot.pointerEvents = 'none';
+    occluderRoot.xb = {pointerEvents: 'none'};
     occluderRoot.add(occluder);
     scene.add(target, occluderRoot);
 

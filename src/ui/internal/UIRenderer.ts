@@ -344,7 +344,7 @@ function treeSignature(root: UIElement, interaction: Interaction): string {
       )
       .join(';');
     values.push(
-      `${object.uuid}:${getUIRevision(object)}:${object.visible}:${object.pointerEvents}:${object.interactionEnabled}:${interaction.isPointingAt(object)}:${interaction.isSelectingAt(object)}:${cursorSignature}`
+      `${object.uuid}:${getUIRevision(object)}:${object.visible}:${object.xb?.pointerEvents}:${object.xb?.interactionEnabled}:${interaction.isPointingAt(object)}:${interaction.isSelectingAt(object)}:${cursorSignature}`
     );
   });
   return values.join('|');

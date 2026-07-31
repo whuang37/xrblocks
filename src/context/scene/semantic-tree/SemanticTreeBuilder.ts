@@ -296,7 +296,7 @@ function inferTraits(object: THREE.Object3D): string[] | undefined {
     isUIElement(object) &&
     (getUIElementKind(object) === 'button' ||
       getUIElementKind(object) === 'slider') &&
-    object.interactionEnabled !== false &&
+    object.xb?.interactionEnabled !== false &&
     !inferDisabled(object)
   ) {
     traits.add('selectable');

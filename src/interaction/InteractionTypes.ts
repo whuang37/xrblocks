@@ -8,16 +8,26 @@ import type {
   SelectEvent,
 } from '../core/Script.js';
 import type {Controller} from '../input/Controller.js';
-import type {ManipulationAction} from './manipulation/ManipulationTypes.js';
+import type {
+  ManipulationAction,
+  ManipulationHandleOptions,
+  ManipulationOptions,
+} from './manipulation/ManipulationTypes.js';
 
 export type PointerEvents = 'auto' | 'none';
 export type ReticleMode = 'auto' | 'surface' | 'hidden';
 
+export interface XBObjectOptions {
+  pointerEvents?: PointerEvents;
+  interactionEnabled?: boolean;
+  reticleMode?: ReticleMode;
+  manipulation?: boolean | ManipulationOptions;
+  manipulationHandle?: ManipulationHandleOptions | 'none';
+}
+
 declare module 'three' {
   interface Object3D {
-    pointerEvents?: PointerEvents;
-    interactionEnabled?: boolean;
-    reticleMode?: ReticleMode;
+    xb?: XBObjectOptions;
   }
 }
 

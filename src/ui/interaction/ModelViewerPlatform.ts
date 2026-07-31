@@ -1,9 +1,7 @@
 import * as THREE from 'three';
 
-import {
-  ManipulationAction,
-  type XBObjectOptions,
-} from '../../interaction/manipulation/ManipulationTypes';
+import type {XBObjectOptions} from '../../interaction/InteractionTypes';
+import {ManipulationAction} from '../../interaction/manipulation/ManipulationTypes';
 
 import {AnimatableNumber} from './AnimatableNumber.js';
 import {createPlatformGeometry} from './ModelViewerPlatformGeometry.js';

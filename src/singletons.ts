@@ -152,7 +152,8 @@ export function getElapsedTime() {
  */
 export function showReticleOnDepthMesh(value: boolean) {
   if (core.depth.depthMesh) {
-    core.depth.depthMesh.pointerEvents = value ? 'auto' : 'none';
+    core.depth.depthMesh.xb ??= {};
+    core.depth.depthMesh.xb.pointerEvents = value ? 'auto' : 'none';
   }
 }
 

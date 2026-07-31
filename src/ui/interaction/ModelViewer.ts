@@ -7,10 +7,8 @@ import {Script, type HoverEvent} from '../../core/Script';
 import {Registry} from '../../core/components/Registry';
 import {Depth} from '../../depth/Depth';
 import {OcclusionUtils} from '../../depth/occlusion/OcclusionUtils';
-import {
-  ManipulationAction,
-  type XBObjectOptions,
-} from '../../interaction/manipulation/ManipulationTypes';
+import type {XBObjectOptions} from '../../interaction/InteractionTypes';
+import {ManipulationAction} from '../../interaction/manipulation/ManipulationTypes';
 import {normalizeManipulationConfig} from '../../interaction/manipulation/ManipulationConfig';
 import {ModelLoader} from '../../utils/ModelLoader';
 import {getGroupBoundingBox} from '../../utils/ModelUtils';

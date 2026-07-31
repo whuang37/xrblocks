@@ -239,10 +239,12 @@ export abstract class UIElement extends Script {
     );
     this.style = options.style ?? {};
     this.visible = options.visible ?? true;
-    this.pointerEvents = options.pointerEvents ?? 'auto';
-    this.interactionEnabled = options.interactionEnabled ?? true;
+    this.xb = {
+      pointerEvents: options.pointerEvents ?? 'auto',
+      interactionEnabled: options.interactionEnabled ?? true,
+    };
     if (options.reticleMode !== undefined) {
-      this.reticleMode = options.reticleMode;
+      this.xb.reticleMode = options.reticleMode;
     }
     if (options.children) this.add(...options.children);
   }

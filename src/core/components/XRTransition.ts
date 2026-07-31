@@ -23,7 +23,7 @@ export class XRTransition extends MeshScript<
   THREE.SphereGeometry,
   THREE.MeshBasicMaterial
 > {
-  pointerEvents = 'none' as const;
+  xb = {pointerEvents: 'none' as const};
   static dependencies = {
     renderer: THREE.WebGLRenderer,
     camera: THREE.Camera,

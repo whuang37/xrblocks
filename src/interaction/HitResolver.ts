@@ -107,7 +107,8 @@ export class HitResolver {
 
   private isExcluded(path: readonly THREE.Object3D[]): boolean {
     return path.some(
-      (object) => object.visible === false || object.pointerEvents === 'none'
+      (object) =>
+        object.visible === false || object.xb?.pointerEvents === 'none'
     );
   }
 
@@ -115,7 +116,7 @@ export class HitResolver {
     objectPath: readonly THREE.Object3D[]
   ): THREE.Object3D[] {
     const barrierIndex = objectPath.findIndex(
-      (object) => object.interactionEnabled === false
+      (object) => object.xb?.interactionEnabled === false
     );
     return barrierIndex < 0
       ? [...objectPath]
@@ -138,7 +139,7 @@ export class HitResolver {
     path: readonly THREE.Object3D[]
   ): 'auto' | 'surface' | 'hidden' {
     for (const object of path) {
-      const mode = object.reticleMode;
+      const mode = object.xb?.reticleMode;
       if (mode === 'auto' || mode === 'surface' || mode === 'hidden') {
         return mode;
       }

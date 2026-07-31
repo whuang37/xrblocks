@@ -94,18 +94,36 @@ Its `disabled` property uses the shared interaction barrier and semantic state.
 
 ## Manipulation and placement
 
-Cards use the same manipulation configuration as every other scene object:
+Cards use the same manipulation configuration as every other scene object.
+`manipulation: true` enables translation and scaling. Card translation faces
+the camera by default. `manipulationEdge` separately adds the shader edge:
 
 ```js
 const card = new UICard({
   sizeX: 0.8,
   sizeY: 0.5,
-  manipulation: {
-    actions: {translate: {faceCamera: true}, scale: true},
-    handle: {action: xb.ManipulationAction.Translate},
-  },
+  manipulation: true,
+  manipulationEdge: true,
 });
 ```
+
+`manipulationEdge` only creates the edge child. It does not enable actions on
+the card. Configure both options when the edge must move or scale the card.
+
+Set `faceCamera: false` when dragging must preserve the card orientation:
+
+```js
+const fixedOrientationCard = new UICard({
+  manipulation: {
+    actions: {translate: {faceCamera: false}, scale: true},
+  },
+  manipulationEdge: true,
+});
+```
+
+Use `mode: 'spherical'` with `faceCamera: true` when the card should tilt toward
+the camera instead of staying upright. Both the card drag and `FaceCamera` use
+the same smoothing model for the transition.
 
 Placement behaviors are normal child scripts. `FaceCamera`, `FollowHead`,
 `FollowObject`, and `VisibilityTransition` suspend and rebase automatically

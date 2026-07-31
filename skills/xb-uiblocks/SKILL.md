@@ -29,6 +29,7 @@ class Menu extends xb.Script {
       sizeY: 0.5,
       position: new THREE.Vector3(0, 1.5, -1.2),
       manipulation: true,
+      manipulationEdge: true,
     });
     this.add(card);
 
@@ -68,7 +69,12 @@ class Menu extends xb.Script {
 - Use `strokeWidth` and `strokeColor` with `cornerRadius` for panel outlines.
 - Use one `pixelSize` and a small spacing/type scale per surface.
 - Configure movement through `card.xb.manipulation` or the constructor's
-  `manipulation` option.
+  `manipulation` option. Card translation faces the camera by default; use
+  `translate: {faceCamera: false}` to preserve its orientation. Set
+  `mode: 'spherical'` to allow vertical tilt toward the camera. Drag-facing
+  uses the same smoothing model as `FaceCamera`.
+- Configure the shader handle separately with `manipulationEdge`. It creates
+  the edge child but does not enable manipulation actions.
 - Add `FaceCamera`, `FollowHead`, `FollowObject`, and `VisibilityTransition` as
   card children. They suspend and rebase during manipulation.
 

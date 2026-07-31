@@ -22,7 +22,23 @@ object.xb = {
 
 `object.xb.manipulation = true` enables the default Translate and Scale
 actions. A selected owner translates until a second free spatial source starts
-Scale.
+Scale. Translation does not face the camera unless `faceCamera` is enabled;
+the default facing mode is cylindrical.
+
+Use spherical facing when the object should tilt toward the camera as well:
+
+```js
+object.xb = {
+  manipulation: {
+    actions: {
+      translate: {faceCamera: true, mode: 'spherical'},
+    },
+  },
+};
+```
+
+Camera-facing translation uses the same exponential smoothing as `FaceCamera`.
+Override it with `smoothing` when a different transition speed is needed.
 
 ## Child handles
 

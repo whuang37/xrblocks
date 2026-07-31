@@ -33,18 +33,35 @@ Use `UIPanel` hover hooks for visual feedback.
 
 ## Shared interaction
 
-Cards use the same manipulation system as every other `Object3D`:
+Cards use the same manipulation system as every other `Object3D`.
+`manipulation: true` enables translation and scaling, and translation faces the
+camera by default. `manipulationEdge` separately creates the shader edge:
 
 ```js
 const card = new UICard({
   sizeX: 0.8,
   sizeY: 0.5,
-  manipulation: {
-    actions: {translate: {faceCamera: true}, scale: true},
-    handle: {action: xb.ManipulationAction.Translate},
-  },
+  manipulation: true,
+  manipulationEdge: true,
 });
 ```
+
+An edge does not enable manipulation actions. Use `manipulation` and
+`manipulationEdge` together when the edge must manipulate the card.
+
+Use an explicit option to preserve the original orientation:
+
+```js
+const fixedOrientationCard = new UICard({
+  manipulation: {
+    actions: {translate: {faceCamera: false}, scale: true},
+  },
+  manipulationEdge: true,
+});
+```
+
+Set `mode: 'spherical'` alongside `faceCamera: true` when the card should tilt
+toward the camera.
 
 Add `FaceCamera`, `FollowHead`, `FollowObject`, or `VisibilityTransition` as
 children. The manipulation manager suspends these transform scripts during a

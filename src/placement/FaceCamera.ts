@@ -1,8 +1,14 @@
 import * as THREE from 'three';
 
+import {
+  DEFAULT_FACE_CAMERA_SMOOTHING,
+  faceCameraQuaternion,
+  faceCameraSlerpAlpha,
+  type FaceCameraMode,
+} from '../utils/FaceCameraMath';
 import {TransformScript} from './TransformScript';
 
-export type FaceCameraMode = 'cylindrical' | 'spherical';
+export type {FaceCameraMode} from '../utils/FaceCameraMath';
 
 export interface FaceCameraOptions {
   mode?: FaceCameraMode;
@@ -15,16 +21,13 @@ export class FaceCamera extends TransformScript {
 
   private camera?: THREE.Camera;
   private timer?: THREE.Timer;
-  private readonly target = new THREE.Vector3();
-  private readonly helper = new THREE.Object3D();
-  private readonly parentWorldQuaternion = new THREE.Quaternion();
   private readonly mode: FaceCameraMode;
   private readonly smoothing: number;
 
   constructor(options: FaceCameraOptions = {}) {
     super();
     this.mode = options.mode ?? 'cylindrical';
-    this.smoothing = options.smoothing ?? 0.1;
+    this.smoothing = options.smoothing ?? DEFAULT_FACE_CAMERA_SMOOTHING;
   }
 
   init({camera, timer}: {camera: THREE.Camera; timer: THREE.Timer}) {
@@ -36,17 +39,20 @@ export class FaceCamera extends TransformScript {
     const object = this.parent;
     if (!this.canUpdate || !object || !this.camera || !this.timer) return;
 
-    object.getWorldPosition(this.helper.position);
-    this.camera.getWorldPosition(this.target);
-    if (this.mode === 'cylindrical') this.target.y = this.helper.position.y;
-    this.helper.lookAt(this.target);
+    const worldPosition = object.getWorldPosition(new THREE.Vector3());
+    const cameraPosition = this.camera.getWorldPosition(new THREE.Vector3());
+    const parentWorldQuaternion = object.parent?.getWorldQuaternion(
+      new THREE.Quaternion()
+    );
+    const targetQuaternion = faceCameraQuaternion(
+      worldPosition,
+      cameraPosition,
+      parentWorldQuaternion,
+      this.mode
+    );
+    if (!targetQuaternion) return;
 
-    if (object.parent) {
-      object.parent.getWorldQuaternion(this.parentWorldQuaternion);
-      this.helper.quaternion.premultiply(this.parentWorldQuaternion.invert());
-    }
-
-    const alpha = 1 - Math.exp(-this.smoothing * this.timer.getDelta() * 60);
-    object.quaternion.slerp(this.helper.quaternion, alpha);
+    const alpha = faceCameraSlerpAlpha(this.smoothing, this.timer.getDelta());
+    object.quaternion.slerp(targetQuaternion, alpha);
   }
 }

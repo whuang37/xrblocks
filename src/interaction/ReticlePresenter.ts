@@ -39,7 +39,11 @@ export class ReticlePresenter implements ReticlePresentationObserver {
       return;
     }
 
-    if (!resolved) {
+    const beyondPresentationRange =
+      resolved &&
+      this.options.maxDistance !== undefined &&
+      resolved.intersection.distance >= this.options.maxDistance;
+    if (!resolved || beyondPresentationRange) {
       reticle.intersection = undefined;
       reticle.targetObject = undefined;
       reticle.setHovering(false);

@@ -1,15 +1,34 @@
 import * as THREE from 'three';
 
-function defaultSortFunction(
+import {UI_OVERLAY_LAYER} from '../../constants';
+
+function compareIntersections(
   a: THREE.Intersection,
   b: THREE.Intersection
 ): number {
+  const aOverlay = a.object.layers.isEnabled(UI_OVERLAY_LAYER);
+  const bOverlay = b.object.layers.isEnabled(UI_OVERLAY_LAYER);
+  if (aOverlay !== bOverlay) return aOverlay ? -1 : 1;
+  if (aOverlay) {
+    const order = interactionHitOrder(b.object) - interactionHitOrder(a.object);
+    if (order !== 0) return order;
+  }
   const distance = a.distance - b.distance;
   if (Math.abs(distance) > 0.00001) return distance;
   if (a.object.renderOrder !== b.object.renderOrder) {
     return b.object.renderOrder - a.object.renderOrder;
   }
   return b.object.id - a.object.id;
+}
+
+function interactionHitOrder(object: THREE.Object3D): number {
+  let current: THREE.Object3D | null = object;
+  while (current) {
+    const order = current.userData.xrblocksHitOrder;
+    if (typeof order === 'number') return order;
+    current = current.parent;
+  }
+  return object.renderOrder;
 }
 
 function intersect(
@@ -35,7 +54,7 @@ function intersect(
  */
 export class Raycaster extends THREE.Raycaster {
   sortFunction: (a: THREE.Intersection, b: THREE.Intersection) => number =
-    defaultSortFunction;
+    compareIntersections;
 
   override intersectObject<TIntersected extends THREE.Object3D>(
     object: THREE.Object3D,

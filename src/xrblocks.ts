@@ -62,6 +62,8 @@ export * from './input/MouseController';
 export type {
   InteractionSource,
   InteractionSourceType,
+  PointerEvents,
+  ReticleMode,
 } from './interaction/InteractionTypes';
 export * from './interaction/manipulation/ManipulationTypes';
 export * from './lighting/Lighting';

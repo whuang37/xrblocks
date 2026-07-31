@@ -64,8 +64,9 @@ export class ReticlePresenter implements ReticlePresentationObserver {
     const {intersection} = resolved;
     reticle.visible = true;
     reticle.intersection = intersection;
-    reticle.targetObject = resolved.target;
-    reticle.setHovering(resolved.target !== undefined);
+    const showsTarget = resolved.reticleMode === 'auto';
+    reticle.targetObject = showsTarget ? resolved.target : undefined;
+    reticle.setHovering(showsTarget && resolved.target !== undefined);
     reticle.position.copy(intersection.point);
 
     if (intersection.normal) {

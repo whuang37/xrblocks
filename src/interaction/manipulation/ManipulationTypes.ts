@@ -57,14 +57,8 @@ export interface XBObjectOptions {
   manipulationHandle?: ManipulationHandleOptions | 'none';
 }
 
-export type PointerEvents = 'auto' | 'none';
-export type ReticleMode = 'auto' | 'surface' | 'hidden';
-
 declare module 'three' {
   interface Object3D {
-    pointerEvents?: PointerEvents;
-    interactionEnabled?: boolean;
-    reticleMode?: ReticleMode;
     xb?: XBObjectOptions;
   }
 }

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 
+import {UI_OVERLAY_LAYER} from '../constants';
 import type {InteractionHitPart} from './InteractionTypes';
 
 export interface RegisteredHitSurface {
@@ -91,13 +92,41 @@ export class HitRegistry {
         point: point.clone(),
       });
     }
-    intersections.sort((a, b) => {
-      if (a.object === preferred) return -1;
-      if (b.object === preferred) return 1;
-      return a.distance - b.distance;
-    });
+    intersections.sort((a, b) => compareTouchIntersections(a, b, preferred));
     return intersections;
   }
+}
+
+function compareTouchIntersections(
+  a: THREE.Intersection,
+  b: THREE.Intersection,
+  preferred?: THREE.Object3D
+): number {
+  if (a.object === b.object) return 0;
+  if (a.object === preferred) return -1;
+  if (b.object === preferred) return 1;
+
+  const aOverlay = a.object.layers.isEnabled(UI_OVERLAY_LAYER);
+  const bOverlay = b.object.layers.isEnabled(UI_OVERLAY_LAYER);
+  if (aOverlay !== bOverlay) return aOverlay ? -1 : 1;
+
+  const aOrder = getInteractionHitOrder(a.object);
+  const bOrder = getInteractionHitOrder(b.object);
+  if (aOrder !== undefined && bOrder !== undefined && aOrder !== bOrder) {
+    return bOrder - aOrder;
+  }
+
+  return a.distance - b.distance;
+}
+
+function getInteractionHitOrder(object: THREE.Object3D): number | undefined {
+  let current: THREE.Object3D | null = object;
+  while (current) {
+    const order = current.userData.xrblocksHitOrder;
+    if (typeof order === 'number') return order;
+    current = current.parent;
+  }
+  return undefined;
 }
 
 function effectiveVisible(object: THREE.Object3D): boolean {

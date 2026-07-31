@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 
 import {Script} from '../core/Script';
+import type {PointerEvents, ReticleMode} from '../interaction/InteractionTypes';
 
 export type UIUnit = number | `${number}%` | 'auto';
 export type UIColor = THREE.ColorRepresentation | 'transparent';
@@ -64,9 +65,9 @@ export interface UIElementOptions {
   style?: UIStyle;
   children?: THREE.Object3D[];
   visible?: boolean;
-  pointerEvents?: 'auto' | 'none';
+  pointerEvents?: PointerEvents;
   interactionEnabled?: boolean;
-  reticleMode?: 'auto' | 'surface' | 'hidden';
+  reticleMode?: ReticleMode;
 }
 
 export type UIElementKind =
@@ -240,7 +241,9 @@ export abstract class UIElement extends Script {
     this.visible = options.visible ?? true;
     this.pointerEvents = options.pointerEvents ?? 'auto';
     this.interactionEnabled = options.interactionEnabled ?? true;
-    this.reticleMode = options.reticleMode ?? 'auto';
+    if (options.reticleMode !== undefined) {
+      this.reticleMode = options.reticleMode;
+    }
     if (options.children) this.add(...options.children);
   }
 

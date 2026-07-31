@@ -10,6 +10,17 @@ import type {
 import type {Controller} from '../input/Controller.js';
 import type {ManipulationAction} from './manipulation/ManipulationTypes.js';
 
+export type PointerEvents = 'auto' | 'none';
+export type ReticleMode = 'auto' | 'surface' | 'hidden';
+
+declare module 'three' {
+  interface Object3D {
+    pointerEvents?: PointerEvents;
+    interactionEnabled?: boolean;
+    reticleMode?: ReticleMode;
+  }
+}
+
 export type InteractionSourceType =
   | 'mouse'
   | 'controller-ray'
@@ -72,7 +83,7 @@ export interface ResolvedRay {
   readonly target?: THREE.Object3D;
   readonly scriptPath: readonly Script[];
   readonly objectPath: readonly THREE.Object3D[];
-  readonly reticleMode: 'auto' | 'surface' | 'hidden';
+  readonly reticleMode: ReticleMode;
   readonly hitPart?: InteractionHitPart;
   readonly semanticControl?: THREE.Object3D;
   readonly manipulation?: ManipulationResolution;

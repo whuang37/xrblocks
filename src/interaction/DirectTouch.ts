@@ -1,298 +1,174 @@
 import * as THREE from 'three';
 
-import type {ObjectGrabEvent, ObjectTouchEvent} from '../core/Script.js';
-import type {Controller} from '../input/Controller.js';
-import {objectIsDescendantOf} from '../utils/SceneGraphUtils.js';
-import {HitResolver} from './HitResolver.js';
-import type {
-  DirectTouchInput,
-  InteractionCallbackDispatch,
-  InteractionManipulation,
-  InteractionSourceSnapshot,
-  ResolvedRay,
-  SelectionCapture,
-  TargetedInteractionHook,
-} from './InteractionTypes.js';
-import {dispatchInteractionPath, isSelectionValid} from './InteractionUtils.js';
+import type {Controller} from '../input/Controller';
+import {HitRegistry} from './HitRegistry';
+import {HitResolver} from './HitResolver';
 import {
-  isSemanticControl,
-  isSemanticControlDisabled,
-} from './SemanticControl.js';
+  getInteractionSource,
+  type DirectTouchInput,
+  type InteractionSourceSnapshot,
+  type ResolvedRay,
+} from './InteractionTypes';
 
-interface TouchCapture {
-  readonly selection: SelectionCapture;
-  readonly ancestry: readonly THREE.Object3D[];
+export interface DirectTouchContact {
+  readonly phase: 'start' | 'move' | 'end';
+  readonly controller: Controller;
+  readonly snapshot: InteractionSourceSnapshot;
+  readonly resolved?: ResolvedRay;
+  readonly previous?: ResolvedRay;
   readonly handIndex: number;
+  readonly hand?: THREE.Object3D;
+  readonly point: THREE.Vector3;
+  readonly selected: boolean;
+  readonly endReason?: 'released' | 'target-changed' | 'source-lost';
+}
+
+interface ActiveContact {
+  resolved: ResolvedRay;
+  handIndex: number;
+  hand?: THREE.Object3D;
   point: THREE.Vector3;
-  synthesized: boolean;
-  semanticControl?: THREE.Object3D;
-  grab?: ObjectGrabEvent;
+  snapshot: InteractionSourceSnapshot;
 }
 
-interface DirectTouchDependencies {
-  callbacks: InteractionCallbackDispatch;
-  manipulation: InteractionManipulation;
-  resolver: HitResolver;
-  suspendRay(controller: Controller): void;
-}
-
-/** Owns direct-touch capture, callbacks, and synthesized selection. */
+/**
+ * Converts registered-bounds contacts into source-neutral contact phases.
+ * Interaction owns callback dispatch, capture, completion, and cancellation.
+ */
 export class DirectTouch {
-  private readonly captures = new Map<Controller, TouchCapture>();
+  private static readonly EXIT_PADDING = 0.01;
+  private readonly active = new Map<Controller, ActiveContact>();
   private readonly snapshots = new Map<Controller, InteractionSourceSnapshot>();
 
-  constructor(private readonly dependencies: DirectTouchDependencies) {}
+  constructor(
+    private readonly registry: HitRegistry,
+    private readonly resolver: HitResolver
+  ) {}
 
-  /** Replaces the physical direct-touch sources and returns active snapshots. */
-  update(inputs: readonly DirectTouchInput[]): InteractionSourceSnapshot[] {
-    const activeSources = new Set<Controller>();
-    const snapshots: InteractionSourceSnapshot[] = [];
+  update(inputs: readonly DirectTouchInput[]): DirectTouchContact[] {
+    const contacts: DirectTouchContact[] = [];
+    const present = new Set<Controller>();
     for (const input of inputs) {
-      activeSources.add(input.controller);
-      const snapshot = this.updateSource(input);
-      if (snapshot) snapshots.push(snapshot);
+      present.add(input.controller);
+      const snapshot = createSnapshot(input);
+      const previous = this.active.get(input.controller);
+      const resolved = this.resolver.resolve(
+        this.registry.intersectionsAt(
+          input.point,
+          previous ? DirectTouch.EXIT_PADDING : 0,
+          previous?.resolved.hitObject
+        ),
+        'direct-touch'
+      );
+
+      if (!previous && resolved?.target) {
+        const active = {
+          resolved,
+          handIndex: input.handIndex,
+          hand: input.hand,
+          point: input.point.clone(),
+          snapshot,
+        };
+        this.active.set(input.controller, active);
+        this.snapshots.set(input.controller, snapshot);
+        contacts.push({
+          phase: 'start',
+          controller: input.controller,
+          snapshot,
+          resolved,
+          handIndex: input.handIndex,
+          hand: input.hand,
+          point: input.point.clone(),
+          selected: input.selected,
+        });
+      } else if (
+        previous &&
+        resolved &&
+        resolved.target === previous.resolved.target
+      ) {
+        previous.resolved = resolved;
+        previous.point.copy(input.point);
+        previous.snapshot = snapshot;
+        this.snapshots.set(input.controller, snapshot);
+        contacts.push({
+          phase: 'move',
+          controller: input.controller,
+          snapshot,
+          resolved,
+          previous: previous.resolved,
+          handIndex: input.handIndex,
+          hand: input.hand,
+          point: input.point.clone(),
+          selected: input.selected,
+        });
+      } else if (previous) {
+        contacts.push(
+          this.endContact(
+            input.controller,
+            input.selected,
+            resolved?.target ? 'target-changed' : 'released'
+          )
+        );
+      }
     }
-    for (const controller of [...this.captures.keys()]) {
-      if (!activeSources.has(controller)) this.finish(controller, true);
+    for (const controller of [...this.active.keys()]) {
+      if (!present.has(controller)) {
+        contacts.push(this.endContact(controller, false, 'source-lost'));
+      }
     }
-    return snapshots;
+    return contacts;
   }
 
-  remove(controller: Controller): boolean {
-    if (!this.captures.has(controller)) return false;
-    this.finish(controller, true);
-    return true;
+  remove(controller: Controller): DirectTouchContact | undefined {
+    return this.active.has(controller)
+      ? this.endContact(controller, false, 'source-lost')
+      : undefined;
   }
 
   has(controller: Controller): boolean {
-    return this.captures.has(controller);
+    return this.active.has(controller);
   }
 
   getSnapshot(controller: Controller): InteractionSourceSnapshot | undefined {
     return this.snapshots.get(controller);
   }
 
-  isSelectingAt(object: THREE.Object3D): boolean {
-    for (const touch of this.captures.values()) {
-      if (
-        touch.synthesized &&
-        objectIsDescendantOf(touch.selection.surface, object)
-      ) {
-        return true;
-      }
-    }
-    return false;
+  clear(): void {
+    this.active.clear();
+    this.snapshots.clear();
   }
 
-  private updateSource(
-    input: DirectTouchInput
-  ): InteractionSourceSnapshot | undefined {
-    const resolved = this.dependencies.resolver.resolve(
-      input.intersections,
-      'direct-touch'
-    );
-    let touch = this.captures.get(input.controller);
-    touch?.point.copy(input.point);
-
-    if (touch && !isSelectionValid(touch.selection, touch.ancestry)) {
-      this.finish(input.controller, true);
-      touch = undefined;
-    } else if (touch && !resolved?.target) {
-      this.finish(input.controller, false);
-      touch = undefined;
-    } else if (
-      touch &&
-      (resolved!.manipulation?.owner ?? resolved!.target) !==
-        touch.selection.owner
-    ) {
-      this.finish(input.controller, true);
-      touch = undefined;
-    }
-
-    if (!touch && resolved?.target) {
-      this.start(input, resolved);
-    } else if (touch) {
-      const snapshot = this.createSnapshot(input);
-      this.snapshots.set(input.controller, snapshot);
-      this.dispatchTouchPath(
-        touch.selection.scriptPath,
-        'onObjectTouching',
-        touch.handIndex,
-        input.point
-      );
-      this.updateGrab(touch, input);
-      if (touch.synthesized) {
-        return snapshot;
-      }
-    }
-    return undefined;
-  }
-
-  private start(input: DirectTouchInput, resolved: ResolvedRay): void {
-    this.dependencies.suspendRay(input.controller);
-    const selection: SelectionCapture = {
-      source: input.controller,
-      surface: resolved.surface,
-      owner: resolved.manipulation?.owner ?? resolved.target!,
-      point: input.point.clone(),
-      scriptPath: Object.freeze([...resolved.scriptPath]),
-    };
-    const touch: TouchCapture = {
-      selection,
-      ancestry: Object.freeze([...resolved.objectPath]),
-      handIndex: input.handIndex,
-      point: input.point.clone(),
-      synthesized: false,
-      semanticControl:
-        isSemanticControl(resolved.target!) &&
-        !isSemanticControlDisabled(resolved.target!)
-          ? resolved.target
-          : undefined,
-    };
-    this.captures.set(input.controller, touch);
-
-    const prevented = this.dispatchTouchPath(
-      selection.scriptPath,
-      'onObjectTouchStart',
-      input.handIndex,
-      input.point
-    );
-    this.updateGrab(touch, input);
-    if (prevented) return;
-
-    const snapshot = this.createSnapshot(input);
-    this.snapshots.set(input.controller, snapshot);
-    dispatchInteractionPath(
-      this.dependencies.callbacks,
-      selection.scriptPath,
-      'onObjectSelectStart',
-      {target: input.controller}
-    );
-    if (resolved.manipulation) {
-      this.dependencies.manipulation.tryStart(selection, snapshot);
-    }
-    this.dependencies.callbacks.invokeGlobal('onSelectStart', {
-      target: input.controller,
-    });
-    touch.synthesized = true;
-  }
-
-  private finish(controller: Controller, canceled: boolean): void {
-    const touch = this.captures.get(controller);
-    if (!touch) return;
-    this.captures.delete(controller);
-    this.finishGrab(touch);
-    this.dispatchTouchPath(
-      touch.selection.scriptPath,
-      'onObjectTouchEnd',
-      touch.handIndex,
-      touch.point
-    );
-
-    if (touch.synthesized) {
-      if (canceled) this.dependencies.manipulation.cancelSource(controller);
-      else this.dependencies.manipulation.end(controller);
-      dispatchInteractionPath(
-        this.dependencies.callbacks,
-        touch.selection.scriptPath,
-        'onObjectSelectEnd',
-        {target: controller}
-      );
-      if (
-        !canceled &&
-        touch.semanticControl &&
-        !isSemanticControlDisabled(touch.semanticControl)
-      ) {
-        this.dependencies.callbacks.invokeSemantic(touch.semanticControl);
-      }
-      if (!canceled) {
-        this.dependencies.callbacks.invokeGlobal('onSelect', {
-          target: controller,
-        });
-      }
-      this.dependencies.callbacks.invokeGlobal('onSelectEnd', {
-        target: controller,
-      });
-    }
-
+  private endContact(
+    controller: Controller,
+    selected: boolean,
+    endReason: NonNullable<DirectTouchContact['endReason']>
+  ): DirectTouchContact {
+    const previous = this.active.get(controller)!;
+    this.active.delete(controller);
     this.snapshots.delete(controller);
+    return {
+      phase: 'end',
+      controller,
+      snapshot: previous.snapshot,
+      previous: previous.resolved,
+      handIndex: previous.handIndex,
+      hand: previous.hand,
+      point: previous.point.clone(),
+      selected,
+      endReason,
+    };
   }
+}
 
-  private updateGrab(touch: TouchCapture, input: DirectTouchInput): void {
-    if (!input.selected || !input.hand) {
-      this.finishGrab(touch);
-      return;
-    }
-
-    if (!touch.grab) {
-      touch.grab = {handIndex: input.handIndex, hand: input.hand};
-      dispatchInteractionPath(
-        this.dependencies.callbacks,
-        touch.selection.scriptPath,
-        'onObjectGrabStart',
-        touch.grab
-      );
-      return;
-    }
-
-    dispatchInteractionPath(
-      this.dependencies.callbacks,
-      touch.selection.scriptPath,
-      'onObjectGrabbing',
-      touch.grab
-    );
-  }
-
-  private finishGrab(touch: TouchCapture): void {
-    if (!touch.grab) return;
-    dispatchInteractionPath(
-      this.dependencies.callbacks,
-      touch.selection.scriptPath,
-      'onObjectGrabEnd',
-      touch.grab
-    );
-    touch.grab = undefined;
-  }
-
-  private createSnapshot(input: DirectTouchInput): InteractionSourceSnapshot {
-    const orientation = input.orientation?.clone() ?? new THREE.Quaternion();
-    if (!input.orientation) input.controller.getWorldQuaternion(orientation);
-    return Object.freeze({
-      controller: input.controller,
-      sourceType: 'direct-touch' as const,
-      position: input.point.clone(),
-      orientation,
-      selected: true,
-    });
-  }
-
-  private dispatchTouchPath(
-    path: readonly THREE.Object3D[],
-    hook: Extract<
-      TargetedInteractionHook,
-      'onObjectTouchStart' | 'onObjectTouching' | 'onObjectTouchEnd'
-    >,
-    handIndex: number,
-    point: THREE.Vector3
-  ): boolean {
-    const preventState = {value: false};
-    for (const script of path) {
-      const event: ObjectTouchEvent = {
-        handIndex,
-        touchPosition: point.clone(),
-        get defaultPrevented() {
-          return preventState.value;
-        },
-        preventDefault() {
-          preventState.value = true;
-        },
-      };
-      if (
-        this.dependencies.callbacks.invokeTarget(script, hook, event) === true
-      ) {
-        break;
-      }
-    }
-    return preventState.value;
-  }
+function createSnapshot(input: DirectTouchInput): InteractionSourceSnapshot {
+  const orientation = input.orientation?.clone() ?? new THREE.Quaternion();
+  if (!input.orientation) input.controller.getWorldQuaternion(orientation);
+  return Object.freeze({
+    source: getInteractionSource(input.controller, 'direct-touch'),
+    controller: input.controller,
+    sourceType: 'direct-touch' as const,
+    position: input.point.clone(),
+    orientation,
+    selected: true,
+  });
 }

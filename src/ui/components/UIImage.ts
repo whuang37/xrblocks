@@ -1,105 +1,37 @@
-import {
-  BaseOutProperties,
-  Image,
-  ImageProperties,
-  InProperties,
-  RenderContext,
-  WithSignal,
-  abortableEffect,
-} from '@pmndrs/uikit';
-import {Signal} from '@preact/signals-core';
-import {ColorRepresentation, MeshBasicMaterial, Texture} from 'three';
+import * as THREE from 'three';
 
-/**
- * Properties for initializing a UIImage.
- * Extends standard \@pmndrs/uikit ImageProperties with tint color overlays.
- */
-export type UIImageProperties = ImageProperties & {
-  /** Optional tint color overlay representation (HEX, CSS, or THREE.Color) */
-  color?: ColorRepresentation | Signal<ColorRepresentation | undefined>;
-};
+import {UIElement, type UIElementOptions} from '../UIElement';
 
-export type UIImageSrc =
-  | string
-  | Texture
-  | Signal<string | Texture | undefined>
-  | undefined;
+export interface UIImageOptions extends UIElementOptions {
+  src: string | THREE.Texture;
+  ariaLabel?: string;
+}
 
-/**
- * UIImage
- * A wrapper component for rendering layout mapped static 2D images or textures.
- * Inherits from standard \@pmndrs/uikit `Image` and overrides updates to correctly sync responsive standard layouts over to internal basic map items properly.
- */
-export class UIImage extends Image {
+/** URL-backed or caller-texture-backed image content. */
+export class UIImage extends UIElement {
   name = 'UIImage';
+  readonly ariaLabel?: string;
+  private _src: string | THREE.Texture;
 
-  /**
-   * Constructs a new UIImage.
-   * Forces reactivity chains maintaining material transparencies against opacity changes via internal signals accurately.
-   *
-   * @param src - The visual source mapping (URL string, Texture, or Signal).
-   * @param properties - Optional layout, sizing, and styling properties overriding defaults.
-   * @param initialClasses - Optional styling class array identifiers for batch design applying rules.
-   * @param config - Optional render contexts or template static mappings defaults triggers.
-   */
-  constructor(
-    src: UIImageSrc,
-    properties?: UIImageProperties,
-    initialClasses?: Array<InProperties<BaseOutProperties> | string>,
-    config?: {
-      renderContext?: RenderContext;
-      defaultOverrides?: UIImageProperties;
-      defaults?: WithSignal<ImageProperties>;
+  constructor({src, ariaLabel, ...options}: UIImageOptions) {
+    if (typeof src !== 'string' && !(src instanceof THREE.Texture)) {
+      throw new Error('UIImage.src must be a URL or THREE.Texture.');
     }
-  ) {
-    super(
-      {
-        src: src,
-        ...properties,
-      },
-      initialClasses,
-      // Use the `never` type to forcefully satisfy the strict generic parameter
-      // requirements of the `\@pmndrs/uikit` primitive Image class constructor,
-      // avoiding `any` overrides and TypeScript generic inference mismatches.
-      config as never
-    );
-
-    // Force opacity and color on material.
-    abortableEffect(() => {
-      const {opacity, color} = this.properties.value;
-      if (this.material) {
-        if (opacity != null) {
-          this.material.transparent = true;
-          this.material.opacity = Number(opacity);
-        }
-        if (color != null) {
-          const mat = this.material as MeshBasicMaterial;
-          mat.color.set(
-            color as unknown as Parameters<typeof mat.color.set>[0]
-          );
-        }
-        this.material.needsUpdate = true;
-      }
-    }, this.abortSignal);
+    super('image', options);
+    this._src = src;
+    this.ariaLabel = ariaLabel;
   }
 
-  /** Updates the visual src binding (URL string or THREE.Texture). */
-  setSrc(src: UIImageSrc) {
-    this.setProperties({src});
+  get src(): string | THREE.Texture {
+    return this._src;
   }
 
-  /** Updates optional tint overlay color dynamically. */
-  setColor(color: ColorRepresentation) {
-    this.setProperties({color});
-  }
-
-  /** Updates image opacity (0.0 - 1.0) on underlying material setup. */
-  setOpacity(opacity: number) {
-    this.setProperties({opacity});
-  }
-
-  /** Updates edge corner curves of the bounding layout mapping setup. */
-  setBorderRadius(borderRadius: number) {
-    this.setProperties({borderRadius});
+  set src(value: string | THREE.Texture) {
+    if (typeof value !== 'string' && !(value instanceof THREE.Texture)) {
+      throw new Error('UIImage.src must be a URL or THREE.Texture.');
+    }
+    if (value === this._src) return;
+    this._src = value;
+    this.markUIDirty();
   }
 }

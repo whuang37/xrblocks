@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import {Core} from './core/Core';
 import {Options} from './core/Options';
 import {Script} from './core/Script';
+import {ui} from './ui/UI';
 import {checkThreeVersion} from './utils/VersionCheck';
 
 checkThreeVersion();
@@ -78,6 +79,9 @@ export const input = core.input;
  * A direct alias to the `THREE.PerspectiveCamera` instance.
  */
 export const camera = core.camera;
+
+/** Lightweight global UI settings and theme. */
+export {ui};
 
 // --- Function Aliases ---
 // These are bound shortcuts to frequently used methods for convenience.

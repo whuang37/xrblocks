@@ -2,16 +2,16 @@ import * as THREE from 'three';
 import {XRControllerModelFactory} from 'three/addons/webxr/XRControllerModelFactory.js';
 import {XRHandModelFactory} from 'three/addons/webxr/XRHandModelFactory.js';
 
-import {NUM_HANDS} from '../constants';
+import {NUM_HANDS, UI_OVERLAY_LAYER} from '../constants';
 import {Options} from '../core/Options.js';
 import {KeyEvent} from '../core/Script';
+import {Raycaster} from '../core/components/Raycaster';
 import type {
   DirectTouchInput,
   InteractionFrameInput,
   RaySourceInput,
 } from '../interaction/InteractionTypes.js';
 import {Reticle} from '../interaction/reticle/Reticle.js';
-import {Raycaster} from '../core/components/Raycaster';
 
 import {ControllerRayVisual} from './components/ControllerRayVisual';
 import type {
@@ -38,13 +38,6 @@ export class Reticles extends THREE.Group {
 
 // Reusable objects for performance.
 const MATRIX4 = new THREE.Matrix4();
-const TOUCH_BOX = new THREE.Box3();
-const TOUCH_CENTER = new THREE.Vector3();
-
-type MutableDirectTouchInput = Omit<DirectTouchInput, 'intersections'> & {
-  intersections: THREE.Intersection[];
-};
-
 /**
  * The XRInput class holds all the controllers and performs raycasts through the
  * scene each frame.
@@ -92,6 +85,7 @@ export class Input {
     renderer: THREE.WebGLRenderer;
   }) {
     this.scene = scene;
+    this.raycaster.layers.enable(UI_OVERLAY_LAYER);
     systemsGroup.add(this.activeControllers, this.reticles);
 
     this.controllersEnabled = options.controllers.enabled;
@@ -515,7 +509,7 @@ export class Input {
   }
 
   private updateDirectTouchInputs() {
-    const inputs: MutableDirectTouchInput[] = [];
+    const inputs: DirectTouchInput[] = [];
     for (let handIndex = 0; handIndex < NUM_HANDS; handIndex++) {
       const controller = this.controllers[handIndex];
       const indexTip = this.hands[handIndex]?.joints?.['index-finger-tip'];
@@ -525,33 +519,9 @@ export class Input {
         handIndex,
         hand: this.hands[handIndex]?.joints?.wrist,
         point: indexTip.getWorldPosition(new THREE.Vector3()),
-        intersections: [],
         selected: controller.userData.selected === true,
       });
     }
-
-    if (inputs.length > 0) {
-      this.scene?.traverse((object) => {
-        if (!(object as Partial<THREE.Mesh>).isMesh || !object.visible) return;
-        try {
-          TOUCH_BOX.setFromObject(object);
-        } catch (_) {
-          return;
-        }
-        for (const input of inputs) {
-          if (!TOUCH_BOX.containsPoint(input.point)) continue;
-          input.intersections.push({
-            distance: TOUCH_BOX.getCenter(TOUCH_CENTER).distanceTo(input.point),
-            object,
-            point: input.point,
-          });
-        }
-      });
-      for (const input of inputs) {
-        input.intersections.sort((a, b) => a.distance - b.distance);
-      }
-    }
-
     this.directTouchInputs = inputs;
   }
 
@@ -559,14 +529,14 @@ export class Input {
     if (controller.userData.connected === false) {
       return;
     }
+    controller.updatePose?.();
+    controller.updateMatrixWorld();
     this.pinchFilter.updateController(
       controller,
       this.dispatchEvent.bind(this),
       this.setRaycasterFromController.bind(this),
       this.performRaycastOnScene.bind(this)
     );
-    controller.updatePose?.();
-    controller.updateMatrixWorld();
     if (this.options.controllers.performRaycastOnUpdate) {
       this.setRaycasterFromController(controller);
       this.performRaycastOnScene(controller);
@@ -651,5 +621,35 @@ export class Input {
     const intersections = this.intersectionsForController.get(controller)!;
     intersections.length = 0;
     this.raycaster.intersectObject(this.scene, true, intersections);
+    intersections.sort(compareIntersections);
   }
+}
+
+function compareIntersections(
+  a: THREE.Intersection,
+  b: THREE.Intersection
+): number {
+  const aOverlay = a.object.layers.isEnabled(UI_OVERLAY_LAYER);
+  const bOverlay = b.object.layers.isEnabled(UI_OVERLAY_LAYER);
+  if (aOverlay !== bOverlay) return aOverlay ? -1 : 1;
+  if (aOverlay) {
+    const order = interactionHitOrder(b.object) - interactionHitOrder(a.object);
+    if (order !== 0) return order;
+  }
+  const distance = a.distance - b.distance;
+  if (Math.abs(distance) > 0.00001) return distance;
+  if (a.object.renderOrder !== b.object.renderOrder) {
+    return b.object.renderOrder - a.object.renderOrder;
+  }
+  return b.object.id - a.object.id;
+}
+
+function interactionHitOrder(object: THREE.Object3D): number {
+  let current: THREE.Object3D | null = object;
+  while (current) {
+    const order = current.userData.xrblocksHitOrder;
+    if (typeof order === 'number') return order;
+    current = current.parent;
+  }
+  return object.renderOrder;
 }

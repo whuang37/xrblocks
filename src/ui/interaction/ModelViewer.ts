@@ -3,16 +3,15 @@ import * as THREE from 'three';
 import type {GLTF} from 'three/addons/loaders/GLTFLoader.js';
 
 import {OCCLUDABLE_ITEMS_LAYER} from '../../constants';
-import {Script} from '../../core/Script';
+import {Script, type HoverEvent} from '../../core/Script';
 import {Registry} from '../../core/components/Registry';
 import {Depth} from '../../depth/Depth';
 import {OcclusionUtils} from '../../depth/occlusion/OcclusionUtils';
 import {
   ManipulationAction,
-  type ManipulationOptions,
   type XBObjectOptions,
 } from '../../interaction/manipulation/ManipulationTypes';
-import {BACK, LEFT} from '../../utils/HelperConstants';
+import {normalizeManipulationConfig} from '../../interaction/manipulation/ManipulationConfig';
 import {ModelLoader} from '../../utils/ModelLoader';
 import {getGroupBoundingBox} from '../../utils/ModelUtils';
 import {SparkRendererHolder} from '../../utils/SparkRendererHolder';
@@ -21,10 +20,6 @@ import type {Shader} from '../../utils/Types';
 import {ModelViewerPlatform} from './ModelViewerPlatform';
 
 const defaultPlatformMargin = new THREE.Vector2(0.2, 0.2);
-const vector3 = new THREE.Vector3();
-const quaternion = new THREE.Quaternion();
-const quaternion2 = new THREE.Quaternion();
-
 function createRaycastProxyMaterial() {
   return new THREE.MeshBasicMaterial({
     colorWrite: false,
@@ -55,21 +50,26 @@ export interface ModelViewerOptions {
   castShadow?: boolean;
   receiveShadow?: boolean;
   raycastToChildren?: boolean;
-  manipulation?: boolean | ManipulationOptions;
 }
 
-export class SplatAnchor extends THREE.Object3D {
+class SplatAnchor extends THREE.Object3D {
   xb: XBObjectOptions = {
     manipulationHandle: {action: ManipulationAction.Rotate},
   };
+
+  constructor() {
+    super();
+    this.userData.xrblocksPrivateSelf = true;
+  }
 }
 
-export class RotationRaycastMesh extends THREE.Mesh<
+class RotationRaycastMesh extends THREE.Mesh<
   THREE.BufferGeometry,
   THREE.Material
 > {
   constructor(geometry: THREE.BufferGeometry, material: THREE.Material) {
     super(geometry, material);
+    this.userData.xrblocksPrivateSelf = true;
   }
   xb: XBObjectOptions = {
     manipulationHandle: {action: ManipulationAction.Rotate},
@@ -84,7 +84,6 @@ export class RotationRaycastMesh extends THREE.Mesh<
  */
 export class ModelViewer extends Script {
   static dependencies = {
-    camera: THREE.Camera,
     depth: Depth,
     scene: THREE.Scene,
     renderer: THREE.WebGLRenderer,
@@ -94,8 +93,6 @@ export class ModelViewer extends Script {
 
   platformAnimationSpeed = 2;
   platformThickness = 0.02;
-  isOneOneScale = false;
-  initialScale = new THREE.Vector3().setScalar(1);
   startAnimationOnLoad = true;
   clipActions: THREE.AnimationAction[] = [];
   bbox = new THREE.Box3();
@@ -111,12 +108,10 @@ export class ModelViewer extends Script {
   protected hoveringControllers = new Set();
   protected raycastToChildren: boolean;
   protected occludableShaders = new Set<Shader>();
-  protected camera?: THREE.Camera;
   protected depth?: Depth;
   protected scene?: THREE.Scene;
   protected renderer?: THREE.WebGLRenderer;
   protected platform?: ModelViewerPlatform;
-  protected controlBar?: THREE.Mesh;
   protected rotationRaycastMesh?: RotationRaycastMesh;
   protected registry?: Registry;
 
@@ -124,11 +119,10 @@ export class ModelViewer extends Script {
     castShadow = true,
     receiveShadow = true,
     raycastToChildren = false,
-    manipulation,
   }: ModelViewerOptions = {}) {
     super();
     this.xb = {
-      manipulation: manipulation ?? {
+      manipulation: {
         actions: {translate: true, rotate: true, scale: true},
         handle: {action: ManipulationAction.Rotate},
       },
@@ -139,21 +133,18 @@ export class ModelViewer extends Script {
   }
 
   async init({
-    camera,
     depth,
     scene,
     renderer,
     registry,
     timer,
   }: {
-    camera: THREE.Camera;
     depth: Depth;
     scene: THREE.Scene;
     renderer: THREE.WebGLRenderer;
     registry: Registry;
     timer: THREE.Timer;
   }) {
-    this.camera = camera;
     this.depth = depth;
     this.scene = scene;
     this.renderer = renderer;
@@ -185,9 +176,6 @@ export class ModelViewer extends Script {
     setupPlatform?: boolean;
   }) {
     this.data = data;
-    if (data.scale) {
-      this.initialScale.copy(data.scale);
-    }
 
     const splatMesh = await new ModelLoader().loadSplat({url: data.model});
     this.splatMesh = splatMesh;
@@ -254,9 +242,6 @@ export class ModelViewer extends Script {
     addOcclusionToShader?: boolean;
   }) {
     this.data = data;
-    if (data.scale) {
-      this.initialScale.copy(data.scale);
-    }
     const gltf = await new ModelLoader().loadGLTF({
       path: data.path,
       url: data.model,
@@ -369,10 +354,7 @@ export class ModelViewer extends Script {
       this.bbox = localBboxOfTransformedMesh.translate(translationAmount);
     } else {
       const contentChildren = this.children.filter(
-        (c) =>
-          c !== this.platform &&
-          c !== this.rotationRaycastMesh &&
-          c !== this.controlBar
+        (c) => c !== this.platform && c !== this.rotationRaycastMesh
       );
       this.bbox = getGroupBoundingBox(contentChildren);
       if (this.bbox.isEmpty()) {
@@ -453,47 +435,17 @@ export class ModelViewer extends Script {
     if (this.platform) {
       this.platform.update(delta);
     }
-    const camera = this.camera;
-    if (
-      this.controlBar != null &&
-      this.controlBar.parent == this &&
-      camera != null
-    ) {
-      const directionToCamera = vector3
-        .copy(camera.position)
-        .sub(this.position);
-      const distanceToCamera = directionToCamera.length();
-      const pitchAngleRadians = Math.asin(directionToCamera.normalize().y);
-      directionToCamera.y = 0;
-      directionToCamera.normalize();
-      // Make the button face the camera.
-      quaternion.copy(this.quaternion).invert();
-      this.controlBar.quaternion
-        .setFromAxisAngle(LEFT, pitchAngleRadians)
-        .premultiply(quaternion2.setFromUnitVectors(BACK, directionToCamera))
-        .premultiply(quaternion);
-      this.controlBar.position
-        .setScalar(0)
-        .addScaledVector(directionToCamera, 0.5)
-        .applyQuaternion(quaternion);
-      this.controlBar.position.y = 0.0;
-      this.controlBar.scale.set(
-        distanceToCamera / this.scale.x,
-        distanceToCamera / this.scale.y,
-        distanceToCamera / this.scale.z
-      );
-    }
   }
 
-  onHoverEnter(controller: THREE.Object3D) {
-    this.hoveringControllers.add(controller);
+  onHoverEnter(event: HoverEvent) {
+    this.hoveringControllers.add(event.source.controller);
     if (this.platform) {
       this.platform.opacity.speed = this.platformAnimationSpeed;
     }
   }
 
-  onHoverExit(controller: THREE.Object3D) {
-    this.hoveringControllers.delete(controller);
+  onHoverExit(event: HoverEvent) {
+    this.hoveringControllers.delete(event.source.controller);
     if (this.platform && this.hoveringControllers.size == 0) {
       this.platform.opacity.speed = -this.platformAnimationSpeed;
     }
@@ -507,11 +459,7 @@ export class ModelViewer extends Script {
     if (this.raycastToChildren && content) {
       const childRaycasts: THREE.Intersection[] = [];
       for (const child of this.children) {
-        if (
-          child != this.rotationRaycastMesh &&
-          child != this.platform &&
-          child != this.controlBar
-        ) {
+        if (child != this.rotationRaycastMesh && child != this.platform) {
           raycaster.intersectObject(child, true, childRaycasts);
         }
       }
@@ -534,18 +482,31 @@ export class ModelViewer extends Script {
       }
     }
 
-    if (this.controlBar != null && this.controlBar.parent == this) {
-      const controlButtonIntersects: THREE.Intersection[] = [];
-      this.controlBar.raycast(raycaster, controlButtonIntersects);
-      for (const intersect of controlButtonIntersects) {
-        intersects.push(intersect);
-      }
-    }
     return false;
   }
 
-  onScaleButtonClick() {
-    this.scale.setScalar(1.0);
+  get draggable(): boolean {
+    return this.capabilityEnabled('translate');
+  }
+
+  set draggable(value: boolean) {
+    this.setCapability('translate', value);
+  }
+
+  get rotatable(): boolean {
+    return this.capabilityEnabled('rotate');
+  }
+
+  set rotatable(value: boolean) {
+    this.setCapability('rotate', value);
+  }
+
+  get scalable(): boolean {
+    return this.capabilityEnabled('scale');
+  }
+
+  set scalable(value: boolean) {
+    this.setCapability('scale', value);
   }
 
   setCastShadow(castShadow: boolean) {
@@ -620,5 +581,34 @@ export class ModelViewer extends Script {
     if (!this.registry.get(SparkRendererHolder)) {
       this.registry.register(new SparkRendererHolder(sparkRenderer));
     }
+  }
+
+  private capabilityEnabled(action: 'translate' | 'rotate' | 'scale'): boolean {
+    return !!normalizeManipulationConfig(this.xb?.manipulation)?.[action];
+  }
+
+  private setCapability(
+    action: 'translate' | 'rotate' | 'scale',
+    enabled: boolean
+  ): void {
+    const current = this.xb?.manipulation;
+    const options =
+      current && current !== true
+        ? {
+            ...current,
+            actions: {...current.actions},
+            handle: current.handle ? {...current.handle} : undefined,
+          }
+        : {
+            actions: {
+              translate: current === true,
+              rotate: current === true,
+              scale: current === true,
+            },
+            handle: {action: ManipulationAction.Rotate},
+          };
+    options.actions[action] = enabled;
+    this.xb ??= {};
+    this.xb.manipulation = options;
   }
 }

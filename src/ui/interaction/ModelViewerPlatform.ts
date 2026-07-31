@@ -36,6 +36,7 @@ export class ModelViewerPlatform extends THREE.Mesh<
         opacity: 0.0,
       }),
     ]);
+    this.userData.xrblocksPrivateSelf = true;
     this.opacity = new AnimatableNumber(0, 0, 0.5, 0);
   }
 
@@ -43,6 +44,5 @@ export class ModelViewerPlatform extends THREE.Mesh<
     this.opacity.update(deltaTime);
     this.material[0].opacity = this.opacity.value;
     this.material[1].opacity = 0.5 * this.opacity.value;
-    this.visible = this.opacity.value > 0.001;
   }
 }

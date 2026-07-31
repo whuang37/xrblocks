@@ -1,28 +1,25 @@
+import type * as THREE from 'three';
+
 import type {SelectEvent} from '../../core/Script';
 import {registerSemanticControl} from '../../interaction/SemanticControl';
-import {UIIcon} from './UIIcon';
-import {UIPanel, type UIPanelProperties} from './UIPanel';
-import {UIText} from './UIText';
+import {isUIElement, UIElement, type UIElementOptions} from '../UIElement';
 
-export interface UIButtonProperties extends Omit<UIPanelProperties, 'onClick'> {
-  /** Optional text content created inside the button. */
+export interface UIButtonOptions extends UIElementOptions {
   label?: string;
-  /** Optional Material Symbol created before the label. */
   icon?: string;
-  /** Accessible name. Required when the button has no text label. */
   ariaLabel?: string;
-  /** Prevents selection and activation. */
   disabled?: boolean;
-  /** Runs after a selection starts and ends on this button. */
   onClick?: () => void;
 }
 
-/** A semantic UI action backed by the shared interaction capture system. */
-export class UIButton extends UIPanel {
+/** A semantic button that activates after a valid captured press and release. */
+export class UIButton extends UIElement {
   name = 'UIButton';
-  readonly ariaLabel: string;
   onClick?: () => void;
-  private _disabled: boolean;
+  private _label?: string;
+  private _icon?: string;
+  private _ariaLabel?: string;
+  private _disabled = false;
 
   constructor({
     label,
@@ -30,26 +27,76 @@ export class UIButton extends UIPanel {
     ariaLabel,
     disabled = false,
     onClick,
-    ...properties
-  }: UIButtonProperties = {}) {
-    const resolvedAriaLabel = ariaLabel ?? label;
-    if (!resolvedAriaLabel) {
-      throw new Error('UIButton requires ariaLabel when it has no label.');
+    children,
+    ...options
+  }: UIButtonOptions = {}) {
+    if (typeof disabled !== 'boolean') {
+      throw new Error('UIButton disabled must be a boolean.');
     }
-
-    super(properties);
-    this.ariaLabel = resolvedAriaLabel;
-    this.onClick = onClick;
+    if (children?.length && (label !== undefined || icon !== undefined)) {
+      throw new Error(
+        'UIButton convenience label/icon content cannot be combined with children.'
+      );
+    }
+    if (!ariaLabel && !label) {
+      throw new Error('UIButton requires ariaLabel when it has no text label.');
+    }
+    super('button', {...options, children});
+    this._label = label;
+    this._icon = icon;
+    this._ariaLabel = ariaLabel;
     this._disabled = disabled;
-    this.interactionEnabled = !disabled;
-
-    if (icon) this.add(new UIIcon(icon));
-    if (label) this.add(new UIText(label));
+    this.onClick = onClick;
 
     registerSemanticControl(this, {
+      kind: 'button',
       isDisabled: () => this._disabled,
       activate: () => this.onClick?.(),
     });
+  }
+
+  get label(): string | undefined {
+    return this._label;
+  }
+
+  set label(value: string | undefined) {
+    this.assertConvenienceContent(value);
+    const previous = this._label;
+    this._label = value;
+    try {
+      this.assertAccessibleName();
+    } catch (error) {
+      this._label = previous;
+      throw error;
+    }
+    this.markUIDirty();
+  }
+
+  get icon(): string | undefined {
+    return this._icon;
+  }
+
+  set icon(value: string | undefined) {
+    this.assertConvenienceContent(value);
+    this._icon = value;
+    this.assertAccessibleName();
+    this.markUIDirty();
+  }
+
+  get ariaLabel(): string {
+    return this._ariaLabel ?? this._label!;
+  }
+
+  set ariaLabel(value: string | undefined) {
+    const previous = this._ariaLabel;
+    this._ariaLabel = value;
+    try {
+      this.assertAccessibleName();
+    } catch (error) {
+      this._ariaLabel = previous;
+      throw error;
+    }
+    this.markUIDirty();
   }
 
   get disabled(): boolean {
@@ -57,8 +104,12 @@ export class UIButton extends UIPanel {
   }
 
   set disabled(value: boolean) {
+    if (typeof value !== 'boolean') {
+      throw new Error('UIButton disabled must be a boolean.');
+    }
+    if (value === this._disabled) return;
     this._disabled = value;
-    this.interactionEnabled = !value;
+    this.markUIDirty();
   }
 
   onObjectSelectStart(_event: SelectEvent): true {
@@ -67,5 +118,31 @@ export class UIButton extends UIPanel {
 
   onObjectSelectEnd(_event: SelectEvent): true {
     return true;
+  }
+
+  override add(...objects: THREE.Object3D[]): this {
+    if (
+      objects.some(isUIElement) &&
+      (this._label !== undefined || this._icon !== undefined)
+    ) {
+      throw new Error(
+        'UIButton convenience label/icon content cannot be combined with children.'
+      );
+    }
+    return super.add(...objects);
+  }
+
+  private assertConvenienceContent(value: string | undefined): void {
+    if (this.children.some(isUIElement) && value !== undefined) {
+      throw new Error(
+        'UIButton convenience label/icon content cannot be combined with children.'
+      );
+    }
+  }
+
+  private assertAccessibleName(): void {
+    if (!this._ariaLabel && !this._label) {
+      throw new Error('UIButton requires an accessible name.');
+    }
   }
 }

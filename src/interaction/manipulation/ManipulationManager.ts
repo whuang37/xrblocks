@@ -7,42 +7,36 @@ import {
   suspendTransformScripts,
 } from '../../placement/TransformScript';
 import {objectIsDescendantOf} from '../../utils/SceneGraphUtils';
-import {
-  DEFAULT_FACE_CAMERA_SMOOTHING,
-  faceCameraSlerpAlpha,
-} from '../../utils/FaceCameraMath';
+import {getUIElementKind, isUIElement} from '../../ui/UIElement';
 import type {
   InteractionSourceSnapshot,
+  InteractionSource,
+  InteractionHitPart,
   ManipulationResolution,
   ResolvedManipulationAction,
+  ResolvedRay,
   SelectionCapture,
 } from '../InteractionTypes';
 import {
-  cloneScaleOptions,
   isHandleAction,
   isManipulationActionEnabled,
   normalizeManipulationConfig,
-  normalizeRotationAxis,
   type NormalizedManipulationConfig,
 } from './ManipulationConfig';
 import {
   clampScaleFactor,
-  faceCameraQuaternion,
-  isFiniteQuaternion,
-  isFiniteVector,
   isPositiveFinite,
   isPositiveVector,
-  worldPositionToLocal,
-  worldQuaternionToLocal,
 } from './ManipulationMath';
 import {
   ManipulationAction,
   type ManipulationEvent,
   type ManipulationPhase,
-  type RotateOptions,
-  type ScaleOptions,
-  type TranslateOptions,
 } from './ManipulationTypes';
+import type {PhaseBaseline, Proposal} from './drivers/DriverTypes';
+import {RotateDriver} from './drivers/RotateDriver';
+import {ScaleDriver} from './drivers/ScaleDriver';
+import {TranslateDriver} from './drivers/TranslateDriver';
 
 export type DispatchManipulationEvent = (
   script: Script,
@@ -62,35 +56,12 @@ interface Session {
   primaryAction?: ResolvedManipulationAction;
   auxiliary?: InteractionSourceSnapshot;
   phase?: ActivePhase;
+  cornerScale?: {
+    primaryCorner: CardCorner;
+  };
 }
 
-interface TranslateBaseline {
-  action: typeof ManipulationAction.Translate;
-  worldPosition: THREE.Vector3;
-  sourcePosition: THREE.Vector3;
-  rayDepth?: number;
-  rayPoint?: THREE.Vector3;
-  options: TranslateOptions;
-}
-
-interface RotateBaseline {
-  action: typeof ManipulationAction.Rotate;
-  localQuaternion: THREE.Quaternion;
-  worldQuaternion: THREE.Quaternion;
-  sourcePosition: THREE.Vector3;
-  sourceOrientationInverse: THREE.Quaternion;
-  axis: THREE.Vector3;
-  options: Required<Pick<RotateOptions, 'space' | 'sensitivity'>>;
-}
-
-interface ScaleBaseline {
-  action: typeof ManipulationAction.Scale;
-  scale: THREE.Vector3;
-  distance: number;
-  options: ScaleOptions;
-}
-
-type PhaseBaseline = TranslateBaseline | RotateBaseline | ScaleBaseline;
+type CardCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 
 interface ActivePhase {
   action: ResolvedManipulationAction;
@@ -98,32 +69,6 @@ interface ActivePhase {
   defaultPrevented: boolean;
   lastProposal?: Proposal;
 }
-
-interface ProposalBase {
-  apply(): void;
-}
-
-type Proposal = ProposalBase &
-  (
-    | {
-        action: typeof ManipulationAction.Translate;
-        point: THREE.Vector3;
-        delta: THREE.Vector3;
-        position: THREE.Vector3;
-        worldPosition: THREE.Vector3;
-      }
-    | {
-        action: typeof ManipulationAction.Rotate;
-        angle: number;
-        quaternion: THREE.Quaternion;
-      }
-    | {
-        action: typeof ManipulationAction.Scale;
-        factor: number;
-        center: THREE.Vector3;
-        scale: THREE.Vector3;
-      }
-  );
 
 /**
  * Private runtime used by Interaction. It does not observe input or raycast.
@@ -133,14 +78,23 @@ export class ManipulationManager {
   private readonly sessions = new Map<THREE.Object3D, Session>();
   private readonly roles = new Map<Controller, Session>();
   private readonly suppressedUntilRelease = new Set<Controller>();
+  private readonly translateDriver: TranslateDriver;
+  private readonly rotateDriver = new RotateDriver();
+  private readonly scaleDriver = new ScaleDriver();
 
   constructor(
     private readonly dispatch: DispatchManipulationEvent,
-    private readonly camera?: THREE.Camera,
-    private readonly timer?: THREE.Timer
-  ) {}
+    camera?: THREE.Camera,
+    timer?: THREE.Timer
+  ) {
+    this.translateDriver = new TranslateDriver(camera, timer);
+  }
 
-  resolve(surface: THREE.Object3D): ManipulationResolution | undefined {
+  resolve(
+    surface: THREE.Object3D,
+    _eligiblePath?: readonly THREE.Object3D[],
+    hitPart?: InteractionHitPart
+  ): ManipulationResolution | undefined {
     let current: THREE.Object3D | null = surface;
     let childHandle:
       | ResolvedManipulationAction
@@ -149,6 +103,9 @@ export class ManipulationManager {
     let hasChildHandle = false;
 
     while (current) {
+      if (isUIElement(current) && getUIElementKind(current) === 'overlay') {
+        return undefined;
+      }
       const options = current.xb;
       if (!hasChildHandle && options?.manipulationHandle !== undefined) {
         hasChildHandle = true;
@@ -169,6 +126,16 @@ export class ManipulationManager {
         }
         const config = normalizeManipulationConfig(options.manipulation);
         if (!config) return undefined;
+
+        const edge = getCardEdge(current);
+        if (edge) {
+          if (hitPart?.kind === 'card-edge') {
+            return config.translate
+              ? {owner: current, action: ManipulationAction.Translate}
+              : undefined;
+          }
+          if (!edge.translateFromSurface) return undefined;
+        }
 
         const requested = hasChildHandle ? childHandle : config.handle;
         if (requested === ManipulationAction.None) return undefined;
@@ -209,7 +176,9 @@ export class ManipulationManager {
       return false;
     }
 
-    const resolution = this.resolve(capture.surface);
+    const resolution =
+      capture.manipulation ??
+      this.resolve(capture.surface, undefined, capture.hitPart);
     if (!resolution || this.sessions.has(resolution.owner)) return false;
     const config = normalizeManipulationConfig(
       resolution.owner.xb?.manipulation
@@ -223,6 +192,15 @@ export class ManipulationManager {
       primary: {capture, snapshot: cloneSnapshot(snapshot)},
       primaryAction: resolution.action,
     };
+    const edge = getCardEdge(session.owner);
+    const corner =
+      capture.hitPart?.kind === 'card-edge'
+        ? capture.hitPart.corner
+        : undefined;
+    if (edge?.scale && corner) {
+      session.primaryAction = undefined;
+      session.cornerScale = {primaryCorner: corner};
+    }
     const baseline = session.primaryAction
       ? this.captureBaseline(session, session.primaryAction)
       : undefined;
@@ -243,7 +221,10 @@ export class ManipulationManager {
   }
 
   /** Claims a free spatial Select for Scale before normal target resolution. */
-  tryClaimScale(snapshot: InteractionSourceSnapshot): boolean {
+  tryClaimScale(
+    snapshot: InteractionSourceSnapshot,
+    resolved?: ResolvedRay
+  ): boolean {
     if (
       snapshot.sourceType === 'gaze' ||
       this.roles.has(snapshot.controller) ||
@@ -251,9 +232,21 @@ export class ManipulationManager {
     ) {
       return false;
     }
-    const eligible = [...this.sessions.values()].filter(
-      (session) => session.config.scale && !session.auxiliary
-    );
+    const eligible = [...this.sessions.values()].filter((session) => {
+      if (!session.config.scale || session.auxiliary) return false;
+      if (session.cornerScale) {
+        const corner =
+          resolved?.hitPart?.kind === 'card-edge'
+            ? resolved.hitPart.corner
+            : undefined;
+        return (
+          resolved?.manipulation?.owner === session.owner &&
+          corner !== undefined &&
+          oppositeCorner(session.cornerScale.primaryCorner) === corner
+        );
+      }
+      return !getCardEdge(session.owner)?.scale;
+    });
     if (eligible.length !== 1) return false;
 
     const session = eligible[0];
@@ -355,7 +348,7 @@ export class ManipulationManager {
 
   /** Ends the role held by a source. Returns true when the source was claimed. */
   end(source: Controller, finalSnapshot?: InteractionSourceSnapshot): boolean {
-    if (this.suppressedUntilRelease.delete(source)) return true;
+    if (this.suppressedUntilRelease.delete(source)) return false;
     const session = this.roles.get(source);
     if (!session) return false;
     if (finalSnapshot) {
@@ -416,16 +409,21 @@ export class ManipulationManager {
     return object ? this.sessions.has(object) : this.sessions.size > 0;
   }
 
+  isSourceActive(source: Controller): boolean {
+    return this.roles.has(source);
+  }
+
   private validate(session: Session): boolean {
     const current = normalizeManipulationConfig(session.owner.xb?.manipulation);
-    const resolution = this.resolve(session.primary.capture.surface);
+    const edge = getCardEdge(session.owner);
     if (
       !current ||
       !session.owner.visible ||
       session.owner.parent !== session.ownerParent ||
       !objectIsDescendantOf(session.primary.capture.surface, session.owner) ||
-      resolution?.owner !== session.owner ||
-      resolution.action !== session.primaryAction
+      (session.primary.capture.hitPart?.kind === 'card-edge' && !edge) ||
+      (session.cornerScale &&
+        (!edge?.scale || !current.scale || !current.translate))
     ) {
       this.cancelOwner(session.owner);
       return false;
@@ -509,213 +507,26 @@ export class ManipulationManager {
     action: ResolvedManipulationAction,
     auxiliary = session.auxiliary
   ): PhaseBaseline | undefined {
-    const owner = session.owner;
-    owner.updateWorldMatrix(true, false);
-
+    session.owner.updateWorldMatrix(true, false);
     if (action === ManipulationAction.Translate) {
-      const snapshot = session.primary.snapshot;
-      const baseline: TranslateBaseline = {
-        action,
-        worldPosition: owner.getWorldPosition(new THREE.Vector3()),
-        sourcePosition: snapshot.position.clone(),
-        options: {...session.config.translate},
-      };
-      if (snapshot.ray) {
-        baseline.rayDepth = snapshot.ray.direction.dot(
-          session.primary.capture.point.clone().sub(snapshot.ray.origin)
-        );
-        baseline.rayPoint = snapshot.ray
-          .at(baseline.rayDepth, new THREE.Vector3())
-          .clone();
-      }
-      return baseline;
+      return this.translateDriver.capture(session);
     }
-
     if (action === ManipulationAction.Rotate) {
-      const raw = session.config.rotate ?? {};
-      const axis = normalizeRotationAxis(raw.axis);
-      const sensitivity = raw.sensitivity ?? 10;
-      if (!axis || !Number.isFinite(sensitivity)) return undefined;
-      return {
-        action,
-        localQuaternion: owner.quaternion.clone(),
-        worldQuaternion: owner.getWorldQuaternion(new THREE.Quaternion()),
-        sourcePosition: session.primary.snapshot.position.clone(),
-        sourceOrientationInverse: session.primary.snapshot.orientation
-          .clone()
-          .invert(),
-        axis,
-        options: {space: raw.space ?? 'world', sensitivity},
-      };
+      return this.rotateDriver.capture(session);
     }
-
-    if (action !== ManipulationAction.Scale) return undefined;
-    if (!auxiliary) return undefined;
-    const distance = session.primary.snapshot.position.distanceTo(
-      auxiliary.position
-    );
-    if (!isPositiveFinite(distance) || !isPositiveVector(owner.scale)) {
-      return undefined;
-    }
-    const options = cloneScaleOptions(session.config.scale);
-    if (!isPositiveFinite(clampScaleFactor(1, owner.scale, options))) {
-      return undefined;
-    }
-    return {
-      action,
-      scale: owner.scale.clone(),
-      distance,
-      options,
-    };
+    return this.scaleDriver.capture(session, auxiliary);
   }
 
   private propose(session: Session): Proposal | undefined {
     const baseline = session.phase?.baseline;
     if (!baseline) return undefined;
     if (baseline.action === ManipulationAction.Translate) {
-      return this.proposeTranslate(session, baseline);
+      return this.translateDriver.propose(session, baseline);
     }
     if (baseline.action === ManipulationAction.Rotate) {
-      return this.proposeRotate(session, baseline);
+      return this.rotateDriver.propose(session, baseline);
     }
-    return this.proposeScale(session, baseline);
-  }
-
-  private proposeTranslate(
-    session: Session,
-    baseline: TranslateBaseline
-  ): Proposal | undefined {
-    const snapshot = session.primary.snapshot;
-    let delta: THREE.Vector3;
-    let point: THREE.Vector3;
-    if (snapshot.ray && baseline.rayDepth !== undefined && baseline.rayPoint) {
-      point = snapshot.ray.at(baseline.rayDepth, new THREE.Vector3());
-      delta = point.clone().sub(baseline.rayPoint);
-    } else {
-      delta = snapshot.position.clone().sub(baseline.sourcePosition);
-      point = session.primary.capture.point.clone().add(delta);
-    }
-    const worldPosition = baseline.worldPosition.clone().add(delta);
-    const parent = session.owner.parent;
-    parent?.updateWorldMatrix(true, false);
-    const localPosition = worldPositionToLocal(
-      worldPosition,
-      parent?.matrixWorld
-    );
-    const localQuaternion = baseline.options.faceCamera
-      ? faceCameraQuaternion(
-          worldPosition,
-          this.camera?.getWorldPosition(new THREE.Vector3()),
-          parent?.getWorldQuaternion(new THREE.Quaternion()),
-          baseline.options.mode
-        )
-      : undefined;
-    const rotationAlpha = this.timer
-      ? faceCameraSlerpAlpha(
-          baseline.options.smoothing ?? DEFAULT_FACE_CAMERA_SMOOTHING,
-          this.timer.getDelta()
-        )
-      : 1;
-    if (
-      !isFiniteVector(point) ||
-      !isFiniteVector(delta) ||
-      !isFiniteVector(worldPosition) ||
-      !isFiniteVector(localPosition)
-    ) {
-      return undefined;
-    }
-    return {
-      action: ManipulationAction.Translate,
-      point,
-      delta,
-      position: localPosition,
-      worldPosition,
-      apply: () => {
-        if (!isFiniteVector(localPosition)) return;
-        session.owner.position.copy(localPosition);
-        if (localQuaternion) {
-          session.owner.quaternion.slerp(localQuaternion, rotationAlpha);
-        }
-      },
-    };
-  }
-
-  private proposeRotate(
-    session: Session,
-    baseline: RotateBaseline
-  ): Proposal | undefined {
-    const snapshot = session.primary.snapshot;
-    let angle: number;
-    if (snapshot.sourceType === 'mouse') {
-      const deltaRotation = snapshot.orientation
-        .clone()
-        .multiply(baseline.sourceOrientationInverse);
-      angle =
-        -new THREE.Euler().setFromQuaternion(deltaRotation, 'YXZ').y *
-        baseline.options.sensitivity;
-    } else {
-      const localDelta = snapshot.position
-        .clone()
-        .sub(baseline.sourcePosition)
-        .applyQuaternion(baseline.sourceOrientationInverse);
-      angle = localDelta.x * baseline.options.sensitivity;
-    }
-    const offset = new THREE.Quaternion().setFromAxisAngle(
-      baseline.axis,
-      angle
-    );
-    let quaternion: THREE.Quaternion;
-    if (baseline.options.space === 'local') {
-      quaternion = baseline.localQuaternion.clone().multiply(offset);
-    } else {
-      const world = offset.multiply(baseline.worldQuaternion);
-      const parent = session.owner.parent;
-      parent?.updateWorldMatrix(true, false);
-      quaternion = worldQuaternionToLocal(
-        world,
-        parent?.getWorldQuaternion(new THREE.Quaternion())
-      );
-    }
-    if (!Number.isFinite(angle) || !isFiniteQuaternion(quaternion)) {
-      return undefined;
-    }
-    return {
-      action: ManipulationAction.Rotate,
-      angle,
-      quaternion,
-      apply: () => {
-        if (Number.isFinite(angle) && isFiniteQuaternion(quaternion)) {
-          session.owner.quaternion.copy(quaternion).normalize();
-        }
-      },
-    };
-  }
-
-  private proposeScale(
-    session: Session,
-    baseline: ScaleBaseline
-  ): Proposal | undefined {
-    if (!session.auxiliary) return undefined;
-    const currentDistance = session.primary.snapshot.position.distanceTo(
-      session.auxiliary.position
-    );
-    let factor = currentDistance / baseline.distance;
-    if (!isPositiveFinite(factor)) return undefined;
-    factor = clampScaleFactor(factor, baseline.scale, baseline.options);
-    if (!isPositiveFinite(factor)) return undefined;
-    const scale = baseline.scale.clone().multiplyScalar(factor);
-    if (!isPositiveVector(scale)) return undefined;
-    const center = session.primary.snapshot.position
-      .clone()
-      .add(session.auxiliary.position)
-      .multiplyScalar(0.5);
-    return {
-      action: ManipulationAction.Scale,
-      factor,
-      center,
-      scale,
-      apply: () => session.owner.scale.copy(scale),
-    };
+    return this.scaleDriver.propose(session, baseline);
   }
 
   private dispatchPhase(
@@ -731,6 +542,29 @@ export class ManipulationManager {
     }
     if (phase === 'start') session.phase.defaultPrevented = preventState.value;
   }
+}
+
+function getCardEdge(
+  owner: THREE.Object3D
+): {scale: boolean; translateFromSurface: boolean} | undefined {
+  const candidate = owner as THREE.Object3D & {
+    readonly isUI?: boolean;
+    readonly edge?:
+      | false
+      | {readonly scale?: boolean; readonly translateFromSurface?: boolean};
+  };
+  if (!candidate.isUI || !candidate.edge) return undefined;
+  return {
+    scale: candidate.edge.scale ?? false,
+    translateFromSurface: candidate.edge.translateFromSurface ?? false,
+  };
+}
+
+function oppositeCorner(corner: CardCorner): CardCorner {
+  if (corner === 'top-left') return 'bottom-right';
+  if (corner === 'top-right') return 'bottom-left';
+  if (corner === 'bottom-left') return 'top-right';
+  return 'top-left';
 }
 
 function cloneSnapshot(
@@ -754,14 +588,13 @@ function createEvent(
   const common = {
     phase,
     action: proposal.action,
-    target: session.primary.snapshot.controller,
-    controllers: Object.freeze(
-      [
-        session.primary.snapshot.controller,
-        session.auxiliary?.controller,
-      ].filter(Boolean) as Controller[]
+    source: session.primary.snapshot.source,
+    sources: Object.freeze(
+      [session.primary.snapshot.source, session.auxiliary?.source].filter(
+        Boolean
+      ) as InteractionSource[]
     ),
-    sourceType: session.primary.snapshot.sourceType,
+    target: session.primary.capture.target,
     surface: session.primary.capture.surface,
     owner: session.owner,
     currentTarget,

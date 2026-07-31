@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import {reversePainterSortStable} from '@pmndrs/uikit';
 
 import {AI} from '../ai/AI';
 import {AIOptions} from '../ai/AIOptions';
@@ -21,6 +20,8 @@ import {Input} from '../input/Input';
 import {Interaction} from '../interaction/Interaction';
 import {ManipulationManager} from '../interaction/manipulation/ManipulationManager';
 import {ReticlePresenter} from '../interaction/ReticlePresenter';
+import {UIRenderer} from '../ui/internal/UIRenderer';
+import {isUIElement} from '../ui/UIElement';
 import {Lighting} from '../lighting/Lighting';
 import {Physics} from '../physics/Physics';
 import {Simulator} from '../simulator/Simulator';
@@ -108,6 +109,8 @@ export class Core {
   private manipulationManager!: ManipulationManager;
   private reticleOptions = new ReticleOptions();
   private reticlePresenter = new ReticlePresenter(this.reticleOptions);
+  private uiRenderer!: UIRenderer;
+  private physicsInterval?: ReturnType<typeof setInterval>;
 
   /** Manages real-world understanding: planes, meshes, objects, and sounds. */
   world = new World();
@@ -227,6 +230,17 @@ export class Core {
       reticle: this.reticlePresenter,
       reticleOptions: this.reticleOptions,
     });
+    this.uiRenderer = new UIRenderer(
+      this.interaction,
+      undefined,
+      (error, root) =>
+        this.scriptsManager.reportError(error, root, 'UI renderer load')
+    );
+    this.scriptsManager.beforeDispose = (script) =>
+      this.interaction.cancelObject(script, 'removed');
+    this.scriptsManager.afterDispose = (script) => {
+      if (isUIElement(script)) this.uiRenderer.release(script);
+    };
 
     this.scene.name = 'XR Blocks Scene';
 
@@ -255,7 +269,15 @@ export class Core {
 
   dispose() {
     this.interaction.clear();
+    this.uiRenderer.dispose();
     this.input.dispose();
+    if (this.physicsInterval !== undefined) {
+      clearInterval(this.physicsInterval);
+      this.physicsInterval = undefined;
+    }
+    if (typeof this._renderer?.setAnimationLoop === 'function') {
+      this._renderer.setAnimationLoop(null);
+    }
     window.removeEventListener('resize', this.onWindowResize);
   }
 
@@ -324,11 +346,6 @@ export class Core {
     };
     this.registry.register(this.renderer);
 
-    // src/ui uses UIKit directly. Configure its clipping and painter order on
-    // the shared renderer so applications do not need a second UI bootstrap.
-    this.renderer.localClippingEnabled = true;
-    this.renderer.setTransparentSort(reversePainterSortStable);
-
     this.renderer.xr.setReferenceSpaceType(options.referenceSpaceType);
     // For desktop simulator:
     window.addEventListener('resize', this.onWindowResize);
@@ -344,6 +361,9 @@ export class Core {
     this.reticleOptions.defaultRenderDistance =
       options.reticles.defaultRenderDistance;
     this.scriptsManager.catchExceptions = options.catchScriptExceptions;
+    this.interaction.setLongSelectDuration(
+      options.interaction.longSelectDuration
+    );
 
     // Sets up input. Head gestures are camera-only and do not require controllers.
     this.input.init({
@@ -501,12 +521,19 @@ export class Core {
       await this.scriptsManager.initScript(this.ai);
     }
 
-    await this.scriptsManager.syncScriptsWithScene(this.scene);
+    await Promise.all([
+      this.uiRenderer.initialize(this.scene, this.renderer, this.camera),
+      this.scriptsManager.syncScriptsWithScene(this.scene),
+    ]);
+    this.uiRenderer.update();
 
     this.renderer.setAnimationLoop(this.update);
 
     if (this.physics) {
-      setInterval(this.physicsStep, 1000 * this.physics.timestep);
+      this.physicsInterval = setInterval(
+        this.physicsStep,
+        1000 * this.physics.timestep
+      );
     }
 
     if (this.options.reticles.enabled) {
@@ -562,28 +589,30 @@ export class Core {
     // Traverse the scene to find all scripts.
     this.scriptsManager.syncScriptsWithScene(this.scene);
 
-    // Force matrix updates since there is no active renderer render loop in headless/test environments.
-    this.scene.updateMatrixWorld(true);
+    // Run callbacks that use wait frame.
+    this.waitFrame.onFrame();
 
-    // Update input and resolved interaction state.
-    this.input.update();
-    this.interaction.update(
-      this.input.getInteractionFrame(),
-      this.timer.getDelta()
+    // Public state changes first, then one UI flush, then fresh hit sampling.
+    this.scriptsManager.update(time, frame);
+    this.uiRenderer.update();
+    this.interaction.syncTouchCandidates(
+      this.scriptsManager.directTouchCandidates
     );
+    this.scene.updateMatrixWorld(true);
+    this.input.update();
 
-    // Updates scripts with user interactions.
+    // Update non-selection input callbacks.
     for (const controller of this.input.controllers) {
       if (controller.userData.squeezing) {
         this.scriptsManager.callSqueezing(controller);
       }
     }
 
-    // Run callbacks that use wait frame.
-    this.waitFrame.onFrame();
+    this.interaction.update(
+      this.input.getInteractionFrame(),
+      this.timer.getDelta()
+    );
 
-    // Updates renderings.
-    this.scriptsManager.update(time, frame);
     this.renderSimulatorAndScene();
     this.screenshotSynthesizer.onAfterRender(
       this.renderer,

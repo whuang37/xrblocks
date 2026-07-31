@@ -104,13 +104,8 @@ export class Reticle extends THREE.Mesh<
    * @param normal - The world-space normal of the surface.
    */
   setRotationFromNormalVector(normal: THREE.Vector3) {
-    const angle = this.originalNormal.angleTo(normal);
-
-    // Calculate the rotation axis by taking the cross product.
-    // Note: this.originalNormal is modified here but reset by the next line.
-    this.originalNormal.cross(normal).normalize();
-    this.newRotation.setFromAxisAngle(this.originalNormal, angle);
-    this.originalNormal.set(0, 0, 1); // Reset for next use.
+    this.normalVector.copy(normal).normalize();
+    this.newRotation.setFromUnitVectors(this.originalNormal, this.normalVector);
 
     // Smoothly interpolate from the current rotation to the new rotation.
     this.quaternion.slerp(this.newRotation, 1.0 - this.rotationSmoothing);

@@ -1,136 +1,102 @@
-import * as THREE from 'three';
-
-import {ScriptMixin, type SelectEvent} from '../../core/Script';
-import {registerSemanticControl} from '../../interaction/SemanticControl';
-import {clamp} from '../../utils/utils';
+import type {SelectEvent} from '../../core/Script';
 import {
-  GradientPanel,
-  type GradientPanelProperties,
-} from '../primitives/GradientPanel';
-import type {Paint} from '../types/ShaderTypes';
-import {FreestandingSlider} from '../interaction/FreestandingSlider';
+  registerSemanticControl,
+  type SemanticControlInput,
+} from '../../interaction/SemanticControl';
+import {clamp} from '../../utils/utils';
+import {UIElement, type UIElementOptions} from '../UIElement';
 
-/** Initialization properties for a horizontal spatial slider. */
-export interface UISliderProperties extends GradientPanelProperties {
-  /** Accessible control name. */
+export interface UISliderOptions extends UIElementOptions {
   ariaLabel: string;
   min?: number;
   max?: number;
   step?: number;
   value?: number;
   disabled?: boolean;
-  /** Controller travel in meters that spans the complete value range. */
-  dragDistance?: number;
-  trackColor?: Paint;
-  progressColor?: Paint;
-  thumbColor?: Paint;
-  trackHeight?: number;
-  thumbSize?: number;
+  onInput?: (value: number) => void;
   onChange?: (value: number) => void;
 }
 
-const SliderBase = ScriptMixin(GradientPanel);
-
-/** A horizontal slider that captures one controller until selection ends. */
-export class UISlider extends SliderBase {
+/** A horizontal slider with one exclusive captured interaction. */
+export class UISlider extends UIElement {
   name = 'UISlider';
   readonly ariaLabel: string;
-  readonly min: number;
-  readonly max: number;
-  readonly step: number;
+  onInput?: (value: number) => void;
   onChange?: (value: number) => void;
 
+  private _min: number;
+  private _max: number;
+  private _step: number;
   private _value: number;
   private _disabled: boolean;
-  private activeController?: THREE.Object3D;
-  private readonly motion: FreestandingSlider;
-  private readonly progress: GradientPanel;
-  private readonly thumb: GradientPanel;
+  private interactionStart?: number;
+  private interactionChanged = false;
 
   constructor({
     ariaLabel,
     min = 0,
     max = 1,
     step = 0.01,
-    value = min,
+    value = 0,
     disabled = false,
-    dragDistance = 0.25,
-    trackColor = 'rgba(255, 255, 255, 0.25)',
-    progressColor = '#4796e3',
-    thumbColor = '#ffffff',
-    trackHeight = 10,
-    thumbSize = 28,
+    onInput,
     onChange,
-    ...properties
-  }: UISliderProperties) {
-    validateRange(min, max, step, dragDistance);
-    super({
-      width: 240,
-      height: 44,
-      cornerRadius: 22,
-      fillColor: 'rgba(0, 0, 0, 0)',
-      pointerEvents: 'auto',
-      ...properties,
-    });
-
+    ...options
+  }: UISliderOptions) {
+    if (!ariaLabel) throw new Error('UISlider requires ariaLabel.');
+    if (typeof disabled !== 'boolean') {
+      throw new Error('UISlider disabled must be a boolean.');
+    }
+    validateRange(min, max, step);
+    super('slider', options);
     this.ariaLabel = ariaLabel;
-    this.min = min;
-    this.max = max;
-    this.step = step;
+    this._min = min;
+    this._max = max;
+    this._step = step;
     this._value = quantize(value, min, max, step);
     this._disabled = disabled;
+    this.onInput = onInput;
     this.onChange = onChange;
-    this.interactionEnabled = !disabled;
-    this.motion = new FreestandingSlider(
-      this._value,
-      min,
-      max,
-      (max - min) / dragDistance
-    );
-
-    const track = new GradientPanel({
-      positionType: 'absolute',
-      positionLeft: 0,
-      positionRight: 0,
-      positionTop: '50%',
-      transformTranslateY: -trackHeight / 2,
-      height: trackHeight,
-      cornerRadius: trackHeight / 2,
-      fillColor: trackColor,
-      pointerEvents: 'none',
-    });
-    this.progress = new GradientPanel({
-      positionType: 'absolute',
-      positionLeft: 0,
-      positionTop: '50%',
-      transformTranslateY: -trackHeight / 2,
-      height: trackHeight,
-      cornerRadius: trackHeight / 2,
-      fillColor: progressColor,
-      pointerEvents: 'none',
-    });
-    this.thumb = new GradientPanel({
-      positionType: 'absolute',
-      positionTop: '50%',
-      width: thumbSize,
-      height: thumbSize,
-      transformTranslateX: -thumbSize / 2,
-      transformTranslateY: -thumbSize / 2,
-      cornerRadius: thumbSize / 2,
-      fillColor: thumbColor,
-      pointerEvents: 'none',
-    });
-    this.add(track, this.progress, this.thumb);
-    this.updateVisuals();
 
     registerSemanticControl(this, {
+      kind: 'slider',
       isDisabled: () => this._disabled,
-      activate: () => this.setValue(this._value + this.step, true),
+      activate: () => {},
+      begin: (input) => this.beginInput(input),
+      update: (input) => this.updateInput(input),
+      complete: () => this.completeInput(),
+      cancel: () => this.cancelInput(),
     });
+  }
 
-    // The child shader layers provide the physical hit surfaces. The slider
-    // remains the logical interaction owner.
-    this.raycast = () => {};
+  get min(): number {
+    return this._min;
+  }
+
+  set min(value: number) {
+    validateRange(value, this._max, this._step);
+    this._min = value;
+    this.setProgrammaticValue(this._value);
+  }
+
+  get max(): number {
+    return this._max;
+  }
+
+  set max(value: number) {
+    validateRange(this._min, value, this._step);
+    this._max = value;
+    this.setProgrammaticValue(this._value);
+  }
+
+  get step(): number {
+    return this._step;
+  }
+
+  set step(value: number) {
+    validateRange(this._min, this._max, value);
+    this._step = value;
+    this.setProgrammaticValue(this._value);
   }
 
   get value(): number {
@@ -138,7 +104,7 @@ export class UISlider extends SliderBase {
   }
 
   set value(value: number) {
-    this.setValue(value);
+    this.setProgrammaticValue(value);
   }
 
   get disabled(): boolean {
@@ -146,73 +112,80 @@ export class UISlider extends SliderBase {
   }
 
   set disabled(value: boolean) {
+    if (typeof value !== 'boolean') {
+      throw new Error('UISlider disabled must be a boolean.');
+    }
+    if (value === this._disabled) return;
     this._disabled = value;
-    this.interactionEnabled = !value;
-    if (value) this.activeController = undefined;
+    this.markUIDirty();
   }
 
-  /** Updates the value. User-originated updates can emit `onChange`. */
-  setValue(value: number, emit = false): void {
-    const next = quantize(value, this.min, this.max, this.step);
+  onObjectSelectStart(_event: SelectEvent): true {
+    return true;
+  }
+
+  onObjectSelectEnd(_event: SelectEvent): true {
+    return true;
+  }
+
+  private beginInput(input: SemanticControlInput): void {
+    this.interactionStart = this._value;
+    this.interactionChanged = false;
+    this.updateInput(input);
+  }
+
+  private updateInput(input: SemanticControlInput): void {
+    const ratio = clamp(input.uv?.x ?? 0.5, 0, 1);
+    const next = quantize(
+      this._min + ratio * (this._max - this._min),
+      this._min,
+      this._max,
+      this._step
+    );
     if (next === this._value) return;
     this._value = next;
-    this.motion.updateValue(next);
-    this.updateVisuals();
-    if (emit) this.onChange?.(next);
+    this.interactionChanged = true;
+    this.markUIDirty();
+    this.onInput?.(next);
   }
 
-  onObjectSelectStart(event: SelectEvent): true {
-    if (!this._disabled) {
-      this.activeController = event.target;
-      this.motion.updateValue(this._value);
-      this.motion.setInitialPoseFromController(event.target);
-    }
-    return true;
+  private completeInput(): void {
+    if (this.interactionStart === undefined) return;
+    const changed = this.interactionChanged;
+    this.interactionStart = undefined;
+    this.interactionChanged = false;
+    if (changed) this.onChange?.(this._value);
   }
 
-  onObjectSelectEnd(event: SelectEvent): true {
-    if (this.activeController === event.target) {
-      this.activeController = undefined;
-      this.motion.updateValue(this._value);
-    }
-    return true;
+  private cancelInput(): void {
+    if (this.interactionStart === undefined) return;
+    const original = this.interactionStart;
+    this.interactionStart = undefined;
+    this.interactionChanged = false;
+    if (original === this._value) return;
+    this._value = original;
+    this.markUIDirty();
+    this.onInput?.(original);
   }
 
-  override update(): void {
-    super.update();
-    const controller = this.activeController;
-    if (!controller || controller.userData.selected !== true) return;
-    this.setValue(this.motion.getValueFromController(controller), true);
-  }
-
-  override dispose(): void {
-    GradientPanel.prototype.dispose.call(this);
-  }
-
-  private updateVisuals(): void {
-    const percentage = ((this._value - this.min) / (this.max - this.min)) * 100;
-    this.progress.setProperties({width: `${percentage}%`});
-    this.thumb.setProperties({positionLeft: `${percentage}%`});
+  private setProgrammaticValue(value: number): void {
+    const next = quantize(value, this._min, this._max, this._step);
+    if (next === this._value) return;
+    this._value = next;
+    this.markUIDirty();
   }
 }
 
-function validateRange(
-  min: number,
-  max: number,
-  step: number,
-  dragDistance: number
-): void {
+function validateRange(min: number, max: number, step: number): void {
   if (
     !Number.isFinite(min) ||
     !Number.isFinite(max) ||
     !Number.isFinite(step) ||
-    !Number.isFinite(dragDistance) ||
-    max <= min ||
-    step <= 0 ||
-    dragDistance <= 0
+    min > max ||
+    step <= 0
   ) {
     throw new Error(
-      'UISlider requires finite values with max > min, step > 0, and dragDistance > 0.'
+      'UISlider requires finite values with min <= max and step > 0.'
     );
   }
 }
@@ -223,7 +196,7 @@ function quantize(
   max: number,
   step: number
 ): number {
-  const finiteValue = Number.isFinite(value) ? value : min;
-  const stepped = min + Math.round((finiteValue - min) / step) * step;
+  const finite = Number.isFinite(value) ? value : min;
+  const stepped = min + Math.round((finite - min) / step) * step;
   return clamp(Number(stepped.toPrecision(12)), min, max);
 }

@@ -1,196 +1,203 @@
-import {Container} from '@pmndrs/uikit';
-import * as THREE from 'three';
-
-import {ScriptMixin} from '../../core/Script';
 import type {ManipulationOptions} from '../../interaction/manipulation/ManipulationTypes';
-import {DEFAULT_CARD_PROPS} from '../constants/UICardConstants';
-import {
-  GradientPanel,
-  type GradientPanelProperties,
-} from '../primitives/GradientPanel';
-import {
-  UIManipulationHandle,
-  type UIManipulationHandleProperties,
-} from './UIManipulationHandle';
+import {normalizeManipulationConfig} from '../../interaction/manipulation/ManipulationConfig';
+import {UIElement, type UIElementOptions} from '../UIElement';
 
-const ScriptedGradientPanel = ScriptMixin(GradientPanel);
+export interface UISize {
+  width: number;
+  height: number;
+}
 
-/** Properties for a world-space UI root. */
-export type UICardOutProperties = Omit<
-  GradientPanelProperties,
-  'anchorX' | 'anchorY'
-> & {
-  name?: string;
-  position?: THREE.Vector3;
-  rotation?: THREE.Quaternion;
-  visible?: boolean;
-  sizeX?: number;
-  sizeY?: number;
-  anchorX?: 'left' | 'right' | 'center' | number;
-  anchorY?: 'bottom' | 'top' | 'center' | number;
-  pixelSize?: number;
-  /** Enables card manipulation. Translation faces the camera unless explicitly disabled. */
+export interface UICardEdgeOptions {
+  scale?: boolean;
+  translateFromSurface?: boolean;
+}
+
+export interface UICardOptions extends UIElementOptions {
+  size: UISize;
   manipulation?: boolean | ManipulationOptions;
-  /** Adds an outward shader edge that can act as a manipulation handle. */
-  manipulationEdge?: boolean | UIManipulationHandleProperties;
-};
+  edge?: boolean | UICardEdgeOptions;
+}
 
-/** A UIKit flex container anchored in world space. */
-export class UICard extends ScriptedGradientPanel {
-  static dependencies = {timer: THREE.Timer};
-
+/** The only world-transform root in a spatial UI tree. */
+export class UICard extends UIElement {
   name = 'UICard';
-  readonly isUI = true;
-  readonly cardPixelSize: number;
-  readonly baseWidth?: number;
-  readonly baseHeight?: number;
-  readonly baseSizeX?: number;
-  readonly baseSizeY?: number;
-  readonly anchorX: number;
-  readonly anchorY: number;
-  readonly basePosition: THREE.Vector3;
-  readonly manipulationEdge?: UIManipulationHandle;
-  private timer?: THREE.Timer;
+  private readonly sizeTarget: UISize;
+  private readonly sizeProxy: UISize;
+  private readonly edgeTarget: Required<UICardEdgeOptions> = {
+    scale: false,
+    translateFromSurface: false,
+  };
+  private readonly edgeProxy: Required<UICardEdgeOptions>;
+  private edgeEnabled = false;
 
-  constructor(config: UICardOutProperties = {}) {
-    const {
-      name,
-      position,
-      rotation,
-      visible,
-      manipulation,
-      manipulationEdge,
-      pixelSize,
-      sizeX,
-      sizeY,
-      anchorX,
-      anchorY,
-      ...properties
-    } = config;
-
-    const resolvedPixelSize = pixelSize ?? DEFAULT_CARD_PROPS.pixelSize;
-    const resolvedSizeX = sizeX ?? DEFAULT_CARD_PROPS.sizeX;
-    const resolvedSizeY = sizeY ?? DEFAULT_CARD_PROPS.sizeY;
-
-    super({
-      ...DEFAULT_CARD_PROPS,
-      ...properties,
-      pixelSize: resolvedPixelSize,
-      sizeX: resolvedSizeX,
-      sizeY: resolvedSizeY,
-      pointerEvents: properties.pointerEvents ?? 'auto',
+  constructor({size, manipulation, edge = false, ...options}: UICardOptions) {
+    validateSize(size);
+    super('card', options);
+    this.sizeTarget = {...size};
+    this.sizeProxy = new Proxy(this.sizeTarget, {
+      set: (target, property, value) => {
+        if (
+          (property !== 'width' && property !== 'height') ||
+          typeof value !== 'number' ||
+          !Number.isFinite(value) ||
+          value < 0
+        ) {
+          throw new Error('UICard size values must be finite and nonnegative.');
+        }
+        Reflect.set(target, property, value);
+        this.markUIDirty();
+        return true;
+      },
+    });
+    this.edgeProxy = new Proxy(this.edgeTarget, {
+      set: (target, property, value) => {
+        if (
+          (property !== 'scale' && property !== 'translateFromSurface') ||
+          typeof value !== 'boolean'
+        ) {
+          throw new Error(
+            `Unknown or invalid UICard edge option "${String(property)}".`
+          );
+        }
+        const previous = Reflect.get(target, property);
+        Reflect.set(target, property, value);
+        try {
+          this.validateEdge();
+        } catch (error) {
+          Reflect.set(target, property, previous);
+          throw error;
+        }
+        this.markUIDirty();
+        return true;
+      },
     });
 
-    this.name = name ?? 'UICard';
-    this.cardPixelSize = resolvedPixelSize;
-    this.baseWidth = properties.width as number | undefined;
-    this.baseHeight = properties.height as number | undefined;
-    this.baseSizeX = resolvedSizeX;
-    this.baseSizeY = resolvedSizeY;
-    this.anchorX = resolveHorizontalAnchor(
-      anchorX ?? DEFAULT_CARD_PROPS.anchorX
-    );
-    this.anchorY = resolveVerticalAnchor(anchorY ?? DEFAULT_CARD_PROPS.anchorY);
-    this.basePosition = position?.clone() ?? new THREE.Vector3();
+    this.manipulation = manipulation;
+    this.edge = edge;
+  }
 
-    this.position.copy(this.basePosition);
-    if (rotation) this.quaternion.copy(rotation);
-    if (visible !== undefined) this.visible = visible;
-    if (manipulation !== undefined) {
-      this.xb = {manipulation: resolveCardManipulation(manipulation)};
+  get size(): UISize {
+    return this.sizeProxy;
+  }
+
+  set size(value: UISize) {
+    validateSize(value);
+    this.sizeProxy.width = value.width;
+    this.sizeProxy.height = value.height;
+  }
+
+  get manipulation(): boolean | ManipulationOptions | undefined {
+    return this.xb?.manipulation;
+  }
+
+  set manipulation(value: boolean | ManipulationOptions | undefined) {
+    const normalized = normalizeCardManipulation(value);
+    this.validateEdge(this.edgeEnabled, this.edgeTarget, normalized);
+    this.xb ??= {};
+    this.xb.manipulation = normalized;
+    this.markUIDirty();
+  }
+
+  get edge(): false | Required<UICardEdgeOptions> {
+    return this.edgeEnabled ? this.edgeProxy : false;
+  }
+
+  set edge(value: boolean | UICardEdgeOptions) {
+    const enabled = value !== false;
+    const options = value && value !== true ? value : {};
+    const next = {
+      scale: options.scale ?? false,
+      translateFromSurface: options.translateFromSurface ?? false,
+    };
+    this.validateEdge(enabled, next, this.xb?.manipulation);
+    this.edgeEnabled = enabled;
+    this.edgeTarget.scale = next.scale;
+    this.edgeTarget.translateFromSurface = next.translateFromSurface;
+    this.markUIDirty();
+  }
+
+  private validateEdge(
+    enabled = this.edgeEnabled,
+    edge: Readonly<Required<UICardEdgeOptions>> = this.edgeTarget,
+    manipulation: boolean | ManipulationOptions | undefined = this.xb
+      ?.manipulation
+  ): void {
+    if (!enabled) return;
+    const config = normalizeManipulationConfig(manipulation);
+    if (!config?.translate) {
+      throw new Error('UICard edge requires Translate manipulation.');
     }
-    if (manipulationEdge) {
-      this.manipulationEdge = new UIManipulationHandle(
-        manipulationEdge === true ? {} : manipulationEdge
-      );
-      this.add(this.manipulationEdge);
+    if (edge.scale && !config.scale) {
+      throw new Error('UICard edge Scale requires Scale manipulation.');
     }
-
-    // UIKit containers coordinate their own private hit surfaces. The public
-    // card remains the logical interaction and manipulation owner.
-    this.raycast = () => {};
-  }
-
-  show() {
-    this.visible = true;
-  }
-
-  hide() {
-    this.visible = false;
-  }
-
-  toggle() {
-    this.visible = !this.visible;
-  }
-
-  init({timer}: {timer: THREE.Timer}) {
-    this.timer = timer;
-  }
-
-  update() {
-    super.update();
-    const update = Container.prototype['update'];
-    if (update) update.call(this, this.timer?.getDelta() ?? 0);
-  }
-
-  override dispose(): void {
-    GradientPanel.prototype.dispose.call(this);
   }
 }
 
-function resolveCardManipulation(
-  value: boolean | ManipulationOptions
-): boolean | ManipulationOptions {
-  if (value === false) return false;
+export function getUICardEdgeOptions(
+  card: UICard
+): Readonly<Required<UICardEdgeOptions>> | undefined {
+  return card.edge || undefined;
+}
+
+function normalizeCardManipulation(
+  value: boolean | ManipulationOptions | undefined
+): boolean | ManipulationOptions | undefined {
+  if (value === undefined || value === false) return value;
   if (value === true) {
-    return {actions: defaultCardManipulationActions()};
-  }
-
-  return {
-    ...value,
-    actions: resolveCardManipulationActions(value.actions),
-  };
-}
-
-function defaultCardManipulationActions(): NonNullable<
-  ManipulationOptions['actions']
-> {
-  return {
-    translate: {faceCamera: true},
-    scale: true,
-  };
-}
-
-function resolveCardManipulationActions(
-  actions: ManipulationOptions['actions']
-): NonNullable<ManipulationOptions['actions']> {
-  if (!actions) return defaultCardManipulationActions();
-  if (actions.translate === true) {
-    return {...actions, translate: {faceCamera: true}};
-  }
-  if (actions.translate && typeof actions.translate === 'object') {
     return {
-      ...actions,
-      translate: {faceCamera: true, ...actions.translate},
+      actions: {
+        translate: {faceCamera: true},
+        scale: true,
+      },
+      handle: {action: 'translate'},
     };
   }
-  return actions;
+  const actions = value.actions ? {...value.actions} : undefined;
+  if (actions?.translate === true) {
+    actions.translate = {faceCamera: true};
+  } else if (actions?.translate && typeof actions.translate === 'object') {
+    actions.translate = {
+      ...actions.translate,
+      faceCamera: actions.translate.faceCamera ?? true,
+    };
+  }
+  if (actions?.rotate && typeof actions.rotate === 'object') {
+    actions.rotate = {
+      ...actions.rotate,
+      axis:
+        actions.rotate.axis && typeof actions.rotate.axis === 'object'
+          ? {...actions.rotate.axis}
+          : actions.rotate.axis,
+    };
+  }
+  if (actions?.scale && typeof actions.scale === 'object') {
+    actions.scale = {
+      ...actions.scale,
+      minScale:
+        actions.scale.minScale && typeof actions.scale.minScale === 'object'
+          ? {...actions.scale.minScale}
+          : actions.scale.minScale,
+      maxScale:
+        actions.scale.maxScale && typeof actions.scale.maxScale === 'object'
+          ? {...actions.scale.maxScale}
+          : actions.scale.maxScale,
+    };
+  }
+  return {
+    ...value,
+    actions,
+    handle: value.handle ? {...value.handle} : undefined,
+  };
 }
 
-function resolveHorizontalAnchor(
-  value: 'left' | 'right' | 'center' | number
-): number {
-  if (typeof value === 'number') return value;
-  if (value === 'left') return 0;
-  if (value === 'right') return 1;
-  return 0.5;
-}
-
-function resolveVerticalAnchor(
-  value: 'bottom' | 'top' | 'center' | number
-): number {
-  if (typeof value === 'number') return value;
-  if (value === 'bottom') return 0;
-  if (value === 'top') return 1;
-  return 0.5;
+function validateSize(size: UISize): void {
+  if (
+    !size ||
+    !Number.isFinite(size.width) ||
+    !Number.isFinite(size.height) ||
+    size.width < 0 ||
+    size.height < 0
+  ) {
+    throw new Error('UICard size values must be finite and nonnegative.');
+  }
 }

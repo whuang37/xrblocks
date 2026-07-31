@@ -26,13 +26,11 @@ export function createVisibleObjectsContext({
   camera,
   semanticTree,
   occlusionOpacityThreshold = 0,
-  checkPointerEvents = true,
 }: {
   scene: THREE.Scene;
   camera: THREE.Camera;
   semanticTree: SemanticTreeInternal;
   occlusionOpacityThreshold?: number;
-  checkPointerEvents?: boolean;
 }): SemanticTree {
   scene.updateMatrixWorld(true);
   camera.updateMatrixWorld(true);
@@ -54,7 +52,6 @@ export function createVisibleObjectsContext({
             object,
             raycastTargets,
             occlusionOpacityThreshold,
-            checkPointerEvents,
           })
         : createNotRenderedViewData(),
     };
@@ -72,14 +69,12 @@ function createSemanticViewData({
   object,
   raycastTargets,
   occlusionOpacityThreshold,
-  checkPointerEvents,
 }: {
   camera: THREE.Camera;
   node: SemanticNode;
   object: THREE.Object3D;
   raycastTargets: THREE.Object3D[];
   occlusionOpacityThreshold: number;
-  checkPointerEvents: boolean;
 }): SemanticViewData {
   if (!node.visible || !isObjectVisible(object)) {
     return createNotRenderedViewData();
@@ -105,7 +100,6 @@ function createSemanticViewData({
     targetPoint: center,
     raycastTargets,
     occlusionOpacityThreshold,
-    checkPointerEvents,
   });
 
   return {
@@ -155,14 +149,12 @@ function isObjectInLineOfSight({
   targetPoint,
   raycastTargets,
   occlusionOpacityThreshold,
-  checkPointerEvents,
 }: {
   camera: THREE.Camera;
   object: THREE.Object3D;
   targetPoint: THREE.Vector3;
   raycastTargets: THREE.Object3D[];
   occlusionOpacityThreshold: number;
-  checkPointerEvents: boolean;
 }): boolean {
   camera.getWorldPosition(tempCameraPosition);
   tempDirection.copy(targetPoint).sub(tempCameraPosition);
@@ -183,9 +175,6 @@ function isObjectInLineOfSight({
     if (isSemanticInternalObject(hit.object)) {
       return false;
     }
-    if (checkPointerEvents && hasPointerEventsDisabled(hit.object)) {
-      return false;
-    }
     if (
       isDescendantOf(hit.object, object) ||
       isDescendantOf(object, hit.object)
@@ -199,17 +188,6 @@ function isObjectInLineOfSight({
   });
 
   return occludingHit === undefined;
-}
-
-function hasPointerEventsDisabled(object: THREE.Object3D): boolean {
-  let current: THREE.Object3D | null = object;
-  while (current) {
-    if (current.pointerEvents === 'none') {
-      return true;
-    }
-    current = current.parent;
-  }
-  return false;
 }
 
 function isOpacityOccluding(

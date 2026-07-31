@@ -22,12 +22,6 @@ export class SceneVisibilityOptions extends SceneDerivedContextOptions {
    * threshold are ignored for line-of-sight occlusion.
    */
   occlusionOpacityThreshold = 0;
-
-  /**
-   * Whether objects with `pointerEvents = 'none'` should be ignored for
-   * line-of-sight occlusion. This follows the interaction raycast behavior.
-   */
-  checkPointerEvents = true;
 }
 export class SceneSetOfMarkOptions extends SceneDerivedContextOptions {}
 

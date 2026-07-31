@@ -7,7 +7,8 @@ import type {
   InteractionSourceType,
   ResolvedRay,
 } from './InteractionTypes.js';
-import type {ReticleMode} from './manipulation/ManipulationTypes.js';
+import {HitRegistry} from './HitRegistry.js';
+import {isSemanticControl} from './SemanticControl.js';
 
 function cloneIntersection(
   intersection: THREE.Intersection
@@ -25,7 +26,8 @@ function cloneIntersection(
 export class HitResolver {
   constructor(
     private readonly callbacks: InteractionCallbackDispatch,
-    private readonly manipulation?: InteractionManipulation
+    private readonly manipulation?: InteractionManipulation,
+    private readonly registry = new HitRegistry()
   ) {}
 
   resolve(
@@ -33,26 +35,41 @@ export class HitResolver {
     sourceType: InteractionSourceType
   ): ResolvedRay | undefined {
     for (const rawIntersection of intersections) {
-      const objectPath = this.getObjectPath(rawIntersection.object);
+      const registered = this.registry.resolve(rawIntersection.object);
+      if (
+        registered.logical === rawIntersection.object &&
+        hasPrivateAncestor(rawIntersection.object)
+      ) {
+        continue;
+      }
+      const surface = registered.logical;
+      const objectPath = this.getObjectPath(surface);
       if (this.isExcluded(objectPath)) continue;
 
       const eligiblePath = this.getEligiblePath(objectPath);
+      const hitPart = withCorner(registered.part, rawIntersection.uv);
       const manipulation = this.manipulation?.resolve(
-        rawIntersection.object,
-        eligiblePath
+        surface,
+        eligiblePath,
+        hitPart
       );
       const validManipulation =
         manipulation && eligiblePath.includes(manipulation.owner)
           ? manipulation
           : undefined;
+      const semanticControl = eligiblePath.find(isSemanticControl);
       const callbackTarget = eligiblePath.find((object) =>
         this.callbacks.hasTargetHandler(object, sourceType)
       );
-      const target = this.nearestTarget(
-        eligiblePath,
-        callbackTarget,
-        validManipulation?.owner
-      );
+      const target =
+        hitPart?.kind === 'card-edge'
+          ? validManipulation?.owner
+          : (semanticControl ??
+            this.nearestTarget(
+              eligiblePath,
+              callbackTarget,
+              validManipulation?.owner
+            ));
       const scriptPath = target
         ? (eligiblePath.filter((object) =>
             this.callbacks.isScript(object)
@@ -60,13 +77,18 @@ export class HitResolver {
         : [];
 
       return {
-        intersection: cloneIntersection(rawIntersection),
+        intersection: {
+          ...cloneIntersection(rawIntersection),
+          object: surface,
+        },
         hitObject: rawIntersection.object,
-        surface: rawIntersection.object,
+        surface,
         target,
         scriptPath: Object.freeze(scriptPath),
         objectPath: Object.freeze(objectPath),
         reticleMode: this.getReticleMode(objectPath),
+        hitPart,
+        semanticControl,
         manipulation: validManipulation,
       };
     }
@@ -112,7 +134,9 @@ export class HitResolver {
       : manipulationOwner;
   }
 
-  private getReticleMode(path: readonly THREE.Object3D[]): ReticleMode {
+  private getReticleMode(
+    path: readonly THREE.Object3D[]
+  ): 'auto' | 'surface' | 'hidden' {
     for (const object of path) {
       const mode = object.reticleMode;
       if (mode === 'auto' || mode === 'surface' || mode === 'hidden') {
@@ -121,4 +145,25 @@ export class HitResolver {
     }
     return 'auto';
   }
+}
+
+function hasPrivateAncestor(object: THREE.Object3D): boolean {
+  let current: THREE.Object3D | null = object;
+  while (current) {
+    if (current.userData.xrblocksPrivate === true) return true;
+    current = current.parent;
+  }
+  return false;
+}
+
+function withCorner(
+  part: ResolvedRay['hitPart'],
+  uv: THREE.Vector2 | undefined
+): ResolvedRay['hitPart'] {
+  if (part?.kind !== 'card-edge' || !uv) return part;
+  const horizontal = uv.x <= 0.2 ? 'left' : uv.x >= 0.8 ? 'right' : undefined;
+  const vertical = uv.y <= 0.2 ? 'bottom' : uv.y >= 0.8 ? 'top' : undefined;
+  return horizontal && vertical
+    ? {...part, corner: `${vertical}-${horizontal}` as const}
+    : part;
 }

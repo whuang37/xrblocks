@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 
 import type {ReticleOptions} from '../core/Options.js';
-import type {Script} from '../core/Script.js';
-import type {Controller} from '../input/Controller.js';
 import type {
-  ManipulationAction,
-  ReticleMode,
-} from './manipulation/ManipulationTypes.js';
+  LongSelectEvent,
+  Script,
+  SelectEndEvent,
+  SelectEvent,
+} from '../core/Script.js';
+import type {Controller} from '../input/Controller.js';
+import type {ManipulationAction} from './manipulation/ManipulationTypes.js';
 
 export type InteractionSourceType =
   | 'mouse'
@@ -17,6 +19,12 @@ export type InteractionSourceType =
   | 'simulator';
 
 export type RaySourceType = Exclude<InteractionSourceType, 'direct-touch'>;
+
+export interface InteractionSource {
+  readonly type: InteractionSourceType;
+  readonly handedness: 'left' | 'right' | 'none';
+  readonly controller: Controller;
+}
 
 export interface RaySourceInput {
   controller: Controller;
@@ -33,7 +41,6 @@ export interface DirectTouchInput {
   handIndex: number;
   hand?: THREE.Object3D;
   point: THREE.Vector3;
-  intersections: readonly THREE.Intersection[];
   selected: boolean;
   orientation?: THREE.Quaternion;
 }
@@ -46,6 +53,7 @@ export interface InteractionFrameInput {
 
 /** Frame-local physical input. */
 export interface InteractionSourceSnapshot {
+  readonly source: InteractionSource;
   readonly controller: Controller;
   readonly sourceType: InteractionSourceType;
   readonly position: THREE.Vector3;
@@ -64,16 +72,34 @@ export interface ResolvedRay {
   readonly target?: THREE.Object3D;
   readonly scriptPath: readonly Script[];
   readonly objectPath: readonly THREE.Object3D[];
-  readonly reticleMode: ReticleMode;
+  readonly reticleMode: 'auto' | 'surface' | 'hidden';
+  readonly hitPart?: InteractionHitPart;
+  readonly semanticControl?: THREE.Object3D;
   readonly manipulation?: ManipulationResolution;
 }
 
+export type InteractionHitPart =
+  | {readonly kind: 'content'}
+  | {readonly kind: 'card-surface'}
+  | {
+      readonly kind: 'card-edge';
+      readonly corner?:
+        | 'top-left'
+        | 'top-right'
+        | 'bottom-left'
+        | 'bottom-right';
+    };
+
 export interface SelectionCapture {
   readonly source: Controller;
+  readonly publicSource: InteractionSource;
+  readonly target: THREE.Object3D;
   readonly surface: THREE.Object3D;
   readonly owner: THREE.Object3D;
   readonly point: THREE.Vector3;
   readonly scriptPath: readonly Script[];
+  readonly hitPart?: InteractionHitPart;
+  readonly manipulation?: ManipulationResolution;
 }
 
 export type ResolvedManipulationAction = Exclude<ManipulationAction, 'none'>;
@@ -101,7 +127,15 @@ export type GlobalInteractionHook =
   | 'onSelectStart'
   | 'onSelecting'
   | 'onSelect'
-  | 'onSelectEnd';
+  | 'onSelectEnd'
+  | 'onLongSelect';
+
+export type GlobalInteractionEvent<Hook extends GlobalInteractionHook> =
+  Hook extends 'onSelectEnd'
+    ? SelectEndEvent
+    : Hook extends 'onLongSelect'
+      ? LongSelectEvent
+      : SelectEvent;
 
 /**
  * The only Script-facing seam. The implementation applies the existing Script
@@ -113,29 +147,38 @@ export interface InteractionCallbackDispatch {
     object: THREE.Object3D,
     sourceType: InteractionSourceType
   ): boolean;
+  hasTargetHook(object: THREE.Object3D, hook: TargetedInteractionHook): boolean;
   invokeTarget(
     script: THREE.Object3D,
     hook: TargetedInteractionHook,
     argument: unknown
   ): unknown;
-  invokeSemantic(object: THREE.Object3D): boolean;
-  invokeGlobal(hook: GlobalInteractionHook, event: {target: Controller}): void;
+  invokeSemantic(object: THREE.Object3D, callback: () => void): void;
+  invokeGlobal<Hook extends GlobalInteractionHook>(
+    hook: Hook,
+    event: GlobalInteractionEvent<Hook>
+  ): void;
 }
 
 /** Structural seam implemented by the private manipulation module. */
 export interface InteractionManipulation {
   resolve(
     surface: THREE.Object3D,
-    eligiblePath: readonly THREE.Object3D[]
+    eligiblePath: readonly THREE.Object3D[],
+    hitPart?: InteractionHitPart
   ): ManipulationResolution | undefined;
-  tryClaimScale(snapshot: InteractionSourceSnapshot): boolean;
+  tryClaimScale(
+    snapshot: InteractionSourceSnapshot,
+    resolved?: ResolvedRay
+  ): boolean;
   tryStart(
     capture: SelectionCapture,
     snapshot: InteractionSourceSnapshot
   ): boolean;
   update(snapshots: Iterable<InteractionSourceSnapshot>): void;
-  end(source: Controller): void;
+  end(source: Controller): boolean;
   cancelSource(source: Controller): void;
+  isSourceActive?(source: Controller): boolean;
   isManipulating?(object: THREE.Object3D): boolean;
   applyScaleIntent?(
     capture: SelectionCapture,
@@ -158,4 +201,33 @@ export interface InteractionDependencies {
   reticle?: ReticlePresentationObserver;
   reticleOptions?: ReticleOptions;
   longSelectDuration?: number;
+}
+
+const PUBLIC_SOURCES = new WeakMap<
+  Controller,
+  Map<InteractionSourceType, InteractionSource>
+>();
+
+/** Returns one stable public source for a controller and modality. */
+export function getInteractionSource(
+  controller: Controller,
+  type: InteractionSourceType
+): InteractionSource {
+  let byType = PUBLIC_SOURCES.get(controller);
+  if (!byType) {
+    byType = new Map();
+    PUBLIC_SOURCES.set(controller, byType);
+  }
+  const source = byType.get(type);
+  if (source) return source;
+  const created: InteractionSource = Object.freeze({
+    type,
+    controller,
+    get handedness(): InteractionSource['handedness'] {
+      const value = controller.inputSource?.handedness;
+      return value === 'left' || value === 'right' ? value : 'none';
+    },
+  });
+  byType.set(type, created);
+  return created;
 }

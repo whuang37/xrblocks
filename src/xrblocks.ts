@@ -17,7 +17,6 @@ export * from './context/ContextOptions';
 export * from './context/scene/SceneDetector';
 export * from './context/scene/SceneOptions';
 export * from './context/shared/SemanticTypes';
-export * from './core/components/Raycaster';
 export * from './core/components/Registry';
 export * from './core/components/ScreenshotSynthesizer';
 export * from './core/components/ScriptsManager';
@@ -60,6 +59,10 @@ export * from './input/headGestures/HeadGestureTypes';
 export * from './input/headGestures/gestureRecognizers/HeuristicHeadGestureRecognizer';
 export * from './input/Input';
 export * from './input/MouseController';
+export type {
+  InteractionSource,
+  InteractionSourceType,
+} from './interaction/InteractionTypes';
 export * from './interaction/manipulation/ManipulationTypes';
 export * from './lighting/Lighting';
 export * from './lighting/LightingOptions';

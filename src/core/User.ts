@@ -221,15 +221,4 @@ export class User extends Script {
     }
     return this.input.controllers[id].userData.squeezing;
   }
-
-  /**
-   * Checks if a controller is selecting a specific object. Returns the
-   * intersection details if true.
-   * @param obj - The object to check for selection.
-   * @param controller - The controller performing the select.
-   * @returns The intersection object if a match is found, else null.
-   */
-  select(obj: THREE.Object3D, controller: THREE.Object3D) {
-    return this.interaction.getIntersectionAt(obj, controller as Controller);
-  }
 }

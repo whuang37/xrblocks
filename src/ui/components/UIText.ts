@@ -1,77 +1,30 @@
-import {
-  BaseOutProperties,
-  InProperties,
-  RenderContext,
-  Text,
-  TextProperties,
-  WithSignal,
-} from '@pmndrs/uikit';
-import {ColorRepresentation} from 'three';
+import {UIElement, type UIElementOptions} from '../UIElement';
 
-/**
- * Properties for initializing a UIText.
- * Aliases standard \@pmndrs/uikit TextProperties.
- */
-export type UITextProperties = TextProperties;
+export interface UITextOptions extends UIElementOptions {
+  text: string;
+}
 
-/**
- * UIText
- * A wrapper component for rendering flat 3D text nodes.
- * Inherits from standard \@pmndrs/uikit `Text` for layout and styling.
- */
-export class UIText extends Text {
+/** Text content in a card or overlay layout. */
+export class UIText extends UIElement {
   name = 'UIText';
+  private _text: string;
 
-  /**
-   * Constructs a new UIText.
-   * @param text - The initial string content to display.
-   * @param properties - Standard styling overrides (fontSize, color, etc).
-   * @param initialClasses - Optional layout class strings.
-   * @param config - Optional context references.
-   */
-  constructor(
-    text: string,
-    properties?: UITextProperties,
-    initialClasses?: Array<InProperties<BaseOutProperties> | string>,
-    config?: {
-      renderContext?: RenderContext;
-      defaults?: WithSignal<UITextProperties>;
-    }
-  ) {
-    super(
-      {
-        text: text,
-        ...properties,
-      },
-      initialClasses,
-      // Cast the configuration parameter to match the strict `@pmndrs/uikit`
-      // `Text` class constructor, bypassing structural type inference errors.
-      config as unknown as ConstructorParameters<typeof Text>[2]
-    );
+  constructor({text, ...options}: UITextOptions) {
+    if (typeof text !== 'string') throw new Error('UIText requires text.');
+    super('text', options);
+    this._text = text;
+    this.pointerEvents = options.pointerEvents ?? 'auto';
   }
 
-  /** Updates the text content dynamically. */
-  setText(text: string) {
-    this.setProperties({text});
+  get text(): string {
+    return this._text;
   }
 
-  /** Updates font size (in layout points/pixels depending on pixelSize). */
-  setFontSize(fontSize: number) {
-    this.setProperties({fontSize});
-  }
-
-  /** Updates text color representation (HEX, CSS, or THREE.Color). */
-  setColor(color: ColorRepresentation) {
-    this.setProperties({color});
-  }
-
-  /** Updates font weight configuration. */
-  setFontWeight(fontWeight: UITextProperties['fontWeight']) {
-    this.setProperties({fontWeight});
-  }
-
-  /** Updates text opacity (0.0 - 1.0). */
-  setOpacity(opacity: number) {
-    this.setProperties({opacity});
+  set text(value: string) {
+    if (typeof value !== 'string')
+      throw new Error('UIText.text must be a string.');
+    if (value === this._text) return;
+    this._text = value;
+    this.markUIDirty();
   }
 }

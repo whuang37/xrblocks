@@ -1,8 +1,7 @@
 import type * as THREE from 'three';
 
 import type {Script} from '../../core/Script';
-import type {Controller} from '../../input/Controller';
-import type {InteractionSourceType} from '../InteractionTypes';
+import type {InteractionSource} from '../InteractionTypes';
 import type {FaceCameraMode} from '../../utils/FaceCameraMath';
 
 export type {FaceCameraMode} from '../../utils/FaceCameraMath';
@@ -75,9 +74,9 @@ export type ManipulationPhase = 'start' | 'update' | 'end' | 'cancel';
 export interface BaseManipulationEvent {
   readonly phase: ManipulationPhase;
   readonly action: ManipulationAction;
-  readonly target: Controller;
-  readonly controllers: readonly Controller[];
-  readonly sourceType: InteractionSourceType;
+  readonly source: InteractionSource;
+  readonly sources: readonly InteractionSource[];
+  readonly target: THREE.Object3D;
   readonly surface: THREE.Object3D;
   readonly owner: THREE.Object3D;
   readonly currentTarget: Script;

@@ -1,40 +1,65 @@
 import * as THREE from 'three';
 
+import {
+  type HoverEvent,
+  type LongSelectEvent,
+  type ObjectGrabEvent,
+  type ObjectTouchEvent,
+  type ObjectTouchStartEvent,
+  type SelectEndEvent,
+  type SelectEvent,
+  type SelectionEndReason,
+  type Script,
+} from '../core/Script.js';
 import {ReticleOptions} from '../core/Options.js';
 import type {Controller} from '../input/Controller.js';
 import {objectIsDescendantOf} from '../utils/SceneGraphUtils.js';
-import {DirectTouch} from './DirectTouch.js';
+import {DirectTouch, type DirectTouchContact} from './DirectTouch.js';
 import {GazeDwell} from './GazeDwell.js';
+import {HitRegistry} from './HitRegistry.js';
 import {HitResolver} from './HitResolver.js';
 import {
-  InteractionDependencies,
-  InteractionFrameInput,
-  InteractionManipulation,
-  InteractionSourceSnapshot,
-  RaySourceInput,
-  ResolvedRay,
-  SelectionCapture,
+  getInteractionSource,
+  type InteractionDependencies,
+  type InteractionFrameInput,
+  type InteractionHitPart,
+  type InteractionManipulation,
+  type InteractionSourceSnapshot,
+  type RaySourceInput,
+  type ResolvedRay,
+  type SelectionCapture,
 } from './InteractionTypes.js';
 import {dispatchInteractionPath, isSelectionValid} from './InteractionUtils.js';
 import {ReticlePresenter} from './ReticlePresenter.js';
 import {
-  isSemanticControl,
+  getSemanticControl,
   isSemanticControlDisabled,
+  type SemanticControlState,
 } from './SemanticControl.js';
+
+type AutomaticAction = 'select' | 'semantic' | 'manipulate' | 'none';
 
 interface TargetCapture {
   kind: 'target';
+  action: AutomaticAction;
   selection: SelectionCapture;
   ancestry: readonly THREE.Object3D[];
+  semantic?: SemanticControlState;
+  semanticControl?: THREE.Object3D;
+  exclusiveControl?: THREE.Object3D;
   longSelectDuration: number;
   longSelectFired: boolean;
-  automaticActionClaimed: boolean;
-  semanticControl?: THREE.Object3D;
+  lastStablePoint: THREE.Vector3;
+  touch: boolean;
 }
 
-interface RayFrameResult {
-  snapshots: InteractionSourceSnapshot[];
-  selectionEnds: Controller[];
+interface TouchState {
+  readonly selection: SelectionCapture;
+  readonly handIndex: number;
+  readonly hand?: THREE.Object3D;
+  point: THREE.Vector3;
+  prevented: boolean;
+  grabbing: boolean;
 }
 
 type ActiveCapture = {kind: 'none'} | {kind: 'auxiliary'} | TargetCapture;
@@ -46,19 +71,20 @@ const NO_MANIPULATION: InteractionManipulation = {
   tryClaimScale: () => false,
   tryStart: () => false,
   update: () => {},
-  end: () => {},
+  end: () => false,
   cancelSource: () => {},
 };
 
-/** Owns ray target resolution, hover state, and balanced Select capture. */
+/** Owns all logical target, hover, capture, completion, and cancellation state. */
 export class Interaction {
   private readonly callbacks;
   private readonly manipulation;
   private readonly reticle;
   private readonly reticleOptions;
+  private readonly registry = new HitRegistry();
   private readonly resolver;
   private readonly directTouch;
-  private readonly longSelectDuration;
+  private longSelectDuration;
   private readonly gazeDwell = new GazeDwell();
   private readonly snapshots = new Map<Controller, InteractionSourceSnapshot>();
   private readonly resolvedRays = new Map<Controller, ResolvedRay>();
@@ -67,6 +93,8 @@ export class Interaction {
     readonly THREE.Object3D[]
   >();
   private readonly captures = new Map<Controller, ActiveCapture>();
+  private readonly exclusiveControls = new Map<THREE.Object3D, Controller>();
+  private readonly touches = new Map<Controller, TouchState>();
   private readonly suppressedUntilRelease = new Set<Controller>();
   private frameSources = new Set<Controller>();
 
@@ -78,224 +106,137 @@ export class Interaction {
       dependencies.reticle ?? new ReticlePresenter(this.reticleOptions);
     this.longSelectDuration =
       dependencies.longSelectDuration ?? DEFAULT_LONG_SELECT_DURATION;
-    this.resolver = new HitResolver(this.callbacks, this.manipulation);
-    this.directTouch = new DirectTouch({
-      callbacks: this.callbacks,
-      manipulation: this.manipulation,
-      resolver: this.resolver,
-      suspendRay: (controller) => this.suspendRayForDirectTouch(controller),
-    });
+    this.resolver = new HitResolver(
+      this.callbacks,
+      this.manipulation,
+      this.registry
+    );
+    this.directTouch = new DirectTouch(this.registry, this.resolver);
   }
 
-  /** Replaces all physical interaction state for one engine frame. */
+  setLongSelectDuration(seconds: number): void {
+    if (!Number.isFinite(seconds) || seconds < 0) {
+      throw new Error(
+        'Options.interaction.longSelectDuration must be finite and nonnegative.'
+      );
+    }
+    this.longSelectDuration = seconds;
+  }
+
+  /** Replaces all sampled physical interaction state for one engine frame. */
   update(frame: InteractionFrameInput, deltaSeconds = 0): void {
     const nextSources = new Set<Controller>();
     for (const input of frame.raySources) nextSources.add(input.controller);
     for (const input of frame.directTouches) nextSources.add(input.controller);
     for (const controller of this.frameSources) {
-      if (!nextSources.has(controller)) this.removeSource(controller);
+      if (!nextSources.has(controller)) {
+        this.removeSource(controller, 'source-lost');
+      }
     }
     this.frameSources = nextSources;
 
-    const touchSnapshots = this.directTouch.update(frame.directTouches);
-    const rayFrame = this.updateRaySources(frame.raySources, deltaSeconds);
-    const snapshots = [...rayFrame.snapshots, ...touchSnapshots];
+    for (const [controller, capture] of this.captures) {
+      if (capture.kind === 'target' && !this.isCaptureValid(capture)) {
+        this.cancelCapture(controller, this.invalidReason(capture));
+      }
+    }
+
+    const touchContacts = this.directTouch.update(frame.directTouches);
+    for (const contact of touchContacts) this.updateTouch(contact);
+
+    const snapshots: InteractionSourceSnapshot[] = [];
+    const deliberate = this.hasDeliberateInput(frame);
+    for (const input of frame.raySources) {
+      const snapshot = this.updateRay(input, deltaSeconds, deliberate);
+      if (snapshot) snapshots.push(snapshot);
+    }
+    for (const contact of touchContacts) {
+      if (contact.phase !== 'end') snapshots.push(contact.snapshot);
+    }
+
     if (snapshots.length > 0) this.manipulation.update(snapshots);
-    for (const snapshot of rayFrame.snapshots) {
-      if (snapshot.selected && this.captures.has(snapshot.controller)) {
-        this.updateLongSelect(snapshot.controller, deltaSeconds);
-        this.callbacks.invokeGlobal('onSelecting', {
-          target: snapshot.controller,
-        });
-      }
-    }
-    for (const snapshot of touchSnapshots) {
-      this.callbacks.invokeGlobal('onSelecting', {
-        target: snapshot.controller,
-      });
-    }
-    for (const controller of rayFrame.selectionEnds) {
-      this.endSelection(controller);
-    }
-  }
-
-  /** Cancels all active input sources. */
-  clear(): void {
-    for (const controller of this.frameSources) this.removeSource(controller);
-    this.frameSources.clear();
-  }
-
-  private updateRaySources(
-    inputs: readonly RaySourceInput[],
-    deltaSeconds: number
-  ): RayFrameResult {
-    const frameSnapshots: InteractionSourceSnapshot[] = [];
-    const selectionEnds: Controller[] = [];
-    for (const input of inputs) {
-      if (this.directTouch.has(input.controller)) {
-        this.resolvedRays.delete(input.controller);
-        this.updateHoverPath(input.controller, []);
-        this.reticle.clear(input.controller);
-        continue;
-      }
-
-      const previousSelected =
-        this.snapshots.get(input.controller)?.selected ?? false;
-      let snapshot = this.createSnapshot(input);
-      this.snapshots.set(input.controller, snapshot);
-
-      if (!snapshot.selected) {
-        this.suppressedUntilRelease.delete(input.controller);
-      }
-
-      const capture = this.captures.get(input.controller);
-      if (capture?.kind === 'target' && !this.isCaptureValid(capture)) {
-        this.cancelCapture(input.controller);
-      }
-
-      if (this.suppressedUntilRelease.has(input.controller)) {
-        frameSnapshots.push(snapshot);
-        this.resolvedRays.delete(input.controller);
-        this.updateHoverPath(input.controller, []);
-        this.reticle.clear(input.controller);
-        continue;
-      }
-
-      const maxDistance = this.reticleOptions.maxDistance;
-      const intersections =
-        maxDistance === undefined
-          ? input.intersections
-          : input.intersections.filter(
-              (intersection) => intersection.distance < maxDistance
-            );
-      const resolved = this.resolver.resolve(intersections, input.sourceType);
-      let gazeCompleted = false;
-      if (input.sourceType === 'gaze') {
-        const dwell = this.gazeDwell.update(
-          input.controller,
-          resolved,
-          deltaSeconds
-        );
-        snapshot = Object.freeze({
-          ...snapshot,
-          selectionProgress: dwell.progress,
-        });
-        this.snapshots.set(input.controller, snapshot);
-        gazeCompleted = dwell.completed;
-      } else {
-        this.gazeDwell.remove(input.controller);
-      }
-      this.setResolvedRay(input.controller, snapshot, resolved);
-      if (gazeCompleted) {
-        this.beginSelection(input.controller);
-        selectionEnds.push(input.controller);
-      } else if (snapshot.selected !== previousSelected) {
-        if (snapshot.selected) this.beginSelection(input.controller);
-        else selectionEnds.push(input.controller);
-      }
-      frameSnapshots.push(snapshot);
-    }
-
-    return {snapshots: frameSnapshots, selectionEnds};
-  }
-
-  private beginSelection(controller: Controller): void {
-    if (this.directTouch.has(controller) || this.captures.has(controller))
-      return;
-    const snapshot = this.snapshots.get(controller);
-    if (!snapshot) return;
-    const selectedSnapshot = this.withSelected(snapshot, true);
-    this.snapshots.set(controller, selectedSnapshot);
-    const event = {target: controller};
-
-    if (this.manipulation.tryClaimScale(selectedSnapshot)) {
-      this.captures.set(controller, {kind: 'auxiliary'});
-      this.callbacks.invokeGlobal('onSelectStart', event);
-      return;
-    }
-
-    const resolved = this.resolvedRays.get(controller);
-    if (!resolved?.target) {
-      this.captures.set(controller, {kind: 'none'});
-      this.callbacks.invokeGlobal('onSelectStart', event);
-      return;
-    }
-
-    const selection: SelectionCapture = {
-      source: controller,
-      surface: resolved.surface,
-      owner: resolved.manipulation?.owner ?? resolved.target,
-      point: resolved.intersection.point.clone(),
-      scriptPath: Object.freeze([...resolved.scriptPath]),
-    };
-    const capture: TargetCapture = {
-      kind: 'target',
-      selection,
-      ancestry: Object.freeze([...resolved.objectPath]),
-      longSelectDuration: 0,
-      longSelectFired: false,
-      automaticActionClaimed: false,
-      semanticControl:
-        isSemanticControl(resolved.target) &&
-        !isSemanticControlDisabled(resolved.target)
-          ? resolved.target
-          : undefined,
-    };
-    this.captures.set(controller, capture);
-    dispatchInteractionPath(
-      this.callbacks,
-      selection.scriptPath,
-      'onObjectSelectStart',
-      event
-    );
-    if (resolved.manipulation) {
-      capture.automaticActionClaimed = this.manipulation.tryStart(
-        selection,
-        selectedSnapshot
-      );
-    }
-    this.callbacks.invokeGlobal('onSelectStart', event);
-  }
-
-  private endSelection(controller: Controller): void {
-    if (this.directTouch.has(controller)) return;
-    const capture = this.captures.get(controller);
-    if (!capture) return;
-    this.captures.delete(controller);
-    const snapshot = this.snapshots.get(controller);
-    if (snapshot)
-      this.snapshots.set(controller, this.withSelected(snapshot, false));
-    const event = {target: controller};
-
-    this.manipulation.end(controller);
-    if (capture.kind === 'target') {
-      dispatchInteractionPath(
-        this.callbacks,
-        capture.selection.scriptPath,
-        'onObjectSelectEnd',
-        event
-      );
-      const control = capture.semanticControl;
+    for (const [controller, capture] of [...this.captures]) {
       if (
-        control &&
-        this.resolvedRays.get(controller)?.target === control &&
-        !isSemanticControlDisabled(control)
+        (capture.kind === 'auxiliary' ||
+          (capture.kind === 'target' && capture.action === 'manipulate')) &&
+        this.manipulation.isSourceActive?.(controller) === false
       ) {
-        this.callbacks.invokeSemantic(control);
+        this.cancelCapture(controller, 'disabled');
       }
     }
-    this.callbacks.invokeGlobal('onSelect', event);
-    this.callbacks.invokeGlobal('onSelectEnd', event);
+    for (const snapshot of snapshots) {
+      const capture = this.captures.get(snapshot.controller);
+      if (!capture || capture.kind === 'none') continue;
+      if (capture.kind === 'target') {
+        this.updateLongSelect(capture, snapshot, deltaSeconds);
+        this.updateSemantic(capture, snapshot);
+      }
+      this.callbacks.invokeGlobal(
+        'onSelecting',
+        this.createSelectEvent(snapshot.controller, capture)
+      );
+    }
   }
 
-  /** Cancels a disconnected or disabled source and removes all stored state. */
-  removeSource(controller: Controller): void {
-    this.directTouch.remove(controller);
-    this.cancelCapture(controller);
-    this.updateHoverPath(controller, []);
+  clear(): void {
+    for (const controller of this.frameSources) {
+      this.removeSource(controller, 'source-lost');
+    }
+    this.directTouch.clear();
+    this.frameSources.clear();
+    this.exclusiveControls.clear();
+  }
+
+  registerHitSurface(
+    physical: THREE.Object3D,
+    logical: THREE.Object3D,
+    part?: InteractionHitPart
+  ): () => void {
+    return this.registry.register(physical, logical, part);
+  }
+
+  /** Refreshes bounded direct-touch candidates found by the lifecycle pass. */
+  syncTouchCandidates(candidates: Iterable<THREE.Object3D>): void {
+    this.registry.setWorldTouchCandidates(candidates);
+  }
+
+  /** Cancels captures that belong to an object before its Script is disposed. */
+  cancelObject(
+    object: THREE.Object3D,
+    reason: SelectionEndReason = 'removed'
+  ): void {
+    for (const [controller, capture] of this.captures) {
+      if (
+        capture.kind === 'target' &&
+        selectionBelongsTo(capture.selection, object)
+      ) {
+        this.cancelCapture(controller, reason);
+      }
+    }
+    for (const [controller, touch] of this.touches) {
+      if (!selectionBelongsTo(touch.selection, object)) continue;
+      const contact = this.directTouch.remove(controller);
+      if (contact) this.updateTouch(contact);
+    }
+    for (const [controller, resolved] of this.resolvedRays) {
+      if (objectIsDescendantOf(resolved.surface, object)) {
+        this.clearResolvedRay(controller);
+        this.reticle.clear(controller);
+      }
+    }
+  }
+
+  removeSource(
+    controller: Controller,
+    reason: SelectionEndReason = 'source-lost'
+  ): void {
+    this.cancelCapture(controller, reason);
+    const contact = this.directTouch.remove(controller);
+    if (contact) this.updateTouch(contact);
+    this.finishTouch(controller);
+    this.clearResolvedRay(controller);
     this.reticle.clear(controller);
     this.snapshots.delete(controller);
-    this.resolvedRays.delete(controller);
     this.hoverPaths.delete(controller);
     this.gazeDwell.remove(controller);
     this.suppressedUntilRelease.delete(controller);
@@ -329,28 +270,44 @@ export class Interaction {
         return true;
       }
     }
-    return this.directTouch.isSelectingAt(object);
+    return false;
+  }
+
+  isHovered(object: THREE.Object3D): boolean {
+    for (const resolved of this.resolvedRays.values()) {
+      if (objectIsDescendantOf(resolved.target ?? resolved.surface, object)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   getIntersectionAt(
     object: THREE.Object3D,
     controller?: Controller
   ): THREE.Intersection | null {
-    const resolvedRays = controller
+    const values = controller
       ? [this.resolvedRays.get(controller)]
-      : this.resolvedRays.values();
-    for (const resolved of resolvedRays) {
+      : this.sortedResolvedRays();
+    for (const resolved of values) {
       if (resolved && objectIsDescendantOf(resolved.surface, object)) {
-        return {
-          ...resolved.intersection,
-          point: resolved.intersection.point.clone(),
-          normal: resolved.intersection.normal?.clone(),
-          uv: resolved.intersection.uv?.clone(),
-          uv1: resolved.intersection.uv1?.clone(),
-        };
+        return clonePublicIntersection(resolved.intersection, resolved.surface);
       }
     }
     return null;
+  }
+
+  /** Internal presentation data for multi-source UI feedback. */
+  getIntersectionsAt(object: THREE.Object3D, limit = 2): THREE.Intersection[] {
+    const intersections: THREE.Intersection[] = [];
+    for (const resolved of this.sortedResolvedRays()) {
+      if (!objectIsDescendantOf(resolved.surface, object)) continue;
+      intersections.push(
+        clonePublicIntersection(resolved.intersection, resolved.surface)
+      );
+      if (intersections.length >= limit) break;
+    }
+    return intersections;
   }
 
   isManipulating(object: THREE.Object3D): boolean {
@@ -361,42 +318,539 @@ export class Interaction {
     const snapshot = this.snapshots.get(controller);
     const resolved = this.resolvedRays.get(controller);
     if (!snapshot || !resolved?.target) return false;
-    const intentSnapshot = {...snapshot, sourceType: 'simulator' as const};
+    const source = getInteractionSource(controller, 'simulator');
+    const intentSnapshot = {
+      ...snapshot,
+      source,
+      sourceType: 'simulator' as const,
+    };
     return (
       this.manipulation.applyScaleIntent?.(
-        {
-          source: controller,
-          surface: resolved.surface,
-          owner: resolved.manipulation?.owner ?? resolved.target,
-          point: resolved.intersection.point.clone(),
-          scriptPath: resolved.scriptPath,
-        },
+        this.createSelection(controller, resolved),
         intentSnapshot,
         factor
       ) ?? false
     );
   }
 
-  private createSnapshot(input: RaySourceInput): InteractionSourceSnapshot {
-    const position = input.position?.clone() ?? new THREE.Vector3();
-    const orientation = input.orientation?.clone() ?? new THREE.Quaternion();
-    if (!input.position) input.controller.getWorldPosition(position);
-    if (!input.orientation) input.controller.getWorldQuaternion(orientation);
-    return Object.freeze({
-      controller: input.controller,
-      sourceType: input.sourceType,
-      position,
-      orientation,
-      ray: input.ray.clone(),
-      selected: input.sourceType === 'gaze' ? false : input.selected,
+  private updateRay(
+    input: RaySourceInput,
+    deltaSeconds: number,
+    deliberate: boolean
+  ): InteractionSourceSnapshot | undefined {
+    if (this.directTouch.has(input.controller)) {
+      this.clearResolvedRay(input.controller);
+      this.reticle.clear(input.controller);
+      return undefined;
+    }
+
+    const previousSelected =
+      this.snapshots.get(input.controller)?.selected ?? false;
+    let snapshot = this.createSnapshot(input);
+    this.snapshots.set(input.controller, snapshot);
+    if (!snapshot.selected)
+      this.suppressedUntilRelease.delete(input.controller);
+
+    if (this.suppressedUntilRelease.has(input.controller)) {
+      this.clearResolvedRay(input.controller);
+      this.reticle.clear(input.controller);
+      return snapshot;
+    }
+
+    const resolved = this.resolver.resolve(
+      input.intersections,
+      input.sourceType
+    );
+    let gazeCompleted = false;
+    if (input.sourceType === 'gaze') {
+      const semantic = resolved?.semanticControl
+        ? getSemanticControl(resolved.semanticControl)
+        : undefined;
+      const gazeTarget =
+        semantic?.kind === 'button' &&
+        resolved?.semanticControl &&
+        !semantic.isDisabled()
+          ? resolved
+          : undefined;
+      const dwell = this.gazeDwell.update(
+        input.controller,
+        deliberate ? undefined : gazeTarget,
+        deltaSeconds
+      );
+      snapshot = Object.freeze({
+        ...snapshot,
+        selectionProgress: dwell.progress,
+      });
+      this.snapshots.set(input.controller, snapshot);
+      gazeCompleted = dwell.completed;
+    } else {
+      this.gazeDwell.remove(input.controller);
+    }
+
+    this.setResolvedRay(input.controller, snapshot, resolved);
+    if (gazeCompleted) {
+      this.beginSelection(input.controller, true);
+      this.endSelection(input.controller, 'released');
+    } else if (snapshot.selected !== previousSelected) {
+      if (snapshot.selected) this.beginSelection(input.controller);
+      else this.endSelection(input.controller, 'released');
+    }
+    return snapshot;
+  }
+
+  private beginSelection(controller: Controller, gaze = false): void {
+    if (this.directTouch.has(controller) || this.captures.has(controller))
+      return;
+    const snapshot = this.snapshots.get(controller);
+    if (!snapshot) return;
+    const selectedSnapshot = Object.freeze({...snapshot, selected: true});
+    this.snapshots.set(controller, selectedSnapshot);
+    const resolved = this.resolvedRays.get(controller);
+
+    if (this.manipulation.tryClaimScale(selectedSnapshot, resolved)) {
+      this.captures.set(controller, {kind: 'auxiliary'});
+      this.clearResolvedRay(controller);
+      this.reticle.clear(controller);
+      this.callbacks.invokeGlobal(
+        'onSelectStart',
+        this.createSelectEvent(controller, {kind: 'auxiliary'})
+      );
+      return;
+    }
+
+    if (!resolved?.target) {
+      this.captures.set(controller, {kind: 'none'});
+      this.callbacks.invokeGlobal(
+        'onSelectStart',
+        this.createSelectEvent(controller, {kind: 'none'})
+      );
+      return;
+    }
+    this.startTargetCapture(
+      controller,
+      selectedSnapshot,
+      resolved,
+      false,
+      gaze
+    );
+  }
+
+  private startTargetCapture(
+    controller: Controller,
+    snapshot: InteractionSourceSnapshot,
+    resolved: ResolvedRay,
+    touch: boolean,
+    gaze = false
+  ): TargetCapture {
+    const selection = this.createSelection(controller, resolved);
+    const semantic = resolved.semanticControl
+      ? getSemanticControl(resolved.semanticControl)
+      : undefined;
+    let action: AutomaticAction = 'select';
+    const wantsManipulation = !semantic && resolved.manipulation !== undefined;
+    if (semantic) {
+      action = semantic.isDisabled() ? 'none' : 'semantic';
+      if (
+        action === 'semantic' &&
+        semantic.kind === 'slider' &&
+        resolved.semanticControl &&
+        this.exclusiveControls.has(resolved.semanticControl)
+      ) {
+        action = 'none';
+      }
+    } else if (wantsManipulation) {
+      action = 'manipulate';
+    }
+    if (gaze && semantic?.kind !== 'button') action = 'none';
+
+    const capture: TargetCapture = {
+      kind: 'target',
+      action,
+      selection,
+      ancestry: Object.freeze([...resolved.objectPath]),
+      semantic,
+      semanticControl: resolved.semanticControl,
+      exclusiveControl:
+        action === 'semantic' && semantic?.kind === 'slider'
+          ? resolved.semanticControl
+          : undefined,
+      longSelectDuration: 0,
+      longSelectFired: false,
+      lastStablePoint: resolved.intersection.point.clone(),
+      touch,
+    };
+    this.captures.set(controller, capture);
+    if (capture.exclusiveControl) {
+      this.exclusiveControls.set(capture.exclusiveControl, controller);
+    }
+    const event = this.createSelectEvent(controller, capture);
+    dispatchInteractionPath(
+      this.callbacks,
+      selection.scriptPath,
+      'onObjectSelectStart',
+      event
+    );
+    if (
+      action === 'manipulate' &&
+      !this.manipulation.tryStart(selection, snapshot)
+    ) {
+      capture.action = 'none';
+    }
+    if (action === 'semantic') {
+      this.invokeSemantic(capture, () =>
+        semantic?.begin?.(semanticInput(snapshot, resolved))
+      );
+    }
+    this.callbacks.invokeGlobal('onSelectStart', event);
+    return capture;
+  }
+
+  private endSelection(
+    controller: Controller,
+    reason: SelectionEndReason,
+    releasedTarget?: THREE.Object3D
+  ): void {
+    const capture = this.captures.get(controller);
+    if (!capture) return;
+    this.captures.delete(controller);
+    this.releaseExclusiveControl(controller, capture);
+    const snapshot = this.snapshots.get(controller);
+    if (snapshot) {
+      this.snapshots.set(
+        controller,
+        Object.freeze({...snapshot, selected: false})
+      );
+    }
+
+    let completed = false;
+    let endReason = reason;
+    if (capture.kind === 'auxiliary') {
+      completed = this.manipulation.end(controller);
+    } else if (capture.kind === 'target') {
+      const released = this.resolvedRays.get(controller);
+      const sameTarget =
+        (releasedTarget ?? released?.target) === capture.selection.target;
+      if (capture.action === 'manipulate') {
+        completed = this.manipulation.end(controller);
+      } else if (capture.action === 'semantic') {
+        const slider = capture.semantic?.kind === 'slider';
+        completed =
+          !capture.longSelectFired &&
+          !isSemanticControlDisabled(capture.semanticControl!) &&
+          (slider || sameTarget);
+        if (completed) {
+          this.invokeSemantic(capture, () => {
+            if (slider) capture.semantic?.complete?.();
+            else capture.semantic?.activate();
+          });
+        } else {
+          this.invokeSemantic(capture, () => capture.semantic?.cancel?.());
+        }
+      } else {
+        completed =
+          capture.action === 'select' && !capture.longSelectFired && sameTarget;
+      }
+      endReason = completed
+        ? 'released'
+        : sameTarget
+          ? reason
+          : 'released-outside';
+      const endEvent: SelectEndEvent = {
+        ...this.createSelectEvent(controller, capture),
+        completed,
+        reason: endReason,
+      };
+      dispatchInteractionPath(
+        this.callbacks,
+        capture.selection.scriptPath,
+        'onObjectSelectEnd',
+        endEvent
+      );
+    }
+
+    const globalEvent = this.createSelectEvent(controller, capture);
+    if (completed) this.callbacks.invokeGlobal('onSelect', globalEvent);
+    this.callbacks.invokeGlobal('onSelectEnd', {
+      ...globalEvent,
+      completed,
+      reason: endReason,
     });
   }
 
-  private withSelected(
+  private cancelCapture(
+    controller: Controller,
+    reason: SelectionEndReason
+  ): void {
+    const capture = this.captures.get(controller);
+    if (!capture) return;
+    this.captures.delete(controller);
+    this.releaseExclusiveControl(controller, capture);
+    this.manipulation.cancelSource(controller);
+    const event: SelectEndEvent = {
+      ...this.createSelectEvent(controller, capture),
+      completed: false,
+      reason,
+    };
+    if (capture.kind === 'target') {
+      this.invokeSemantic(capture, () => capture.semantic?.cancel?.());
+      dispatchInteractionPath(
+        this.callbacks,
+        capture.selection.scriptPath,
+        'onObjectSelectEnd',
+        event
+      );
+    }
+    this.callbacks.invokeGlobal('onSelectEnd', event);
+    this.suppressedUntilRelease.add(controller);
+  }
+
+  private updateTouch(contact: DirectTouchContact): void {
+    if (contact.phase === 'start' && contact.resolved?.target) {
+      this.clearResolvedRay(contact.controller);
+      this.reticle.clear(contact.controller);
+      const selection = this.createSelection(
+        contact.controller,
+        contact.resolved
+      );
+      const touchState: TouchState = {
+        selection,
+        handIndex: contact.handIndex,
+        hand: contact.hand,
+        point: contact.point.clone(),
+        prevented: false,
+        grabbing: false,
+      };
+      this.touches.set(contact.controller, touchState);
+      const prevented = this.dispatchTouchStart(touchState, contact);
+      touchState.prevented = prevented;
+      if (!prevented) {
+        this.startTargetCapture(
+          contact.controller,
+          contact.snapshot,
+          contact.resolved,
+          true
+        );
+      }
+      this.updateGrab(touchState, contact);
+      return;
+    }
+
+    const touch = this.touches.get(contact.controller);
+    if (!touch) return;
+    touch.point.copy(contact.point);
+    if (contact.phase === 'move') {
+      this.dispatchTouch(touch, contact, 'onObjectTouching');
+      this.updateGrab(touch, contact);
+      return;
+    }
+
+    this.touches.delete(contact.controller);
+    this.finishGrab(touch, contact);
+    this.dispatchTouch(touch, contact, 'onObjectTouchEnd');
+    this.suppressedUntilRelease.add(contact.controller);
+    if (!touch.prevented) {
+      if (contact.endReason === 'released') {
+        this.endSelection(
+          contact.controller,
+          'released',
+          touch.selection.target
+        );
+      } else {
+        this.cancelCapture(
+          contact.controller,
+          contact.endReason === 'source-lost'
+            ? 'source-lost'
+            : 'released-outside'
+        );
+      }
+    }
+  }
+
+  private finishTouch(controller: Controller): void {
+    const touch = this.touches.get(controller);
+    if (!touch) return;
+    const snapshot = this.getSourceSnapshot(controller);
+    if (!snapshot) {
+      this.touches.delete(controller);
+      return;
+    }
+    const contact: DirectTouchContact = {
+      phase: 'end',
+      controller,
+      snapshot,
+      previous: undefined,
+      handIndex: touch.handIndex,
+      hand: touch.hand,
+      point: touch.point,
+      selected: false,
+    };
+    this.touches.delete(controller);
+    this.finishGrab(touch, contact);
+    this.dispatchTouch(touch, contact, 'onObjectTouchEnd');
+  }
+
+  private dispatchTouchStart(
+    touch: TouchState,
+    contact: DirectTouchContact
+  ): boolean {
+    const state = {prevented: false};
+    for (const script of touch.selection.scriptPath) {
+      const event: ObjectTouchStartEvent = {
+        ...this.createTouchEvent(touch, contact),
+        currentTarget: script,
+        get defaultPrevented() {
+          return state.prevented;
+        },
+        preventDefault() {
+          state.prevented = true;
+        },
+      };
+      if (
+        this.callbacks.invokeTarget(script, 'onObjectTouchStart', event) ===
+        true
+      ) {
+        break;
+      }
+    }
+    return state.prevented;
+  }
+
+  private dispatchTouch(
+    touch: TouchState,
+    contact: DirectTouchContact,
+    hook: 'onObjectTouching' | 'onObjectTouchEnd'
+  ): void {
+    dispatchInteractionPath(
+      this.callbacks,
+      touch.selection.scriptPath,
+      hook,
+      this.createTouchEvent(touch, contact)
+    );
+  }
+
+  private createTouchEvent(
+    touch: TouchState,
+    contact: DirectTouchContact
+  ): ObjectTouchEvent {
+    return {
+      source: contact.snapshot.source,
+      target: touch.selection.target,
+      surface: touch.selection.surface,
+      handIndex: touch.handIndex,
+      hand: touch.hand,
+      touchPosition: touch.point.clone(),
+    };
+  }
+
+  private updateGrab(touch: TouchState, contact: DirectTouchContact): void {
+    if (!contact.selected || !touch.hand) {
+      this.finishGrab(touch, contact);
+      return;
+    }
+    const event = this.createGrabEvent(touch, contact);
+    if (!touch.grabbing) {
+      touch.grabbing = true;
+      dispatchInteractionPath(
+        this.callbacks,
+        touch.selection.scriptPath,
+        'onObjectGrabStart',
+        event
+      );
+    } else {
+      dispatchInteractionPath(
+        this.callbacks,
+        touch.selection.scriptPath,
+        'onObjectGrabbing',
+        event
+      );
+    }
+  }
+
+  private finishGrab(touch: TouchState, contact: DirectTouchContact): void {
+    if (!touch.grabbing || !touch.hand) return;
+    touch.grabbing = false;
+    dispatchInteractionPath(
+      this.callbacks,
+      touch.selection.scriptPath,
+      'onObjectGrabEnd',
+      this.createGrabEvent(touch, contact)
+    );
+  }
+
+  private createGrabEvent(
+    touch: TouchState,
+    contact: DirectTouchContact
+  ): ObjectGrabEvent {
+    return {
+      ...this.createTouchEvent(touch, contact),
+      hand: touch.hand!,
+    };
+  }
+
+  private updateSemantic(
+    capture: TargetCapture,
+    snapshot: InteractionSourceSnapshot
+  ): void {
+    if (capture.action !== 'semantic' || capture.semantic?.kind !== 'slider') {
+      return;
+    }
+    const resolved = this.resolvedRays.get(snapshot.controller);
+    if (resolved) {
+      this.invokeSemantic(capture, () =>
+        capture.semantic?.update?.(semanticInput(snapshot, resolved))
+      );
+    }
+  }
+
+  private updateLongSelect(
+    capture: TargetCapture,
     snapshot: InteractionSourceSnapshot,
-    selected: boolean
-  ): InteractionSourceSnapshot {
-    return Object.freeze({...snapshot, selected});
+    deltaSeconds: number
+  ): void {
+    if (
+      capture.longSelectFired ||
+      capture.action === 'manipulate' ||
+      capture.semantic?.kind === 'slider' ||
+      snapshot.sourceType === 'gaze' ||
+      !capture.selection.scriptPath.some((script) =>
+        this.callbacks.hasTargetHook(script, 'onObjectLongSelect')
+      )
+    ) {
+      return;
+    }
+    const resolved = this.resolvedRays.get(snapshot.controller);
+    const point = capture.touch
+      ? this.touches.get(snapshot.controller)?.point
+      : resolved?.target === capture.selection.target
+        ? resolved.intersection.point
+        : undefined;
+    if (!point) {
+      capture.longSelectDuration = 0;
+      return;
+    }
+    const threshold = snapshot.sourceType === 'direct-touch' ? 0.015 : 0.03;
+    if (point && point.distanceTo(capture.lastStablePoint) > threshold) {
+      capture.longSelectDuration = 0;
+      capture.lastStablePoint.copy(point);
+      return;
+    }
+    if (Number.isFinite(deltaSeconds) && deltaSeconds > 0) {
+      capture.longSelectDuration += deltaSeconds;
+    }
+    if (capture.longSelectDuration < this.longSelectDuration) return;
+
+    capture.longSelectFired = true;
+    const event: LongSelectEvent = {
+      ...this.createSelectEvent(snapshot.controller, capture),
+      duration: capture.longSelectDuration,
+    };
+    dispatchInteractionPath(
+      this.callbacks,
+      capture.selection.scriptPath,
+      'onObjectLongSelect',
+      event
+    );
+    this.callbacks.invokeGlobal('onLongSelect', event);
   }
 
   private setResolvedRay(
@@ -404,16 +858,25 @@ export class Interaction {
     snapshot: InteractionSourceSnapshot,
     resolved: ResolvedRay | undefined
   ): void {
+    const previous = this.resolvedRays.get(controller);
     if (resolved) this.resolvedRays.set(controller, resolved);
     else this.resolvedRays.delete(controller);
-    this.updateHoverPath(controller, resolved?.scriptPath ?? []);
+    this.updateHoverPath(controller, resolved, previous);
     this.reticle.present(snapshot, resolved);
+  }
+
+  private clearResolvedRay(controller: Controller): void {
+    const previous = this.resolvedRays.get(controller);
+    this.resolvedRays.delete(controller);
+    this.updateHoverPath(controller, undefined, previous);
   }
 
   private updateHoverPath(
     controller: Controller,
-    nextPath: readonly THREE.Object3D[]
+    resolved: ResolvedRay | undefined,
+    previous?: ResolvedRay
   ): void {
+    const nextPath = resolved?.scriptPath ?? [];
     const oldPath = this.hoverPaths.get(controller) ?? [];
     let oldIndex = oldPath.length - 1;
     let nextIndex = nextPath.length - 1;
@@ -425,77 +888,179 @@ export class Interaction {
       oldIndex--;
       nextIndex--;
     }
-
+    const eventFor = (value: ResolvedRay | undefined): HoverEvent => ({
+      source:
+        this.getSourceSnapshot(controller)?.source ??
+        getInteractionSource(controller, 'controller-ray'),
+      target: value?.target,
+      surface: value?.surface,
+      intersection: value?.intersection
+        ? clonePublicIntersection(value.intersection, value.surface)
+        : undefined,
+    });
     dispatchInteractionPath(
       this.callbacks,
       oldPath.slice(0, oldIndex + 1),
       'onHoverExit',
-      controller
+      eventFor(previous)
     );
+    const event = eventFor(resolved);
     dispatchInteractionPath(
       this.callbacks,
       nextPath.slice(0, nextIndex + 1),
       'onHoverEnter',
-      controller
+      event
     );
-    dispatchInteractionPath(this.callbacks, nextPath, 'onHovering', controller);
-
+    dispatchInteractionPath(this.callbacks, nextPath, 'onHovering', event);
     if (nextPath.length > 0) this.hoverPaths.set(controller, nextPath);
     else this.hoverPaths.delete(controller);
   }
 
-  private isCaptureValid(
-    capture: Extract<ActiveCapture, {kind: 'target'}>
-  ): boolean {
-    return isSelectionValid(capture.selection, capture.ancestry);
+  private createSnapshot(input: RaySourceInput): InteractionSourceSnapshot {
+    const position = input.position?.clone() ?? new THREE.Vector3();
+    const orientation = input.orientation?.clone() ?? new THREE.Quaternion();
+    if (!input.position) input.controller.getWorldPosition(position);
+    if (!input.orientation) input.controller.getWorldQuaternion(orientation);
+    return Object.freeze({
+      source: getInteractionSource(input.controller, input.sourceType),
+      controller: input.controller,
+      sourceType: input.sourceType,
+      position,
+      orientation,
+      ray: input.ray.clone(),
+      selected: input.sourceType === 'gaze' ? false : input.selected,
+    });
   }
 
-  private updateLongSelect(controller: Controller, deltaSeconds: number): void {
-    const capture = this.captures.get(controller);
-    if (
-      capture?.kind !== 'target' ||
-      capture.longSelectFired ||
-      capture.automaticActionClaimed
-    ) {
-      return;
-    }
+  private createSelection(
+    controller: Controller,
+    resolved: ResolvedRay
+  ): SelectionCapture {
+    const target = resolved.target!;
+    return {
+      source: controller,
+      publicSource:
+        this.getSourceSnapshot(controller)?.source ??
+        getInteractionSource(controller, 'controller-ray'),
+      target,
+      surface: resolved.surface,
+      owner: resolved.manipulation?.owner ?? target,
+      point: resolved.intersection.point.clone(),
+      scriptPath: Object.freeze([...resolved.scriptPath]),
+      hitPart: resolved.hitPart,
+      manipulation: resolved.manipulation,
+    };
+  }
 
-    if (Number.isFinite(deltaSeconds) && deltaSeconds > 0) {
-      capture.longSelectDuration += deltaSeconds;
-    }
-    if (capture.longSelectDuration < this.longSelectDuration) return;
+  private createSelectEvent(
+    controller: Controller,
+    capture: ActiveCapture
+  ): SelectEvent {
+    const targetCapture = capture.kind === 'target' ? capture : undefined;
+    return {
+      source:
+        targetCapture?.selection.publicSource ??
+        this.getSourceSnapshot(controller)?.source ??
+        getInteractionSource(controller, 'controller-ray'),
+      target: targetCapture?.selection.target,
+      surface: targetCapture?.selection.surface,
+    };
+  }
 
-    capture.longSelectFired = true;
-    dispatchInteractionPath(
-      this.callbacks,
-      capture.selection.scriptPath,
-      'onObjectLongSelect',
-      {target: controller, duration: capture.longSelectDuration}
+  private isCaptureValid(capture: TargetCapture): boolean {
+    return (
+      isSelectionValid(capture.selection, capture.ancestry) &&
+      (!capture.semanticControl ||
+        !isSemanticControlDisabled(capture.semanticControl))
     );
   }
 
-  private suspendRayForDirectTouch(controller: Controller): void {
-    if (this.captures.has(controller)) this.cancelCapture(controller);
-    this.suppressedUntilRelease.delete(controller);
-    this.resolvedRays.delete(controller);
-    this.updateHoverPath(controller, []);
-    this.reticle.clear(controller);
+  private invalidReason(capture: TargetCapture): SelectionEndReason {
+    if (
+      capture.semanticControl &&
+      isSemanticControlDisabled(capture.semanticControl)
+    ) {
+      return 'disabled';
+    }
+    if (!capture.selection.target.visible) return 'hidden';
+    return 'removed';
   }
 
-  private cancelCapture(controller: Controller): void {
-    const capture = this.captures.get(controller);
-    if (!capture) return;
-    this.captures.delete(controller);
-    this.manipulation.cancelSource(controller);
-    if (capture.kind === 'target') {
-      dispatchInteractionPath(
-        this.callbacks,
-        capture.selection.scriptPath,
-        'onObjectSelectEnd',
-        {target: controller}
-      );
-    }
-    this.callbacks.invokeGlobal('onSelectEnd', {target: controller});
-    this.suppressedUntilRelease.add(controller);
+  private hasDeliberateInput(frame: InteractionFrameInput): boolean {
+    return (
+      frame.raySources.some(
+        (input) => input.sourceType !== 'gaze' && input.selected
+      ) ||
+      frame.directTouches.length > 0 ||
+      [...this.captures.values()].some(
+        (capture) =>
+          capture.kind === 'auxiliary' ||
+          (capture.kind === 'target' && capture.action === 'manipulate')
+      )
+    );
   }
+
+  private sortedResolvedRays(): ResolvedRay[] {
+    return [...this.resolvedRays.entries()]
+      .sort(([a], [b]) => controllerIndex(a) - controllerIndex(b))
+      .map(([, resolved]) => resolved);
+  }
+
+  private releaseExclusiveControl(
+    controller: Controller,
+    capture: ActiveCapture
+  ): void {
+    if (
+      capture.kind === 'target' &&
+      capture.exclusiveControl &&
+      this.exclusiveControls.get(capture.exclusiveControl) === controller
+    ) {
+      this.exclusiveControls.delete(capture.exclusiveControl);
+    }
+  }
+
+  private invokeSemantic(capture: TargetCapture, callback: () => void): void {
+    if (!capture.semanticControl) return;
+    this.callbacks.invokeSemantic(capture.semanticControl, callback);
+  }
+}
+
+function semanticInput(
+  snapshot: InteractionSourceSnapshot,
+  resolved: ResolvedRay
+) {
+  return {
+    source: snapshot.source,
+    point: resolved.intersection.point.clone(),
+    uv: resolved.intersection.uv?.clone(),
+  };
+}
+
+function clonePublicIntersection(
+  intersection: THREE.Intersection,
+  surface: THREE.Object3D
+): THREE.Intersection {
+  return {
+    ...intersection,
+    object: surface,
+    point: intersection.point.clone(),
+    normal: intersection.normal?.clone(),
+    uv: intersection.uv?.clone(),
+    uv1: intersection.uv1?.clone(),
+  };
+}
+
+function controllerIndex(controller: Controller): number {
+  const value = controller.userData.id;
+  return typeof value === 'number' ? value : Number.MAX_SAFE_INTEGER;
+}
+
+function selectionBelongsTo(
+  selection: SelectionCapture,
+  object: THREE.Object3D
+): boolean {
+  return (
+    objectIsDescendantOf(selection.target, object) ||
+    selection.scriptPath.includes(object as Script)
+  );
 }

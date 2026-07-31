@@ -41,6 +41,9 @@ export interface SemanticNode {
   disabled?: boolean;
   selected?: boolean;
   hovered?: boolean;
+  value?: number;
+  min?: number;
+  max?: number;
   bounds?: SemanticBounds;
   view?: SemanticViewData;
 }

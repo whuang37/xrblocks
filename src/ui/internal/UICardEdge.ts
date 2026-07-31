@@ -6,10 +6,7 @@ import {
 import {effect} from '@preact/signals-core';
 import * as THREE from 'three';
 
-import {ScriptMixin} from '../../core/Script';
-import {ManipulationAction} from '../../interaction/manipulation/ManipulationTypes';
-import {User} from '../../core/User';
-import {UIManipulationHandleFragmentShader} from '../shaders/UIManipulationHandle.frag';
+import {UICardEdgeFragmentShader} from '../shaders/UICardEdge.frag';
 import {parseColorWithAlpha} from '../utils/ColorUtils';
 import {
   PanelLayer,
@@ -19,7 +16,7 @@ import {
   type WritableSignalProperties,
 } from '../primitives/layers/PanelLayer';
 
-const DEFAULT_HANDLE_PROPERTIES = {
+const DEFAULT_EDGE_PROPERTIES = {
   margin: 50,
   cornerRadius: 40,
   edgeWidth: 2,
@@ -29,8 +26,8 @@ const DEFAULT_HANDLE_PROPERTIES = {
   debug: false,
 } as const;
 
-/** Visual and hit-area settings for a card manipulation edge. */
-export interface UIManipulationHandleProperties {
+/** Private visual and hit-area settings for a card manipulation edge. */
+export interface UICardEdgeProperties {
   /** Width of the manipulation band extending outward from the card edge. */
   margin?: number;
   /** Outer edge corner radius in layout pixels. */
@@ -48,9 +45,9 @@ export interface UIManipulationHandleProperties {
 }
 
 type HandleLayerProperties = PanelLayerProperties & {
-  u_manipulation_margin?: number;
-  u_manipulation_corner_radius?: number;
-  u_manipulation_edge_width?: number;
+  u_edge_margin?: number;
+  u_edge_corner_radius?: number;
+  u_edge_width?: number;
   u_cursor_spotlight_color?: THREE.ColorRepresentation;
   u_cursor_radius?: number;
   u_cursor_spotlight_blur?: number;
@@ -61,7 +58,7 @@ type HandleLayerProperties = PanelLayerProperties & {
   u_debug?: number;
 };
 
-class UIManipulationHandleLayer extends PanelLayer<HandleLayerProperties> {
+class UICardEdgeLayer extends PanelLayer<HandleLayerProperties> {
   constructor(
     inputProperties?: InProperties<HandleLayerProperties>,
     initialClasses?: Array<InProperties<HandleLayerProperties> | string>,
@@ -73,7 +70,7 @@ class UIManipulationHandleLayer extends PanelLayer<HandleLayerProperties> {
   ) {
     super(
       new PanelShaderMaterial({
-        fragmentShader: UIManipulationHandleFragmentShader,
+        fragmentShader: UICardEdgeFragmentShader,
         depthWrite: false,
         uniforms: createUniforms(),
       }),
@@ -88,21 +85,13 @@ class UIManipulationHandleLayer extends PanelLayer<HandleLayerProperties> {
           signal: SignalProperties<HandleLayerProperties>;
         }
       ).signal;
+      setNumber(this.material, 'u_edge_margin', signals.u_edge_margin?.value);
       setNumber(
         this.material,
-        'u_manipulation_margin',
-        signals.u_manipulation_margin?.value
+        'u_edge_corner_radius',
+        signals.u_edge_corner_radius?.value
       );
-      setNumber(
-        this.material,
-        'u_manipulation_corner_radius',
-        signals.u_manipulation_corner_radius?.value
-      );
-      setNumber(
-        this.material,
-        'u_manipulation_edge_width',
-        signals.u_manipulation_edge_width?.value
-      );
+      setNumber(this.material, 'u_edge_width', signals.u_edge_width?.value);
       setColor(
         this.material,
         'u_cursor_spotlight_color',
@@ -139,20 +128,14 @@ class UIManipulationHandleLayer extends PanelLayer<HandleLayerProperties> {
   }
 }
 
-const ManipulationHandleScript = ScriptMixin(UIManipulationHandleLayer);
-
-/** Shader-backed edge that requests translation from its manipulation owner. */
-export class UIManipulationHandle extends ManipulationHandleScript {
-  static dependencies = {user: User};
-
-  name = 'UIManipulationHandle';
+/** Private shader-backed card edge. */
+export class UICardEdge extends UICardEdgeLayer {
+  name = 'UICardEdge';
   readonly margin: number;
   readonly cornerRadius: number;
-  private user?: User;
-  private readonly cursorSlots = new Map<THREE.Object3D, 0 | 1>();
 
-  constructor(properties: UIManipulationHandleProperties = {}) {
-    const resolved = {...DEFAULT_HANDLE_PROPERTIES, ...properties};
+  constructor(properties: UICardEdgeProperties = {}) {
+    const resolved = {...DEFAULT_EDGE_PROPERTIES, ...properties};
     const margin = Math.max(0, resolved.margin);
     const cornerRadius = Math.max(0, resolved.cornerRadius);
     super({
@@ -165,9 +148,9 @@ export class UIManipulationHandle extends ManipulationHandleScript {
       height: 'auto',
       pointerEvents: 'auto',
       zIndexOffset: -20,
-      u_manipulation_margin: margin,
-      u_manipulation_corner_radius: cornerRadius,
-      u_manipulation_edge_width: resolved.edgeWidth,
+      u_edge_margin: margin,
+      u_edge_corner_radius: cornerRadius,
+      u_edge_width: resolved.edgeWidth,
       u_cursor_spotlight_color: resolved.spotlightColor,
       u_cursor_radius: resolved.spotlightRadius,
       u_cursor_spotlight_blur: resolved.spotlightBlur,
@@ -179,10 +162,6 @@ export class UIManipulationHandle extends ManipulationHandleScript {
     });
     this.margin = margin;
     this.cornerRadius = cornerRadius;
-    this.xb = {
-      manipulationHandle: {action: ManipulationAction.Translate},
-    };
-    this.reticleMode = 'surface';
 
     const baseRaycast = this.raycast.bind(this);
     this.raycast = (raycaster, intersections) => {
@@ -206,59 +185,17 @@ export class UIManipulationHandle extends ManipulationHandleScript {
     };
   }
 
-  init({user}: {user: User}): void {
-    this.user = user;
-  }
-
-  onHoverEnter(controller: THREE.Object3D): true {
-    this.assignCursorSlot(controller);
-    this.updateCursor(controller);
-    return true;
-  }
-
-  onHovering(controller: THREE.Object3D): true {
-    this.updateCursor(controller);
-    return true;
-  }
-
-  onHoverExit(controller: THREE.Object3D): true {
-    const slot = this.cursorSlots.get(controller);
-    if (slot !== undefined) this.setCursor(undefined, slot);
-    this.cursorSlots.delete(controller);
-    return true;
-  }
-
-  override dispose(): void {
-    this.cursorSlots.clear();
-    UIManipulationHandleLayer.prototype.dispose.call(this);
-  }
-
-  private assignCursorSlot(controller: THREE.Object3D): 0 | 1 | undefined {
-    const existing = this.cursorSlots.get(controller);
-    if (existing !== undefined) return existing;
-    const used = new Set(this.cursorSlots.values());
-    const slot = !used.has(0) ? 0 : !used.has(1) ? 1 : undefined;
-    if (slot !== undefined) this.cursorSlots.set(controller, slot);
-    return slot;
-  }
-
-  private updateCursor(controller: THREE.Object3D): void {
-    const slot = this.assignCursorSlot(controller);
-    if (slot === undefined) return;
-    const id = controller.userData.id;
-    const intersection = this.user?.getIntersectionAt(
-      this,
-      typeof id === 'number' ? id : -1
-    );
-    this.setCursor(intersection?.uv?.clone(), slot);
+  setCursors(first?: THREE.Vector2, second?: THREE.Vector2): void {
+    this.setCursor(first, 0);
+    this.setCursor(second, 1);
   }
 }
 
 function createUniforms(): Record<string, THREE.IUniform> {
   return {
-    u_manipulation_margin: {value: 0},
-    u_manipulation_corner_radius: {value: 0},
-    u_manipulation_edge_width: {value: 0},
+    u_edge_margin: {value: 0},
+    u_edge_corner_radius: {value: 0},
+    u_edge_width: {value: 0},
     u_cursor_spotlight_color: {value: new THREE.Vector4(1, 1, 1, 1)},
     u_cursor_radius: {value: 0},
     u_cursor_spotlight_blur: {value: 0},

@@ -42,7 +42,7 @@ describe('Input head gestures', () => {
 });
 
 describe('Input direct touch', () => {
-  it('reports contact, selection, and the wrist through one frame input', () => {
+  it('reports the contact point, selection, and wrist without scanning the scene', () => {
     const input = new Input();
     const controller = new THREE.Object3D() as Controller;
     controller.userData.selected = true;
@@ -56,9 +56,7 @@ describe('Input direct touch', () => {
     ];
     input.controllersEnabled = false;
 
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
     input.scene = new THREE.Scene();
-    input.scene.add(mesh);
     input.scene.updateMatrixWorld(true);
 
     input.update();
@@ -72,7 +70,8 @@ describe('Input direct touch', () => {
       hand: wrist,
       selected: true,
     });
-    expect(frame.directTouches[0].intersections[0].object).toBe(mesh);
+    expect(frame.directTouches[0].point.toArray()).toEqual([0, 0, 0]);
+    expect(frame.directTouches[0]).not.toHaveProperty('intersections');
   });
 });
 

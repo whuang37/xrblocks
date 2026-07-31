@@ -1,0 +1,509 @@
+import {
+  Container,
+  Image,
+  Svg,
+  Text,
+  reversePainterSortStable,
+} from '@pmndrs/uikit';
+import * as THREE from 'three';
+
+import {UI_OVERLAY_LAYER} from '../../constants';
+import {UIButton} from '../components/UIButton';
+import {UICard, getUICardEdgeOptions} from '../components/UICard';
+import {UIIcon} from '../components/UIIcon';
+import {UIImage} from '../components/UIImage';
+import {UISlider} from '../components/UISlider';
+import {UIText} from '../components/UIText';
+import {
+  getUIElementKind,
+  invalidateUIElement,
+  isUIElement,
+  type UIElement,
+  type UIStyle,
+} from '../UIElement';
+import type {UITheme} from '../UITheme';
+import {GradientPanel} from '../primitives/GradientPanel';
+import {UICardEdge} from './UICardEdge';
+import type {
+  UIBackend,
+  UIHitMapping,
+  UIMount,
+  UIPresentationState,
+} from './UIBackend';
+
+const ICON_BASE =
+  'https://cdn.jsdelivr.net/gh/marella/material-symbols@v0.33.0/svg/400/outlined/';
+
+class UIKitMount implements UIMount {
+  object: THREE.Object3D = new THREE.Group();
+  private rendered?: Container;
+
+  constructor(
+    private readonly root: UIElement,
+    private readonly icons: IconCache,
+    private readonly images: ImageCache
+  ) {
+    this.object.name = `Private ${root.name}`;
+  }
+
+  sync(
+    theme: UITheme,
+    viewport: {width: number; height: number},
+    stateFor: (element: UIElement) => UIPresentationState,
+    rootOrder: number
+  ): UIHitMapping[] {
+    this.rendered?.removeFromParent();
+    this.rendered?.dispose();
+    const mappings: UIHitMapping[] = [];
+    this.rendered = createNode(
+      this.root,
+      theme,
+      mappings,
+      viewport,
+      stateFor,
+      Number(this.root.style.zIndex ?? 0) * 1_000_000_000 +
+        rootOrder * 1_000_000,
+      {value: 0},
+      this.icons,
+      this.images
+    ) as Container;
+    this.object.add(this.rendered);
+    return mappings;
+  }
+
+  dispose(): void {
+    this.rendered?.dispose();
+    this.rendered = undefined;
+    this.object.clear();
+  }
+}
+
+class UIKitBackend implements UIBackend {
+  private readonly icons = new IconCache();
+  private readonly images = new ImageCache();
+
+  configureRenderer(renderer: THREE.WebGLRenderer): void {
+    renderer.localClippingEnabled = true;
+    renderer.setTransparentSort(reversePainterSortStable);
+  }
+
+  createMount(root: UIElement): UIMount {
+    return new UIKitMount(root, this.icons, this.images);
+  }
+
+  dispose(): void {
+    this.icons.dispose();
+    this.images.dispose();
+  }
+}
+
+export function createUIBackend(): UIBackend {
+  return new UIKitBackend();
+}
+
+function createNode(
+  element: UIElement,
+  theme: UITheme,
+  mappings: UIHitMapping[],
+  viewport: {width: number; height: number},
+  stateFor: (element: UIElement) => UIPresentationState,
+  rootStack: number,
+  sequence: {value: number},
+  icons: IconCache,
+  images: ImageCache
+): THREE.Object3D {
+  const kind = getUIElementKind(element);
+  const presentation = stateFor(element);
+  const style = toUIKitStyle(resolveStyle(element, presentation));
+  let node: THREE.Object3D;
+  let blocksHits = true;
+
+  if (kind === 'text') {
+    const text = element as UIText;
+    node = new Text({
+      text: text.text,
+      color:
+        (style.color as THREE.ColorRepresentation | undefined) ??
+        theme.colors.text,
+      ...style,
+      pointerEvents: element.pointerEvents,
+    });
+  } else if (kind === 'image') {
+    const image = element as UIImage;
+    node = new Image({
+      src:
+        typeof image.src === 'string'
+          ? images.get(image.src, () => invalidateUIElement(image))
+          : image.src,
+      ...style,
+      pointerEvents: element.pointerEvents,
+    });
+  } else if (kind === 'icon') {
+    const icon = (element as UIIcon).icon || 'question_mark';
+    node = new Svg({
+      content: icons.get(icon, () => invalidateUIElement(element)),
+      ...style,
+      pointerEvents: element.pointerEvents,
+    });
+  } else {
+    const panelStyle = panelDefaults(element, theme, style, viewport);
+    blocksHits =
+      kind === 'button' ||
+      kind === 'slider' ||
+      !isTransparent(panelStyle.fillColor);
+    const panel = new GradientPanel(panelStyle);
+    node = panel;
+
+    if (kind === 'button') {
+      addButtonContent(
+        panel,
+        element as UIButton,
+        theme,
+        icons,
+        style.color as THREE.ColorRepresentation | undefined
+      );
+    } else if (kind === 'slider') {
+      addSliderContent(panel, element as UISlider, theme);
+    }
+
+    for (const child of element.children) {
+      if (!isUIElement(child)) continue;
+      panel.add(
+        createNode(
+          child,
+          theme,
+          mappings,
+          viewport,
+          stateFor,
+          rootStack,
+          sequence,
+          icons,
+          images
+        )
+      );
+    }
+
+    if (kind === 'card' && getUICardEdgeOptions(element as UICard)) {
+      const edge = new UICardEdge();
+      edge.setCursors(presentation.cursorUVs[0], presentation.cursorUVs[1]);
+      panel.add(edge);
+      mappings.push({
+        physical: edge,
+        logical: element,
+        part: {kind: 'card-edge'},
+      });
+    }
+  }
+
+  node.visible = element.visible;
+  node.renderOrder =
+    rootStack + Number(element.style.zIndex ?? 0) * 1_000 + sequence.value++;
+  if (kind === 'overlay') {
+    node.traverse((object) => object.layers.set(UI_OVERLAY_LAYER));
+  }
+  if (blocksHits) {
+    mappings.push({
+      physical: node,
+      logical: element,
+      part: kind === 'card' ? {kind: 'card-surface'} : {kind: 'content'},
+    });
+  }
+  return node;
+}
+
+function resolveStyle(element: UIElement, state: UIPresentationState): UIStyle {
+  const style = element.style;
+  return {
+    ...style,
+    ...(state.hovered ? style[':hover'] : undefined),
+    ...(state.active ? style[':active'] : undefined),
+    ...(state.disabled ? style[':disabled'] : undefined),
+  };
+}
+
+function isTransparent(color: unknown): boolean {
+  if (color === undefined || color === 'transparent') return true;
+  if (typeof color !== 'string') return false;
+  const compact = color.replace(/\s/g, '').toLowerCase();
+  return (
+    /^#[0-9a-f]{3}0$/u.test(compact) ||
+    /^#[0-9a-f]{6}00$/u.test(compact) ||
+    /^(?:rgba|hsla)\([^)]*,0(?:\.0+)?\)$/u.test(compact)
+  );
+}
+
+function panelDefaults(
+  element: UIElement,
+  theme: UITheme,
+  style: Record<string, unknown>,
+  viewport: {width: number; height: number}
+): NonNullable<ConstructorParameters<typeof GradientPanel>[0]> {
+  const kind = getUIElementKind(element);
+  const defaults: Record<string, unknown> = {
+    fillColor:
+      kind === 'button'
+        ? (element as UIButton).disabled
+          ? theme.colors.disabledSurface
+          : theme.colors.primary
+        : kind === 'card'
+          ? theme.colors.surface
+          : kind === 'slider'
+            ? 'rgba(255, 255, 255, 0)'
+            : 'rgba(0, 0, 0, 0)',
+    cornerRadius: theme.borderRadius,
+    pointerEvents: element.pointerEvents,
+    ...style,
+  };
+  if (kind === 'card') {
+    const card = element as UICard;
+    defaults.pixelSize = 0.001;
+    defaults.sizeX = card.size.width;
+    defaults.sizeY = card.size.height;
+    defaults.width = card.size.width * 1000;
+    defaults.height = card.size.height * 1000;
+  } else if (kind === 'overlay') {
+    defaults.pixelSize = 1;
+    defaults.sizeX = viewport.width;
+    defaults.sizeY = viewport.height;
+    defaults.width = viewport.width;
+    defaults.height = viewport.height;
+    defaults.depthTest = false;
+  }
+  return defaults;
+}
+
+function addButtonContent(
+  panel: GradientPanel,
+  button: UIButton,
+  theme: UITheme,
+  icons: IconCache,
+  color?: THREE.ColorRepresentation
+): void {
+  const contentColor =
+    color ??
+    (button.disabled ? theme.colors.disabledText : theme.colors.primaryText);
+  if (button.icon) {
+    panel.add(
+      new Svg({
+        content: icons.get(button.icon, () => invalidateUIElement(button)),
+        width: 24,
+        height: 24,
+        color: contentColor,
+        pointerEvents: 'none',
+      })
+    );
+  }
+  if (button.label) {
+    panel.add(
+      new Text({
+        text: button.label,
+        color: contentColor,
+        pointerEvents: 'none',
+      })
+    );
+  }
+}
+
+const FALLBACK_ICON = `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <path fill="#ffffff" d="M11 18h2v2h-2zm1-16a7 7 0 0 0-7 7h2a5 5 0 1 1 8.6 3.5C13.7 14.2 11 15.2 11 18h2c0-1.5 1.4-2.2 3.1-3.7A7 7 0 0 0 12 2z"/>
+</svg>`;
+
+/** Backend-owned network cache with an immediate deterministic fallback. */
+class IconCache {
+  private readonly content = new Map<string, string>();
+  private readonly pending = new Map<string, AbortController>();
+
+  get(name: string, onChanged: () => void): string {
+    const cached = this.content.get(name);
+    if (cached) return cached;
+    if (!this.pending.has(name)) {
+      const controller = new AbortController();
+      this.pending.set(name, controller);
+      void fetch(`${ICON_BASE}${encodeURIComponent(name)}.svg`, {
+        signal: controller.signal,
+      })
+        .then((response) => {
+          if (!response.ok)
+            throw new Error(`Icon request failed: ${response.status}`);
+          return response.text();
+        })
+        .then((content) => {
+          if (!content.includes('<svg')) throw new Error('Invalid icon SVG.');
+          this.content.set(name, content);
+          onChanged();
+        })
+        .catch(() => {
+          this.content.set(name, FALLBACK_ICON);
+        })
+        .finally(() => this.pending.delete(name));
+    }
+    return FALLBACK_ICON;
+  }
+
+  dispose(): void {
+    for (const controller of this.pending.values()) controller.abort();
+    this.pending.clear();
+    this.content.clear();
+  }
+}
+
+/** Backend-owned URL texture cache with a deterministic checker fallback. */
+class ImageCache {
+  private readonly fallback: THREE.DataTexture;
+  private readonly textures = new Map<string, THREE.Texture>();
+  private readonly pending = new Set<string>();
+  private disposed = false;
+
+  constructor() {
+    this.fallback = new THREE.DataTexture(
+      new Uint8Array([
+        90, 90, 90, 255, 180, 180, 180, 255, 180, 180, 180, 255, 90, 90, 90,
+        255,
+      ]),
+      2,
+      2
+    );
+    this.fallback.colorSpace = THREE.SRGBColorSpace;
+    this.fallback.needsUpdate = true;
+  }
+
+  get(url: string, onChanged: () => void): THREE.Texture {
+    const cached = this.textures.get(url);
+    if (cached) return cached;
+    if (!this.pending.has(url)) {
+      this.pending.add(url);
+      new THREE.TextureLoader().load(
+        url,
+        (texture) => {
+          this.pending.delete(url);
+          if (this.disposed) {
+            texture.dispose();
+            return;
+          }
+          texture.colorSpace = THREE.SRGBColorSpace;
+          this.textures.set(url, texture);
+          onChanged();
+        },
+        undefined,
+        () => {
+          this.pending.delete(url);
+          if (!this.disposed) this.textures.set(url, this.fallback);
+        }
+      );
+    }
+    return this.fallback;
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    for (const texture of new Set(this.textures.values())) {
+      if (texture !== this.fallback) texture.dispose();
+    }
+    this.textures.clear();
+    this.pending.clear();
+    this.fallback.dispose();
+  }
+}
+
+function addSliderContent(
+  panel: GradientPanel,
+  slider: UISlider,
+  theme: UITheme
+): void {
+  const ratio =
+    slider.max === slider.min
+      ? 0
+      : (slider.value - slider.min) / (slider.max - slider.min);
+  panel.add(
+    new GradientPanel({
+      positionType: 'absolute',
+      positionLeft: 0,
+      positionRight: 0,
+      positionTop: '50%',
+      height: 10,
+      fillColor: theme.colors.outline,
+      cornerRadius: 5,
+      pointerEvents: 'none',
+    }),
+    new GradientPanel({
+      positionType: 'absolute',
+      positionLeft: 0,
+      positionTop: '50%',
+      width: `${ratio * 100}%`,
+      height: 10,
+      fillColor: slider.disabled
+        ? theme.colors.disabledText
+        : theme.colors.primary,
+      cornerRadius: 5,
+      pointerEvents: 'none',
+    }),
+    new GradientPanel({
+      positionType: 'absolute',
+      positionLeft: `${ratio * 100}%`,
+      positionTop: '50%',
+      width: 28,
+      height: 28,
+      fillColor: slider.disabled
+        ? theme.colors.disabledText
+        : theme.colors.primary,
+      cornerRadius: 14,
+      pointerEvents: 'none',
+    })
+  );
+}
+
+function toUIKitStyle(style: UIStyle): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  if (style.padding !== undefined) {
+    result.paddingTop = style.padding;
+    result.paddingRight = style.padding;
+    result.paddingBottom = style.padding;
+    result.paddingLeft = style.padding;
+  }
+  if (style.margin !== undefined) {
+    result.marginTop = style.margin;
+    result.marginRight = style.margin;
+    result.marginBottom = style.margin;
+    result.marginLeft = style.margin;
+  }
+  if (style.gap !== undefined) {
+    result.gapRow = style.gap;
+    result.gapColumn = style.gap;
+  }
+  for (const [key, value] of Object.entries(style)) {
+    if (
+      key.startsWith(':') ||
+      value === undefined ||
+      key === 'padding' ||
+      key === 'margin' ||
+      key === 'gap'
+    ) {
+      continue;
+    }
+    const mapped =
+      key === 'backgroundColor'
+        ? 'fillColor'
+        : key === 'borderColor'
+          ? 'strokeColor'
+          : key === 'borderWidth'
+            ? 'strokeWidth'
+            : key === 'borderRadius'
+              ? 'cornerRadius'
+              : key === 'top'
+                ? 'positionTop'
+                : key === 'right'
+                  ? 'positionRight'
+                  : key === 'bottom'
+                    ? 'positionBottom'
+                    : key === 'left'
+                      ? 'positionLeft'
+                      : key === 'rowGap'
+                        ? 'gapRow'
+                        : key === 'columnGap'
+                          ? 'gapColumn'
+                          : key;
+    result[mapped] = value;
+  }
+  return result;
+}

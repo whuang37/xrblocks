@@ -45,8 +45,7 @@ export class InputOptions {
 export class ReticleOptions {
   enabled = true;
   /**
-   * Maximum reticle interaction distance in meters. Hits at or beyond this
-   * distance cannot hover or select. Undefined means unlimited.
+   * Maximum reticle drawing distance in meters. It does not limit targeting.
    */
   maxDistance?: number;
   /**
@@ -54,6 +53,11 @@ export class ReticleOptions {
    * found. Set to 0 to hide the reticle on a miss.
    */
   defaultRenderDistance = 0;
+}
+
+export class InteractionOptions {
+  /** Seconds a stable object selection must be held before long-select. */
+  longSelectDuration = 0.75;
 }
 
 /**
@@ -130,6 +134,7 @@ export class Options {
   headGestures = new HeadGestureRecognitionOptions();
   strokes = new StrokeRecognitionOptions();
   reticles = new ReticleOptions();
+  interaction = new InteractionOptions();
   sound = new SoundOptions();
   ai = new AIOptions();
   simulator = new SimulatorOptions();

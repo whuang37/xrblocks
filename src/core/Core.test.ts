@@ -26,8 +26,9 @@ vi.hoisted(() => {
 import * as THREE from 'three';
 import {Core} from './Core';
 import {Options} from './Options';
-import {Script, SelectEvent} from './Script';
+import {Script, type SelectEndEvent, SelectEvent} from './Script';
 import {Controller} from '../input/Controller';
+import {getInteractionSource} from '../interaction/InteractionTypes';
 import type {ManipulationEvent} from '../interaction/manipulation/ManipulationTypes';
 import {Physics} from '../physics/Physics';
 import {
@@ -93,12 +94,16 @@ describe('Core and ScriptsManager exception handling via EventDispatcher', () =>
           target: controller,
         })
       ).toBe(true);
-      expect(selectStart).toHaveBeenCalledWith({target: controller});
+      expect(selectStart).toHaveBeenCalledWith(
+        expect.objectContaining({target: controller, currentTarget: script})
+      );
       core.scriptsManager.invokeTarget(script, 'onObjectGrabStart', {
         handIndex: 0,
         hand,
       });
-      expect(grabStart).toHaveBeenCalledWith({handIndex: 0, hand});
+      expect(grabStart).toHaveBeenCalledWith(
+        expect.objectContaining({handIndex: 0, hand, currentTarget: script})
+      );
     });
 
     it('routes global and manipulation hooks through ScriptsManager', () => {
@@ -109,10 +114,15 @@ describe('Core and ScriptsManager exception handling via EventDispatcher', () =>
         .spyOn(script, 'onObjectManipulate')
         .mockReturnValue(true);
       const manipulationEvent = {} as ManipulationEvent;
+      const event: SelectEndEvent = {
+        source: getInteractionSource(controller, 'controller-ray'),
+        completed: false,
+        reason: 'released',
+      };
       core.scriptsManager.scripts.add(script);
 
-      core.scriptsManager.invokeGlobal('onSelectEnd', {target: controller});
-      expect(selectEnd).toHaveBeenCalledWith({target: controller});
+      core.scriptsManager.invokeGlobal('onSelectEnd', event);
+      expect(selectEnd).toHaveBeenCalledWith(event);
       expect(
         core.scriptsManager.invokeManipulation(script, manipulationEvent)
       ).toBe(true);

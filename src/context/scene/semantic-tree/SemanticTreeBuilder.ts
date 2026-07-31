@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 
+import type {Interaction} from '../../../interaction/Interaction';
+import {getUIElementKind, isUIElement} from '../../../ui/UIElement';
 import {roundContextNumber} from '../../shared/ContextNumberUtils';
 import {SemanticIdRegistry} from '../../shared/SemanticIdRegistry';
 import {
@@ -27,6 +29,11 @@ type SemanticObject = THREE.Object3D & {
   behaviors?: unknown[];
   text?: string;
   icon?: string;
+  label?: string;
+  ariaLabel?: string;
+  value?: number;
+  min?: number;
+  max?: number;
   userData: THREE.Object3D['userData'] & {
     semantic?: SemanticMetadata;
   };
@@ -48,10 +55,12 @@ export function buildSemanticTree({
   scene,
   registry,
   capturedAt,
+  interaction,
 }: {
   scene: THREE.Scene;
   registry: SemanticIdRegistry;
   capturedAt: number;
+  interaction?: Interaction;
 }): SemanticTreeInternal {
   scene.updateMatrixWorld(true);
 
@@ -67,11 +76,17 @@ export function buildSemanticTree({
     object: THREE.Object3D,
     semanticParentId: string | undefined
   ) => {
+    if (object.userData.xrblocksPrivateSelf === true) {
+      for (const child of object.children) {
+        visit(child, semanticParentId);
+      }
+      return;
+    }
     if (shouldPruneObject(object)) {
       return;
     }
 
-    const semantic = describeSemanticObject(object);
+    const semantic = describeSemanticObject(object, interaction);
     let nextSemanticParentId = semanticParentId;
 
     if (semantic) {
@@ -117,13 +132,21 @@ function shouldPruneObject(object: THREE.Object3D): boolean {
   return isSemanticInternalObject(object);
 }
 
-function describeSemanticObject(object: THREE.Object3D): {
+function describeSemanticObject(
+  object: THREE.Object3D,
+  interaction?: Interaction
+): {
   role: string;
   name: string;
   source: SemanticSource;
   text?: string;
   traits?: string[];
   disabled?: boolean;
+  selected?: boolean;
+  hovered?: boolean;
+  value?: number;
+  min?: number;
+  max?: number;
 } | null {
   const semanticObject = object as SemanticObject;
   const override = semanticObject.userData.semantic;
@@ -132,11 +155,14 @@ function describeSemanticObject(object: THREE.Object3D): {
   if (override?.role || override?.name) {
     return {
       role: override.role ?? inferRole(object),
-      name: override.name ?? inferName(object),
+      name: inferName(object),
       source: override.source ?? 'app',
       text: override.text ?? inferText(object),
       traits: override.traits ?? inferTraits(object),
       disabled: override.disabled ?? inferDisabled(object),
+      selected: interaction?.isSelectingAt(object),
+      hovered: interaction?.isHovered(object),
+      ...inferValue(object),
     };
   }
 
@@ -162,6 +188,9 @@ function describeSemanticObject(object: THREE.Object3D): {
     text: inferText(object),
     traits: inferTraits(object),
     disabled: inferDisabled(object),
+    selected: interaction?.isSelectingAt(object),
+    hovered: interaction?.isHovered(object),
+    ...inferValue(object),
   };
 }
 
@@ -183,46 +212,31 @@ function inferRole(object: THREE.Object3D): string {
   if (semanticObject.userData.semantic?.role) {
     return semanticObject.userData.semantic.role;
   }
-  if (className === 'SpatialPanel' || className === 'Panel') return 'panel';
-  if (
-    className === 'UICard' ||
-    className === 'AdditiveUICard' ||
-    isUiblocksCard(semanticObject)
-  ) {
-    return 'panel';
+  if (isUIElement(object)) {
+    const kind = getUIElementKind(object);
+    if (kind === 'button') return 'button';
+    if (kind === 'slider') return 'slider';
+    if (kind === 'text') return 'text';
+    if (kind === 'image' || kind === 'icon') return 'image';
+    return 'group';
   }
-  if (className === 'UIPanel') {
-    return typeof (semanticObject as {onClick?: unknown}).onClick === 'function'
-      ? 'button'
-      : 'panel';
-  }
-  if (
-    semanticObject.isUI &&
-    typeof (semanticObject as {onClick?: unknown}).onClick === 'function'
-  ) {
-    return 'button';
-  }
+  if (className === 'SpatialPanel' || className === 'Panel') return 'group';
   if (className === 'TextButton' || className === 'IconButton') {
     return 'button';
   }
   if (
     className === 'TextView' ||
     className === 'LabelView' ||
-    className === 'UIText' ||
     className === 'ScrollingTroikaTextView' ||
     (semanticObject.isUI && typeof semanticObject.text === 'string')
   ) {
     return 'text';
   }
-  if (className === 'ImageView' || className === 'UIImage') return 'image';
-  if (
-    className === 'IconView' ||
-    className === 'MaterialSymbolsView' ||
-    className === 'UIIcon'
-  ) {
-    return 'icon';
+  if (className === 'ImageView') return 'image';
+  if (className === 'IconView' || className === 'MaterialSymbolsView') {
+    return 'image';
   }
-  if (semanticObject.isPanel || semanticObject.isUI) return 'panel';
+  if (semanticObject.isPanel || semanticObject.isUI) return 'group';
   if (semanticObject.isView) return 'group';
   if (object instanceof THREE.Mesh) return 'object';
   if (object instanceof THREE.Group && hasRenderableDescendant(object)) {
@@ -231,22 +245,15 @@ function inferRole(object: THREE.Object3D): string {
   return '';
 }
 
-function isUiblocksCard(object: SemanticObject): boolean {
-  return (
-    object.name === 'UICard' ||
-    object.name.endsWith(' Card') ||
-    (object.isUI === true &&
-      (typeof object.baseSizeX === 'number' ||
-        typeof object.baseSizeY === 'number' ||
-        Array.isArray(object.behaviors)))
-  );
-}
-
 function inferName(object: THREE.Object3D): string {
   const semanticObject = object as SemanticObject;
   return (
+    semanticObject.ariaLabel ??
+    semanticObject.label ??
+    semanticObject.text ??
+    semanticObject.icon ??
     semanticObject.userData.semantic?.name ??
-    inferText(object) ??
+    semanticObject.userData.semantic?.text ??
     object.name ??
     `${object.type}_${object.id}`
   );
@@ -285,10 +292,24 @@ function inferTraits(object: THREE.Object3D): string[] | undefined {
   );
   if (semanticObject.selectable) traits.add('selectable');
   if (semanticObject.xb?.manipulation) traits.add('manipulable');
-  if (typeof (semanticObject as {onClick?: unknown}).onClick === 'function') {
+  if (
+    isUIElement(object) &&
+    (getUIElementKind(object) === 'button' ||
+      getUIElementKind(object) === 'slider') &&
+    object.interactionEnabled !== false &&
+    !inferDisabled(object)
+  ) {
     traits.add('selectable');
   }
   return traits.size ? [...traits] : undefined;
+}
+
+function inferValue(
+  object: THREE.Object3D
+): Pick<SemanticNode, 'value' | 'min' | 'max'> {
+  if (!isUIElement(object) || getUIElementKind(object) !== 'slider') return {};
+  const slider = object as SemanticObject;
+  return {value: slider.value, min: slider.min, max: slider.max};
 }
 
 function inferDisabled(object: THREE.Object3D): boolean | undefined {
@@ -324,7 +345,7 @@ function createSemanticNode(
     id,
     role: semantic.role,
     name: semantic.name,
-    visible: object.visible,
+    visible: isEffectivelyVisible(object),
     position: [
       roundContextNumber(tempPosition.x),
       roundContextNumber(tempPosition.y),
@@ -340,9 +361,23 @@ function createSemanticNode(
   if (semantic.text) node.text = semantic.text;
   if (semantic.traits?.length) node.traits = semantic.traits;
   if (semantic.disabled !== undefined) node.disabled = semantic.disabled;
+  if (semantic.selected !== undefined) node.selected = semantic.selected;
+  if (semantic.hovered !== undefined) node.hovered = semantic.hovered;
+  if (semantic.value !== undefined) node.value = semantic.value;
+  if (semantic.min !== undefined) node.min = semantic.min;
+  if (semantic.max !== undefined) node.max = semantic.max;
   const bounds = getSemanticBounds(object);
   if (bounds) node.bounds = bounds;
   return node;
+}
+
+function isEffectivelyVisible(object: THREE.Object3D): boolean {
+  let current: THREE.Object3D | null = object;
+  while (current) {
+    if (!current.visible) return false;
+    current = current.parent;
+  }
+  return true;
 }
 
 function getSemanticBounds(object: THREE.Object3D): SemanticBounds | undefined {

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-import type {Controller} from '../input/Controller';
+import type {InteractionSource} from '../interaction/InteractionTypes';
 import type {ManipulationEvent} from '../interaction/manipulation/ManipulationTypes';
 import type {Physics} from '../physics/Physics';
 import type {Injectable} from '../utils/DependencyInjection';
@@ -8,7 +8,24 @@ import type {Constructor} from '../utils/Types';
 import {markDefaultScriptMethods} from './ScriptHooks';
 
 export interface SelectEvent {
-  target: Controller;
+  readonly source: InteractionSource;
+  readonly target?: THREE.Object3D;
+  readonly currentTarget?: Script;
+  readonly surface?: THREE.Object3D;
+}
+
+export type SelectionEndReason =
+  | 'released'
+  | 'released-outside'
+  | 'source-lost'
+  | 'pointer-cancel'
+  | 'removed'
+  | 'hidden'
+  | 'disabled';
+
+export interface SelectEndEvent extends SelectEvent {
+  readonly completed: boolean;
+  readonly reason: SelectionEndReason;
 }
 
 /** Event sent after a captured selection is held past the long-select delay. */
@@ -18,15 +35,32 @@ export interface LongSelectEvent extends SelectEvent {
 }
 
 export interface ObjectTouchEvent {
-  handIndex: number;
-  touchPosition: THREE.Vector3;
+  readonly source: InteractionSource;
+  readonly target: THREE.Object3D;
+  readonly currentTarget?: Script;
+  readonly surface: THREE.Object3D;
+  readonly handIndex: number;
+  readonly hand?: THREE.Object3D;
+  readonly touchPosition: THREE.Vector3;
+}
+
+export interface ObjectTouchStartEvent extends ObjectTouchEvent {
   readonly defaultPrevented: boolean;
   preventDefault(): void;
 }
 
 export interface ObjectGrabEvent {
-  handIndex: number;
-  hand: THREE.Object3D;
+  readonly source: InteractionSource;
+  readonly target: THREE.Object3D;
+  readonly currentTarget?: Script;
+  readonly surface: THREE.Object3D;
+  readonly handIndex: number;
+  readonly hand: THREE.Object3D;
+  readonly touchPosition: THREE.Vector3;
+}
+
+export interface HoverEvent extends SelectEvent {
+  readonly intersection?: THREE.Intersection;
 }
 
 export interface KeyEvent {
@@ -90,19 +124,19 @@ export function ScriptMixin<TBase extends Constructor<THREE.Object3D>>(
     // See https://developer.mozilla.org/en-US/docs/Web/API/XRInputSourceEvent
     /**
      * Called whenever pinch / mouse click starts, globally.
-     * @param _event - event.target holds its controller
+     * @param _event - The interaction source and optional captured target.
      */
     onSelectStart(_event: SelectEvent) {}
 
     /**
      * Called whenever pinch / mouse click discontinues, globally.
-     * @param _event - event.target holds its controller
+     * @param _event - The completed state and end reason.
      */
-    onSelectEnd(_event: SelectEvent) {}
+    onSelectEnd(_event: SelectEndEvent) {}
 
     /**
      * Called whenever pinch / mouse click successfully completes, globally.
-     * @param _event - event.target holds its controller.
+     * @param _event - The interaction source and completed target.
      */
     onSelect(_event: SelectEvent) {}
 
@@ -110,6 +144,9 @@ export function ScriptMixin<TBase extends Constructor<THREE.Object3D>>(
      * Called whenever pinch / mouse click is happening, globally.
      */
     onSelecting(_event: SelectEvent) {}
+
+    /** Called when an object selection reaches the long-select delay. */
+    onLongSelect(_event: LongSelectEvent) {}
 
     /**
      * Called on keyboard keypress.
@@ -151,10 +188,10 @@ export function ScriptMixin<TBase extends Constructor<THREE.Object3D>>(
     /**
      * Called when the controller stops selecting this object the script
      * represents, e.g. View, ModelView.
-     * @param _event - event.target holds its controller.
+     * @param _event - The completed state and end reason.
      * @returns Whether the event was handled. If true, the event will not bubble up.
      */
-    onObjectSelectEnd(_event: SelectEvent): boolean | void {}
+    onObjectSelectEnd(_event: SelectEndEvent): boolean | void {}
     /**
      * Called once when a captured selection is held for the long-select delay.
      * Manipulation captures do not emit this callback.
@@ -173,23 +210,23 @@ export function ScriptMixin<TBase extends Constructor<THREE.Object3D>>(
      * @param _controller - An XR controller.
      * @returns Whether the event was handled. If true, the event will not bubble up.
      */
-    onHoverEnter(_controller: THREE.Object3D): boolean | void {}
+    onHoverEnter(_event: HoverEvent): boolean | void {}
     /**
      * Called when the controller hovers over this object with reticle.
      * @param _controller - An XR controller.
      * @returns Whether the event was handled. If true, the event will not bubble up.
      */
-    onHoverExit(_controller: THREE.Object3D): boolean | void {}
+    onHoverExit(_event: HoverEvent): boolean | void {}
     /**
      * Called when the controller hovers over this object with reticle.
      * @param _controller - An XR controller.
      * @returns Whether the event was handled. If true, the event will not bubble up.
      */
-    onHovering(_controller: THREE.Object3D): boolean | void {}
+    onHovering(_event: HoverEvent): boolean | void {}
     /**
      * Called when a hand's index finger starts touching this object.
      */
-    onObjectTouchStart(_event: ObjectTouchEvent): boolean | void {}
+    onObjectTouchStart(_event: ObjectTouchStartEvent): boolean | void {}
     /**
      * Called every frame that a hand's index finger is touching this object.
      */

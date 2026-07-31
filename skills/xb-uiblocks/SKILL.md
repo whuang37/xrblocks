@@ -1,111 +1,75 @@
 ---
 name: xb-uiblocks
 description: >-
-  Build rich spatial UI with the uiblocks addon — flexbox-laid-out 3D cards/panels
-  (`UICard`, `UIPanel`, `UIText`, `UIImage`, `UIIcon`) with gradients, strokes,
-  rounded corners, drop/inner shadows, and spatial behaviors (head-leash, billboard,
-  grab/manipulate, object-anchor). Use when you need web-like styling fidelity or
-  real flexbox layout beyond the lightweight core `xb.SpatialPanel`. Requires
-  `options.uikit.enable(uikit)` and the `@pmndrs/uikit` peer deps. The complete
-  reference (styling rules, behaviors, gotchas, troubleshooting) lives at
-  src/addons/uiblocks/SKILL.md.
+  Build rich spatial UI with the core XR Blocks flex UI: UICard, UIPanel,
+  UIButton, UIText, UIImage, and UIIcon. Use for menus, HUDs, cards, controls,
+  gradients, strokes, shadows, flex layout, placement, and manipulation.
 ---
 
-# xb-uiblocks — rich flexbox spatial UI
+# xb-uiblocks — core flex spatial UI
 
-uiblocks wraps `@pmndrs/uikit` (yoga flexbox) for styled 3D cards. Use it over the core
-[`xb-ui`](../xb-ui/SKILL.md) `SpatialPanel` when you need flexbox layout, gradients, strokes,
-or shadows. **Don't mix the two on one panel**, and never import `UIPanel`/`UICard` from
-`xrblocks` core — they exist only in this addon.
+The former `uiblocks` addon now lives in `src/ui` and is exported from
+`xrblocks`. Do not import a bare `uiblocks` module, create `UICore`, register a
+raycast sorter, or call `options.uikit.enable()`.
 
-> **Full reference** (UICard/UIPanel/UIText/UIImage/UIIcon props, behaviors, sizing gotchas,
-> and a clicks/styling/sizing troubleshooting playbook):
-> [`../../src/addons/uiblocks/SKILL.md`](../../src/addons/uiblocks/SKILL.md). Samples:
-> `src/addons/uiblocks/samples/`.
-
-## Setup
-
-Needs the `@pmndrs/uikit` + yoga/troika peer deps in your importmap (see the addon
-[README](../../src/addons/uiblocks/README.md)) and:
-
-```js
-const options = new xb.Options();
-options.enableUI();
-options.uikit.enable(uikit); // REQUIRED — registers the uikit renderer
-```
+Browser import maps still need the `@pmndrs/uikit`, `@pmndrs/*`,
+`@preact/signals-core`, and Yoga peer entries used by `build/xrblocks.js`. Copy
+them from `samples/uiblocks/index.html`.
 
 ## Quick start
 
 ```js
-import * as uikit from '@pmndrs/uikit';
 import * as THREE from 'three';
-import {UICore, UIPanel, UIText, raycastSortFunction} from 'uiblocks';
 import * as xb from 'xrblocks';
 
-class CustomScript extends xb.Script {
-  constructor() {
-    super();
-    this.uiCore = new UICore(this);
-  }
+class Menu extends xb.Script {
   init() {
-    // REQUIRED for raycasting against uiblocks to work.
-    if (xb.core.input.raycaster) {
-      xb.core.input.raycaster.sortFunction = raycastSortFunction;
-    }
-    const card = this.uiCore.createCard({
-      name: 'HelloCard',
-      sizeX: 1.0,
-      sizeY: 0.6,
-      position: new THREE.Vector3(0, 1.5, -1),
-      width: 'auto',
-      alignItems: 'center', // shrink-wrap + center (see full ref §5.1)
+    const card = new xb.UICard({
+      sizeX: 0.8,
+      sizeY: 0.5,
+      position: new THREE.Vector3(0, 1.5, -1.2),
+      manipulation: true,
     });
-    const panel = new UIPanel({
+    this.add(card);
+
+    const panel = new xb.UIPanel({
       width: '100%',
       height: '100%',
-      fillColor: '#1a1a24',
-      cornerRadius: 20,
-      padding: 30,
       flexDirection: 'column',
       justifyContent: 'center',
       alignItems: 'center',
+      gap: 16,
+      padding: 24,
+      fillColor: '#16181dee',
+      cornerRadius: 24,
+      strokeWidth: 2,
+      strokeColor: '#ffffff44',
     });
     card.add(panel);
+    panel.add(new xb.UIText('Main menu', {fontSize: 32, color: '#ffffff'}));
     panel.add(
-      new UIText('Hello World', {
-        fontSize: 32,
-        fontWeight: 'bold',
-        color: 'white',
+      new xb.UIButton({
+        label: 'Continue',
+        ariaLabel: 'Continue',
+        width: 220,
+        height: 72,
+        onClick: () => console.log('Continue'),
       })
     );
   }
 }
 ```
 
-## Top rules (see full reference for the rest)
+## Rules
 
-- Borders that follow corners: use `strokeWidth`/`strokeColor`, **not** `borderWidth`/`borderColor`.
-- Colors are hex strings (`'#ffffff'`) or `THREE.Color` — never `rgba()`/`hsla()`.
-- No built-in button class: compose a `UIPanel` + child `UIText`/`UIIcon`/`UIImage`.
-- One `UICard` per spatial pivot; partition complex layouts with child `UIPanel`s + flexbox.
+- Add each `UICard` directly to an owning `xb.Script`.
+- Use `UIButton` for actions. It activates only after a valid captured release
+  and exposes shared disabled and semantic state.
+- Use `strokeWidth` and `strokeColor` with `cornerRadius` for panel outlines.
+- Use one `pixelSize` and a small spacing/type scale per surface.
+- Configure movement through `card.xb.manipulation` or the constructor's
+  `manipulation` option.
+- Add `FaceCamera`, `FollowHead`, `FollowObject`, and `VisibilityTransition` as
+  card children. They suspend and rebase during manipulation.
 
-## Designing complex, elegant spatial UI
-
-For multi-section, polished interfaces, follow the **design guide in §6** of the full reference
-([`../../src/addons/uiblocks/SKILL.md`](../../src/addons/uiblocks/SKILL.md)). The essentials:
-
-- **Tokens first.** Fix a `pixelSize` (density), a small `fontSize`/`fontWeight` type scale, a
-  spacing scale (`gap`/`padding` multiples of one unit), one–two `cornerRadius` values, and a
-  restrained hex palette — then reuse them everywhere.
-- **Compose, don't multiply.** Build the whole screen inside one `UICard`; partition into
-  sections with nested `UIPanel`s + flexbox (`flexDirection`, `justifyContent`, `flexGrow`).
-- **Elevation, not Z gaps.** Convey layering with `dropShadow*`, `innerShadow*`, and
-  `strokeWidth`/`strokeColor` (shared `cornerRadius`) — avoid large literal `position.z` offsets.
-- **Comfort + legibility.** Place at `xb.user.height` / `-xb.user.panelDistance`; keep opaque
-  enough `fillColor` + a shadow/stroke to read over AR passthrough; size text for distance.
-- **Purposeful motion & affordances.** `ToggleAnimationBehavior` for enter/exit, hover/press
-  states for feedback, gentle `lerp` on `HeadLeashBehavior`/`BillboardBehavior`.
-- **Grab & anchor.** `ManipulationBehavior({draggable, faceCamera, manipulationMargin})` with a
-  header as the grab handle; `ObjectAnchorBehavior` (+ billboard) for contextual, object-attached UI.
-
-See §6.7 of the full reference for a complete, styled settings-card example.
+See `docs/docs/manual/UIBlocks.mdx` and `samples/uiblocks/index.html`.

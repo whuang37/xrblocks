@@ -41,10 +41,8 @@ contract and tests intentionally change it.
 ## Addon-public branch
 
 Find the addon's intended entry before adding exports. Common entries include
-`src/addons/<name>/index.ts`; UIBlocks instead exposes
-`src/addons/uiblocks/src/index.ts`. Export consumer values and types from that
-entry, not from the root barrel unless the capability is deliberately becoming
-core.
+`src/addons/<name>/index.ts`. Flex UI is core: export it from `src/ui/index.ts`
+and let `src/xrblocks.ts` re-export that barrel.
 
 Rollup emits every non-test addon source file beneath the same relative
 `build/addons/` path. `package.json` exposes `./addons/*` as

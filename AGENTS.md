@@ -61,16 +61,16 @@ XR Blocks is a **singleton engine driven by a script lifecycle**:
 
 ### Repository layout
 
-| Path          | Purpose                                                                                                                                                 |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/`        | SDK source — one folder per subsystem                                                                                                                   |
-| `src/addons/` | Opt-in modules built separately: `testing`, `uiblocks`, `netblocks`, `lipsync`, `glasses`, `simulator`, `volumes`, `virtualkeyboard`, `agenthands`, ... |
-| `samples/`    | Focused feature examples (served by the docs site)                                                                                                      |
-| `demos/`      | Richer showcase apps (Ballpit, XR-Emoji, XR-Object, Gemini Icebreakers, ...)                                                                            |
-| `templates/`  | Minimal starting points (`0_basic`, `1_ui`, `2_hands`, `6_ai`, ...)                                                                                     |
-| `docs/`       | Docusaurus manual + samples/templates pages                                                                                                             |
-| `skills/`     | Agent skill registry (`xb-*`) — focused, task-oriented guides                                                                                           |
-| `build/`      | **Generated** bundle output — do not edit                                                                                                               |
+| Path          | Purpose                                                                                                                                     |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/`        | SDK source — one folder per subsystem                                                                                                       |
+| `src/addons/` | Opt-in modules built separately: `testing`, `netblocks`, `lipsync`, `glasses`, `simulator`, `volumes`, `virtualkeyboard`, `agenthands`, ... |
+| `samples/`    | Focused feature examples (served by the docs site)                                                                                          |
+| `demos/`      | Richer showcase apps (Ballpit, XR-Emoji, XR-Object, Gemini Icebreakers, ...)                                                                |
+| `templates/`  | Minimal starting points (`0_basic`, `1_ui`, `2_hands`, `6_ai`, ...)                                                                         |
+| `docs/`       | Docusaurus manual + samples/templates pages                                                                                                 |
+| `skills/`     | Agent skill registry (`xb-*`) — focused, task-oriented guides                                                                               |
+| `build/`      | **Generated** bundle output — do not edit                                                                                                   |
 
 ### `src/` subsystems
 
@@ -84,7 +84,7 @@ XR Blocks is a **singleton engine driven by a script lifecycle**:
 | `depth/`                                    | depth sensing, depth mesh, `occlusion/` shaders & passes                                                       |
 | `ai/`                                       | `AI` facade over `Gemini` + `OpenAI` (query / live / image gen)                                                |
 | `agent/`                                    | agent framework: tools, memory, context (WIP)                                                                  |
-| `ui/`                                       | core spatial UI: `SpatialPanel`, `Grid`/`Row`/`Col`, views, `ModelViewer`, `Reticle`                           |
+| `ui/`                                       | core UIKit flex surfaces (`UICard`, panels, controls, text/images/icons) and `ModelViewer`                     |
 | `ux/`                                       | temporary per-Script presentation state used by the current UI systems                                         |
 | `simulator/`                                | desktop XR simulator (manifest environments, physical objects, virtual user/hands/depth/planes, control modes) |
 | `sound/`                                    | spatial audio, speech recognizer/synthesizer                                                                   |

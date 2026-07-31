@@ -1,181 +1,126 @@
 ---
 sidebar_position: 17
-title: 'UI Blocks (Addon)'
+title: 'Flex UI'
 ---
 
 import {CodeSearchLink} from './components/CodeSearchLink.jsx';
 
-# UI Blocks (Addon)
+# Flex UI
 
-The `uiblocks` addon is the preferred spatial UI system for XR Blocks apps. It
-builds on **`@pmndrs/uikit`** and the Yoga flexbox layout engine.
+XR Blocks includes a world-space flex UI built on `@pmndrs/uikit`. It is part
+of the main `xrblocks` entry. There is no separate `uiblocks` addon or UI
+manager.
 
-Start with `uiblocks` for menus, HUDs, cards, labels, and controls, including
-simple surfaces. Use the core [Spatial UI](UI.mdx) system only when a concrete
-constraint prevents loading UIBlocks or an existing app requires legacy
-`SpatialPanel` integration.
+Use `UICard` for each world-space surface. Compose it with `UIPanel`, `UIText`,
+`UIImage`, `UIIcon`, and `UIButton`. The renderer configures UIKit clipping and
+transparent painter order during `xb.init()`.
 
-:::warning
+## Setup
 
-Do not mix core UI classes (`Panel`, `SpatialPanel`) and `uiblocks` classes (`UIPanel`, `UICard`) on the same physical panel.
+Browser import maps must provide the UIKit peer packages used by the SDK. The
+complete map is in <CodeSearchLink path="samples/uiblocks/index.html" />. App
+code imports every public UI type from `xrblocks`:
 
-:::
-
----
-
-## Installation & Setup
-
-1. Make sure you have `@pmndrs/uikit` and its peer dependencies configured in your importmap, or install via npm:
-
-   ```bash
-   npm install @pmndrs/uikit
-   ```
-
-2. Enable the UI kit options in your startup configuration:
-
-   ```javascript
-   import * as uikit from '@pmndrs/uikit';
-   import * as xb from 'xrblocks';
-
-   const options = new xb.Options();
-   options.enableUI();
-   options.uikit.enable(uikit); // Required to register the custom UI renderer
-   xb.init(options);
-   ```
-
-3. Configure inputs. To allow raycasting against flexbox items, you must override the raycaster sort function in your script:
-
-   ```javascript
-   import {raycastSortFunction} from 'uiblocks';
-
-   class MyScript extends xb.Script {
-     init() {
-       if (xb.core.input.raycaster) {
-         xb.core.input.raycaster.sortFunction = raycastSortFunction;
-       }
-     }
-   }
-   ```
-
----
-
-## Basic Example
-
-To render UI blocks, instantiate a `UICore` manager parented to your script, create a pivot-facing `UICard`, and build panels within it:
-
-```javascript
-import * as xb from 'xrblocks';
-import {UICore, UIPanel, UIText} from 'uiblocks';
+```js
 import * as THREE from 'three';
+import {UIButton, UICard, UIIcon, UIImage, UIPanel, UIText} from 'xrblocks';
+import * as xb from 'xrblocks';
+```
 
+UI rendering is part of core and does not need an option or setup call.
+
+## Basic surface
+
+Create the card and add it to its owning script. The script lifecycle updates
+the UIKit layout automatically.
+
+```js
 class MenuScript extends xb.Script {
-  constructor() {
-    super();
-    this.uiCore = new UICore(this);
-  }
-
   init() {
-    // 1. Create a root 3D Card pivot
-    const card = this.uiCore.createCard({
-      name: 'MainMenu',
-      sizeX: 1.0, // 1.0 meter physical width
-      sizeY: 0.6, // 0.6 meter physical height
-      position: new THREE.Vector3(0, 1.5, -1),
-      alignItems: 'center',
+    const card = new UICard({
+      name: 'Main menu',
+      sizeX: 0.8,
+      sizeY: 0.5,
+      position: new THREE.Vector3(0, 1.5, -1.2),
     });
+    this.add(card);
 
-    // 2. Add a styled container UIPanel
     const panel = new UIPanel({
       width: '100%',
       height: '100%',
-      fillColor: '#1a1a24', // Hex string background
-      cornerRadius: 20, // Pixel corner radius
-      padding: 30, // Padding in pixels
       flexDirection: 'column',
       justifyContent: 'center',
       alignItems: 'center',
+      gap: 16,
+      padding: 24,
+      fillColor: '#16181dee',
+      cornerRadius: 24,
+      strokeWidth: 2,
+      strokeColor: '#ffffff44',
     });
     card.add(panel);
 
-    // 3. Add a child text block
+    panel.add(new UIText('Main menu', {fontSize: 32, color: '#ffffff'}));
     panel.add(
-      new UIText('Hello from Flexbox', {
-        fontSize: 32,
-        fontWeight: 'bold',
-        color: 'white',
+      new UIButton({
+        label: 'Continue',
+        width: 220,
+        height: 72,
+        fillColor: '#2b2f3a',
+        cornerRadius: 18,
+        justifyContent: 'center',
+        alignItems: 'center',
+        onClick: () => console.log('Continue'),
       })
     );
   }
 }
 ```
 
----
+`UIButton` activates only when a selection starts and ends on the same button.
+Its `disabled` property uses the shared interaction barrier and semantic state.
+`UIPanel` still supports low-level hover and click hooks for custom controls.
 
-## Styling Primitives
+## Layout and appearance
 
-- **`UIPanel`**: A container layout group. Supports borders, padding, margins, shadows, and flex alignments.
-- **`UIText`**: Text block element.
-- **`UIImage`**: Renders 2D image assets.
-- **`UIIcon`**: Renders SVG icons.
-- **`UICard`**: The 3D root wrapper that anchors the flexbox system to the Three.js scene.
+- `sizeX` and `sizeY` set the physical card size in meters.
+- `pixelSize` maps layout units to meters.
+- Use flex properties such as `flexDirection`, `justifyContent`, `alignItems`,
+  `gap`, `padding`, and percentage sizes.
+- Use `fillColor`, `cornerRadius`, `strokeWidth`, `strokeColor`, and the inner
+  or drop-shadow properties for panel appearance.
+- Text, image, and icon setters update existing elements without rebuilding the
+  tree.
 
-### Formatting Rules
+## Manipulation and placement
 
-- **Borders**: To follow rounded corners properly, use `strokeWidth` and `strokeColor` instead of `borderWidth`/`borderColor`.
-- **Colors**: Solid colors accept hex (including alpha), `rgb()` / `rgba()`,
-  CSS color names, numeric Three.js colors, or `THREE.Color`. `hsla()` is not
-  supported by the addon's alpha-aware parser.
-- **Buttons**: There is no dedicated button primitive. Build buttons with the
-  `onClick` option on a styled `UIPanel`:
-  ```javascript
-  const button = new UIPanel({
-    padding: 10,
-    fillColor: '#222222',
-    onClick: () => console.log('Button clicked!'),
-  });
-  ```
+Cards use the same manipulation configuration as every other scene object:
 
----
-
-## Spatial UI Behaviors
-
-You can attach behaviors to `UICard` elements to enable modern XR interactions:
-
-```javascript
-import {
-  ManipulationBehavior,
-  HeadLeashBehavior,
-  BillboardBehavior,
-} from 'uiblocks';
-
-// 1. ManipulationBehavior: allows the user to grab and reposition the UI card
-card.addBehavior(
-  new ManipulationBehavior({
-    draggable: true,
-    faceCamera: true,
-    manipulationMargin: 0.05,
-  })
-);
-
-// 2. HeadLeashBehavior: makes the UI smoothly follow the user's head position
-card.addBehavior(
-  new HeadLeashBehavior({
-    offset: new THREE.Vector3(0, -0.1, -1.2),
-    posLerp: 0.1,
-    rotLerp: 0.1,
-  })
-);
-
-// 3. BillboardBehavior: keeps the card rotated to always face the user
-card.addBehavior(new BillboardBehavior({mode: 'cylindrical'}));
+```js
+const card = new UICard({
+  sizeX: 0.8,
+  sizeY: 0.5,
+  manipulation: {
+    actions: {translate: {faceCamera: true}, scale: true},
+    handle: {action: xb.ManipulationAction.Translate},
+  },
+});
 ```
 
-Use the bare `from 'uiblocks'` specifier consistently. Browser-native apps map
-that exact name to `build/addons/uiblocks/src/index.js`; the `xrblocks/addons/`
-prefix does not resolve it. Copy the complete peer-dependency map from the
+Placement behaviors are normal child scripts. `FaceCamera`, `FollowHead`,
+`FollowObject`, and `VisibilityTransition` suspend and rebase automatically
+while the card is manipulated.
 
-<CodeSearchLink path="samples/uiblocks/index.html" /> or
-<CodeSearchLink path="src/addons/uiblocks/README.md" />, keeping `uiblocks` and
-`xrblocks` on the same build commit or package version.
+```js
+card.add(
+  new xb.FollowHead({
+    offset: new THREE.Vector3(0, -0.1, -1.2),
+    smoothing: 0.1,
+  }),
+  new xb.FaceCamera({mode: 'spherical', smoothing: 0.1})
+);
+```
 
-For complete reference implementation details, styling props, and troubleshooting tips, see <CodeSearchLink path="src/addons/uiblocks/SKILL.md"/>.
+See <CodeSearchLink path="docs/docs/manual/Manipulation.md" /> for action and
+handle configuration, and <CodeSearchLink path="samples/uiblocks/index.html" />
+for a complete surface.

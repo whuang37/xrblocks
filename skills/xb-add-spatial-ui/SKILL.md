@@ -23,39 +23,28 @@ Record:
 The contract is complete when every displayed value and control has a user
 purpose, state source, spatial anchor, and observable result.
 
-## 2. Establish the UIBlocks foundation
+## 2. Establish the flex UI foundation
 
-Use the `uiblocks` addon for app UI. Its flexbox layout, rich styling,
-interactive panels, and spatial behaviors make it the stable default even for a
-simple first surface. Keep each physical surface entirely within UIBlocks.
+Use the core flex UI for app surfaces. Its flexbox layout, rich styling,
+semantic buttons, placement scripts, and shared manipulation make it the
+default even for a simple first surface.
 
 Before implementation, read
 [references/uiblocks.md](references/uiblocks.md) completely. Copy its verified
-bare `uiblocks` import, import map or bundler setup, renderer registration, and
-raycast sorting. Confirm imported addon symbols exist in
-`src/addons/uiblocks/src/index.ts` rather than assuming they belong to core
-`xrblocks`.
+import map or bundler setup. Confirm imported symbols exist in `src/ui/index.ts`
+and are re-exported from `src/xrblocks.ts`.
 
-Use core `xb.SpatialPanel` only after identifying a concrete constraint that
-UIBlocks cannot satisfy, such as an environment that cannot load its browser
-peers or an explicitly required legacy `SpatialPanel` integration. Record the
-constraint, then read
-[references/core-ui-fallback.md](references/core-ui-fallback.md). A preference
-for fewer setup lines is not a constraint.
-
-The foundation is complete when the app resolves `xrblocks`, `uiblocks`,
-`three`, and UIBlocks peers from one dependency graph; calls `enableUI()` and
-`options.uikit.enable(uikit)` before `xb.init()`; and installs
-`raycastSortFunction` before controls are created.
+The foundation is complete when the app resolves `xrblocks`, `three`, and the
+UIKit peers from one dependency graph, adds each `UICard` to an owning script,
+and uses the shared interaction configuration for controls and manipulation.
 
 ## 3. Compose one coherent surface
 
 Create one `UICard` per spatial pivot and partition it with nested `UIPanel`
 flex layouts. Establish a small density, type, spacing, shape, and color scale;
-then add `UIText`, `UIImage`, and `UIIcon` in reading order. Compose buttons from
-an interactive `UIPanel` plus content. Use behaviors for leash, billboard,
-manipulation, anchoring, and show/hide motion when the surface contract calls for
-them.
+then add `UIText`, `UIImage`, and `UIIcon` in reading order. Use `UIButton` for
+actions. Use transform scripts for leash, billboard, anchoring, and show/hide
+motion, and use `xb.manipulation` for movement and scaling.
 
 The surface is complete when every required value is visible, the layout fits
 inside the card at its intended physical dimensions, and every state-changing
@@ -64,8 +53,8 @@ control has hover feedback plus an observable click result.
 ## 4. Prepare the spatial UI handoff
 
 Build or type-check the app and load its initial surface when browser access is
-available. Confirm imports, renderer registration, layout construction,
-raycast sorting, control handlers, feedback states, and cleanup are present
+available. Confirm imports, layout construction, interaction capture,
+control handlers, feedback states, and cleanup are present
 without relevant startup errors.
 
 Give the user the exact simulator/XR URL, intended viewing pose, input path, and

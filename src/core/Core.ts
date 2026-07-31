@@ -18,7 +18,6 @@ import type {PoseEstimator} from '../input/gestures/GestureTypes';
 import {StrokeRecognitionOptions} from '../input/strokes/StrokeRecognitionOptions';
 import {Input} from '../input/Input';
 import {Interaction} from '../interaction/Interaction';
-import {ManipulationManager} from '../interaction/manipulation/ManipulationManager';
 import {ReticlePresenter} from '../interaction/ReticlePresenter';
 import {UIRenderer} from '../ui/internal/UIRenderer';
 import {isUIElement} from '../ui/UIElement';
@@ -104,9 +103,8 @@ export class Core {
   /** Manages the desktop XR simulator. */
   simulator = new Simulator(this.renderSceneCallback);
 
-  /** Private interaction and manipulation runtime. */
+  /** Private interaction runtime. */
   private interaction!: Interaction;
-  private manipulationManager!: ManipulationManager;
   private reticleOptions = new ReticleOptions();
   private reticlePresenter = new ReticlePresenter(this.reticleOptions);
   private uiRenderer!: UIRenderer;
@@ -220,14 +218,10 @@ export class Core {
     }
     Core.instance = this;
 
-    this.manipulationManager = new ManipulationManager(
-      this.scriptsManager.invokeManipulation,
-      this.camera,
-      this.timer
-    );
     this.interaction = new Interaction({
       callbacks: this.scriptsManager,
-      manipulation: this.manipulationManager,
+      camera: this.camera,
+      timer: this.timer,
       reticle: this.reticlePresenter,
       reticleOptions: this.reticleOptions,
     });

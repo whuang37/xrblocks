@@ -8,7 +8,6 @@ import type {
   ResolvedRay,
 } from './InteractionTypes.js';
 import type {ReticleMode} from './manipulation/ManipulationTypes.js';
-import {resolveHitOwner} from './HitOwnerMapping.js';
 
 function cloneIntersection(
   intersection: THREE.Intersection
@@ -33,11 +32,7 @@ export class HitResolver {
     intersections: readonly THREE.Intersection[],
     sourceType: InteractionSourceType
   ): ResolvedRay | undefined {
-    for (const backendIntersection of intersections) {
-      const mappedOwner = resolveHitOwner(backendIntersection.object);
-      const rawIntersection = mappedOwner
-        ? {...backendIntersection, object: mappedOwner}
-        : backendIntersection;
+    for (const rawIntersection of intersections) {
       const objectPath = this.getObjectPath(rawIntersection.object);
       if (this.isExcluded(objectPath)) continue;
 
@@ -66,7 +61,7 @@ export class HitResolver {
 
       return {
         intersection: cloneIntersection(rawIntersection),
-        hitObject: backendIntersection.object,
+        hitObject: rawIntersection.object,
         surface: rawIntersection.object,
         target,
         scriptPath: Object.freeze(scriptPath),

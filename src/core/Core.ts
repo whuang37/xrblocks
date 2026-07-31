@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {reversePainterSortStable} from '@pmndrs/uikit';
 
 import {AI} from '../ai/AI';
 import {AIOptions} from '../ai/AIOptions';
@@ -321,6 +322,11 @@ export class Core {
       return null;
     };
     this.registry.register(this.renderer);
+
+    // src/ui uses UIKit directly. Configure its clipping and painter order on
+    // the shared renderer so applications do not need a second UI bootstrap.
+    this.renderer.localClippingEnabled = true;
+    this.renderer.setTransparentSort(reversePainterSortStable);
 
     this.renderer.xr.setReferenceSpaceType(options.referenceSpaceType);
     // For desktop simulator:

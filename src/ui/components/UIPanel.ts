@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type {SelectEvent} from '../../core/Script';
 import {XRUI} from '../mixins/XRUI';
 import {
   GradientPanel,
@@ -74,7 +75,7 @@ export class UIPanel extends XRUI(GradientPanel) {
   /**
    * Internal hook triggered by Mixin beam listeners on select releases to trigger click triggers.
    */
-  onObjectSelectEnd() {
+  onObjectSelectEnd(_event: SelectEvent) {
     if (this.onClick) this.onClick();
     return true;
   }

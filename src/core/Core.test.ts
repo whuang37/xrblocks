@@ -143,6 +143,29 @@ describe('Core and ScriptsManager exception handling via EventDispatcher', () =>
       expect(secondCallback).not.toHaveBeenCalled();
     });
 
+    it('shares dispatch snapshot values while setting currentTarget', () => {
+      const first = new Script();
+      const second = new Script();
+      const firstHover = vi.spyOn(first, 'onHoverEnter');
+      const secondHover = vi.spyOn(second, 'onHoverEnter');
+      const intersection = {
+        point: new THREE.Vector3(1, 2, 3),
+      } as THREE.Intersection;
+      const event = {intersection};
+
+      core.scriptsManager.invokeTarget(first, 'onHoverEnter', event);
+      core.scriptsManager.invokeTarget(second, 'onHoverEnter', event);
+
+      expect(firstHover.mock.calls[0][0]).toEqual(
+        expect.objectContaining({currentTarget: first, intersection})
+      );
+      expect(secondHover.mock.calls[0][0]).toEqual(
+        expect.objectContaining({currentTarget: second, intersection})
+      );
+      expect(firstHover.mock.calls[0][0].intersection).toBe(intersection);
+      expect(secondHover.mock.calls[0][0].intersection).toBe(intersection);
+    });
+
     it('isolates a targeted callback error and continues the path', () => {
       const first = new Script();
       const second = new Script();

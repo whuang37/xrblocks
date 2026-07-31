@@ -393,22 +393,26 @@ export class ScriptsManager
   }
 
   private disposeScript(script: Script): void {
-    try {
-      this.beforeDispose?.(script);
-    } catch (error: unknown) {
-      this.handleScriptError(error, script, 'beforeDispose');
-    }
-    try {
-      script.dispose();
-    } catch (error: unknown) {
-      this.handleScriptError(error, script, 'dispose');
-    } finally {
+    let firstError: Error | undefined;
+    const run = (context: string, callback: () => void): void => {
       try {
-        this.afterDispose?.(script);
+        callback();
       } catch (error: unknown) {
-        this.handleScriptError(error, script, 'afterDispose');
+        const normalizedError =
+          error instanceof Error ? error : new Error(String(error));
+        if (this.catchExceptions) {
+          this.handleException(normalizedError, script, context);
+        } else {
+          firstError ??= normalizedError;
+        }
       }
-    }
+    };
+
+    run('beforeDispose', () => this.beforeDispose?.(script));
+    run('dispose', () => script.dispose());
+    run('afterDispose', () => this.afterDispose?.(script));
+
+    if (firstError) throw firstError;
   }
 
   /** Helper for scene traversal to avoid closure allocation. */
@@ -592,6 +596,7 @@ function controllerSelectEvent(controller: Controller): SelectEvent {
 
 function eventForTarget(argument: unknown, currentTarget: Script): unknown {
   if (!argument || typeof argument !== 'object') return argument;
+  if (Reflect.get(argument, 'currentTarget') === currentTarget) return argument;
   const event = Object.create(Object.getPrototypeOf(argument)) as Record<
     PropertyKey,
     unknown
@@ -602,30 +607,5 @@ function eventForTarget(argument: unknown, currentTarget: Script): unknown {
     configurable: true,
     value: currentTarget,
   });
-  for (const key of [
-    'point',
-    'touchPosition',
-    'position',
-    'worldPosition',
-    'delta',
-    'quaternion',
-    'scale',
-    'center',
-  ]) {
-    const value = Reflect.get(argument, key);
-    if (value && typeof value.clone === 'function') {
-      Reflect.set(event, key, value.clone());
-    }
-  }
-  const intersection = Reflect.get(argument, 'intersection');
-  if (intersection && typeof intersection === 'object') {
-    Reflect.set(event, 'intersection', {
-      ...intersection,
-      point: intersection.point?.clone(),
-      normal: intersection.normal?.clone(),
-      uv: intersection.uv?.clone(),
-      uv1: intersection.uv1?.clone(),
-    });
-  }
   return event;
 }

@@ -111,6 +111,7 @@ export class Core {
   private reticlePresenter = new ReticlePresenter(this.reticleOptions);
   private uiRenderer!: UIRenderer;
   private physicsInterval?: ReturnType<typeof setInterval>;
+  private disposalPromise?: Promise<void>;
 
   /** Manages real-world understanding: planes, meshes, objects, and sounds. */
   world = new World();
@@ -267,10 +268,9 @@ export class Core {
     this.registry.register(this.xrSystemsGroup);
   }
 
-  dispose() {
-    this.interaction.clear();
-    this.uiRenderer.dispose();
-    this.input.dispose();
+  dispose(): Promise<void> {
+    if (this.disposalPromise) return this.disposalPromise;
+
     if (this.physicsInterval !== undefined) {
       clearInterval(this.physicsInterval);
       this.physicsInterval = undefined;
@@ -279,6 +279,33 @@ export class Core {
       this._renderer.setAnimationLoop(null);
     }
     window.removeEventListener('resize', this.onWindowResize);
+
+    const scriptsDisposal = this.scriptsManager.dispose();
+    this.disposalPromise = this.finishDisposal(scriptsDisposal);
+    return this.disposalPromise;
+  }
+
+  private async finishDisposal(scriptsDisposal: Promise<void>): Promise<void> {
+    let firstError: unknown;
+    try {
+      await scriptsDisposal;
+    } catch (error: unknown) {
+      firstError = error;
+    }
+
+    for (const dispose of [
+      () => this.interaction.clear(),
+      () => this.uiRenderer.dispose(),
+      () => this.input.dispose(),
+    ]) {
+      try {
+        dispose();
+      } catch (error: unknown) {
+        firstError ??= error;
+      }
+    }
+
+    if (firstError !== undefined) throw firstError;
   }
 
   /**

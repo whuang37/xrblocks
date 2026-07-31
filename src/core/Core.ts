@@ -218,7 +218,8 @@ export class Core {
 
     this.manipulationManager = new ManipulationManager(
       this.scriptsManager.invokeManipulation,
-      this.camera
+      this.camera,
+      this.timer
     );
     this.interaction = new Interaction({
       callbacks: this.scriptsManager,

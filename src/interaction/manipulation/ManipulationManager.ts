@@ -7,6 +7,10 @@ import {
   suspendTransformScripts,
 } from '../../placement/TransformScript';
 import {objectIsDescendantOf} from '../../utils/SceneGraphUtils';
+import {
+  DEFAULT_FACE_CAMERA_SMOOTHING,
+  faceCameraSlerpAlpha,
+} from '../../utils/FaceCameraMath';
 import type {
   InteractionSourceSnapshot,
   ManipulationResolution,
@@ -132,7 +136,8 @@ export class ManipulationManager {
 
   constructor(
     private readonly dispatch: DispatchManipulationEvent,
-    private readonly camera?: THREE.Camera
+    private readonly camera?: THREE.Camera,
+    private readonly timer?: THREE.Timer
   ) {}
 
   resolve(surface: THREE.Object3D): ManipulationResolution | undefined {
@@ -601,9 +606,16 @@ export class ManipulationManager {
       ? faceCameraQuaternion(
           worldPosition,
           this.camera?.getWorldPosition(new THREE.Vector3()),
-          parent?.getWorldQuaternion(new THREE.Quaternion())
+          parent?.getWorldQuaternion(new THREE.Quaternion()),
+          baseline.options.mode
         )
       : undefined;
+    const rotationAlpha = this.timer
+      ? faceCameraSlerpAlpha(
+          baseline.options.smoothing ?? DEFAULT_FACE_CAMERA_SMOOTHING,
+          this.timer.getDelta()
+        )
+      : 1;
     if (
       !isFiniteVector(point) ||
       !isFiniteVector(delta) ||
@@ -621,7 +633,9 @@ export class ManipulationManager {
       apply: () => {
         if (!isFiniteVector(localPosition)) return;
         session.owner.position.copy(localPosition);
-        if (localQuaternion) session.owner.quaternion.copy(localQuaternion);
+        if (localQuaternion) {
+          session.owner.quaternion.slerp(localQuaternion, rotationAlpha);
+        }
       },
     };
   }

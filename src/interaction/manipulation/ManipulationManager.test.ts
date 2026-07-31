@@ -65,6 +65,83 @@ describe('ManipulationManager resolution', () => {
     });
   });
 
+  it.each(['cylindrical', 'spherical'] as const)(
+    'uses the %s camera-facing mode while translating',
+    (mode) => {
+      const camera = new THREE.PerspectiveCamera();
+      camera.position.set(0, 3, 4);
+      const localManager = new ManipulationManager(() => {}, camera);
+      const owner = new THREE.Object3D();
+      owner.position.set(0, 1, 0);
+      owner.xb = {
+        manipulation: {
+          actions: {translate: {faceCamera: true, mode}},
+        },
+      };
+      const source = controller();
+
+      expect(
+        localManager.tryStart(
+          capture(source, owner),
+          snapshot(source, new THREE.Vector3())
+        )
+      ).toBe(true);
+      localManager.update([snapshot(source, new THREE.Vector3(0.25, 0, 0))]);
+      owner.updateWorldMatrix(true, false);
+
+      const target = camera.position.clone();
+      if (mode === 'cylindrical') target.y = owner.position.y;
+      const expected = new THREE.Object3D();
+      expected.position.copy(owner.getWorldPosition(new THREE.Vector3()));
+      expected.lookAt(target);
+
+      expect(
+        Math.abs(
+          owner
+            .getWorldQuaternion(new THREE.Quaternion())
+            .dot(expected.quaternion)
+        )
+      ).toBeCloseTo(1);
+      localManager.end(source);
+    }
+  );
+
+  it('smooths camera-facing rotation during translation', () => {
+    const camera = new THREE.PerspectiveCamera();
+    camera.position.set(0, 3, 4);
+    const timer = {getDelta: () => 1 / 60} as THREE.Timer;
+    const localManager = new ManipulationManager(() => {}, camera, timer);
+    const owner = new THREE.Object3D();
+    owner.xb = {
+      manipulation: {
+        actions: {translate: {faceCamera: true}},
+      },
+    };
+    const source = controller();
+
+    expect(
+      localManager.tryStart(
+        capture(source, owner),
+        snapshot(source, new THREE.Vector3())
+      )
+    ).toBe(true);
+    localManager.update([snapshot(source, new THREE.Vector3(0.25, 0, 0))]);
+
+    const target = camera.position.clone();
+    target.y = owner.position.y;
+    const exact = new THREE.Object3D();
+    exact.position.copy(owner.position);
+    exact.lookAt(target);
+    const expected = new THREE.Quaternion().slerp(
+      exact.quaternion,
+      1 - Math.exp(-0.1)
+    );
+
+    expect(Math.abs(owner.quaternion.dot(expected))).toBeCloseTo(1);
+    expect(Math.abs(owner.quaternion.dot(exact.quaternion))).toBeLessThan(1);
+    localManager.end(source);
+  });
+
   it('uses the nearest handle and stops at the nearest owner seam', () => {
     const outer = new THREE.Object3D();
     outer.xb = {manipulation: true};

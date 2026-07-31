@@ -3,6 +3,9 @@ import type * as THREE from 'three';
 import type {Script} from '../../core/Script';
 import type {Controller} from '../../input/Controller';
 import type {InteractionSourceType} from '../InteractionTypes';
+import type {FaceCameraMode} from '../../utils/FaceCameraMath';
+
+export type {FaceCameraMode} from '../../utils/FaceCameraMath';
 
 export const ManipulationAction = {
   Translate: 'translate',
@@ -16,6 +19,10 @@ export type ManipulationAction =
 
 export interface TranslateOptions {
   faceCamera?: boolean;
+  /** Camera-facing rotation mode used while translating. */
+  mode?: FaceCameraMode;
+  /** Camera-facing rotation smoothing, matching `FaceCamera`. */
+  smoothing?: number;
 }
 
 export interface RotateOptions {

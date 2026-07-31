@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 
-import {UP} from '../../utils/HelperConstants';
 import type {ScaleOptions} from './ManipulationTypes';
+
+export {faceCameraQuaternion} from '../../utils/FaceCameraMath';
 
 const EPSILON = 1e-8;
 
@@ -19,22 +20,6 @@ export function worldQuaternionToLocal(
 ): THREE.Quaternion {
   if (!parentWorldQuaternion) return worldQuaternion.clone();
   return parentWorldQuaternion.clone().invert().multiply(worldQuaternion);
-}
-
-export function faceCameraQuaternion(
-  worldPosition: THREE.Vector3,
-  cameraPosition?: THREE.Vector3,
-  parentWorldQuaternion?: THREE.Quaternion
-): THREE.Quaternion | undefined {
-  if (!cameraPosition) return undefined;
-  const target = cameraPosition.clone();
-  target.y = worldPosition.y;
-  if (target.distanceToSquared(worldPosition) < EPSILON) return undefined;
-  const matrix = new THREE.Matrix4().lookAt(target, worldPosition, UP);
-  return worldQuaternionToLocal(
-    new THREE.Quaternion().setFromRotationMatrix(matrix),
-    parentWorldQuaternion
-  );
 }
 
 export function clampScaleFactor(

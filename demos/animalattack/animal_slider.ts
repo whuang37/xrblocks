@@ -9,17 +9,10 @@ const PANEL_POS_Y = 2.2;
 const PANEL_POS_Z = -1.0;
 const PANEL_ROT_X = Math.PI / 8;
 
-const ROW_WEIGHT = 1.0;
-const BTN_COL_WEIGHT = 0.25;
-const SPACE_COL_WEIGHT = 0.5;
-
-const ICON_FONT_SIZE = 0.6;
-const ICON_FONT_COLOR = '#ffffff';
-
-const MESH_WIDTH = 0.4;
-const MESH_HEIGHT = 0.4;
-const ALPHA_TEST = 0.1;
-const Z_OFFSET = 0.01;
+const BUTTON_WIDTH = '25%';
+const IMAGE_WIDTH = '50%';
+const ICON_SIZE = 100;
+const ICON_COLOR = '#ffffff';
 
 /** Configuration data for an animal model in the application. */
 export interface AnimalModel {
@@ -36,21 +29,19 @@ export interface AnimalModel {
 export class AnimalSlider {
   public models: AnimalModel[];
   public currentIndex = 0;
-  public paletteItems: THREE.Mesh[] = [];
+  public paletteItems: xb.UIImage[] = [];
   public textures: THREE.Texture[];
-  public panel: xb.SpatialPanel;
-  public prevBtn!: xb.IconButton;
-  public nextBtn!: xb.IconButton;
-  public sliderMaterial!: THREE.MeshBasicMaterial;
-  public sliderMesh!: THREE.Mesh;
+  public panel: xb.UICard;
+  public prevBtn!: xb.UIButton;
+  public nextBtn!: xb.UIButton;
+  public sliderImage!: xb.UIImage;
 
   public constructor(scene: THREE.Object3D, models: AnimalModel[]) {
     this.models = models;
     this.textures = models.map(({img}) => new THREE.TextureLoader().load(img));
     this.panel = AnimalSlider.createPanel();
     scene.add(this.panel);
-    this.setupGrid();
-    this.setupMesh();
+    this.setupContent();
   }
 
   /** Creates the base spatial panel for the slider. */
@@ -63,49 +54,57 @@ export class AnimalSlider {
     );
   }
 
-  /** Initializes the UI grid and buttons for the slider. */
-  private setupGrid() {
-    const grid = this.panel.addGrid();
-    const sliderRow = grid.addRow({weight: ROW_WEIGHT});
-
-    this.prevBtn = sliderRow.addCol({weight: BTN_COL_WEIGHT}).addIconButton({
-      text: 'arrow_back',
-      fontSize: ICON_FONT_SIZE,
-      fontColor: ICON_FONT_COLOR,
+  /** Initializes the animal image and navigation controls. */
+  private setupContent() {
+    const row = new xb.UIPanel({
+      width: '100%',
+      height: '100%',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fillColor: 'rgba(30, 30, 30, 0.85)',
+      strokeColor: '#555555',
+      strokeWidth: 4,
+      cornerRadius: 24,
     });
-
-    sliderRow.addCol({weight: SPACE_COL_WEIGHT}); // Restored exactly to 0.5 to fix the gap.
-
-    this.nextBtn = sliderRow.addCol({weight: BTN_COL_WEIGHT}).addIconButton({
-      text: 'arrow_forward',
-      fontSize: ICON_FONT_SIZE,
-      fontColor: ICON_FONT_COLOR,
+    this.prevBtn = this.createButton('arrow_back', 'Previous animal', () =>
+      this.slide(-1)
+    );
+    this.sliderImage = new xb.UIImage(this.textures[this.currentIndex], {
+      width: IMAGE_WIDTH,
+      height: '100%',
+      objectFit: 'cover',
     });
-
-    this.prevBtn.onTriggered = () => this.slide(-1);
-    this.nextBtn.onTriggered = () => this.slide(1);
-    this.panel.updateLayouts();
-  }
-
-  /** Initializes the 3D mesh used to display the current animal texture. */
-  private setupMesh() {
-    const geometry = new THREE.PlaneGeometry(MESH_WIDTH, MESH_HEIGHT);
-    this.sliderMaterial = new THREE.MeshBasicMaterial({
-      transparent: true,
-      alphaTest: ALPHA_TEST,
-      side: THREE.DoubleSide,
-    });
-
-    this.sliderMesh = new THREE.Mesh(geometry, this.sliderMaterial);
-    this.sliderMesh.position.set(0, 0, Z_OFFSET);
-    this.sliderMesh.userData = {
+    this.sliderImage.userData = {
       isPaletteItem: true,
       animalIndex: this.currentIndex,
     };
+    this.nextBtn = this.createButton('arrow_forward', 'Next animal', () =>
+      this.slide(1)
+    );
+    row.add(this.prevBtn, this.sliderImage, this.nextBtn);
+    this.panel.add(row);
+    this.paletteItems.push(this.sliderImage);
+  }
 
-    this.panel.add(this.sliderMesh);
-    this.paletteItems.push(this.sliderMesh);
-    this.sliderMaterial.map = this.textures[this.currentIndex];
+  private createButton(icon: string, ariaLabel: string, onClick: () => void) {
+    const button = new xb.UIButton({
+      ariaLabel,
+      width: BUTTON_WIDTH,
+      height: '100%',
+      fillColor: '#00000000',
+      alignItems: 'center',
+      justifyContent: 'center',
+      onClick,
+    });
+    button.add(
+      new xb.UIIcon(icon, {
+        width: ICON_SIZE,
+        height: ICON_SIZE,
+        color: ICON_COLOR,
+      })
+    );
+    return button;
   }
 
   /** Shifts the slider selection by the given direction offset. */
@@ -115,8 +114,8 @@ export class AnimalSlider {
       direction,
       this.models.length
     );
-    this.sliderMaterial.map = this.textures[this.currentIndex];
-    this.sliderMesh.userData.animalIndex = this.currentIndex;
+    this.sliderImage.setSrc(this.textures[this.currentIndex]);
+    this.sliderImage.userData.animalIndex = this.currentIndex;
   }
 
   /** Calculates a safely wrapped array index to handle circular scrolling. */
@@ -133,7 +132,7 @@ export class AnimalSlider {
 
   /** Retrieves the meshes that should be interactable within this UI. */
   public getHitboxes() {
-    return [this.prevBtn, this.nextBtn, this.sliderMesh];
+    return [this.prevBtn, this.nextBtn, this.sliderImage];
   }
 
   /** Retrieves the draggable/spawning elements from the slider. */

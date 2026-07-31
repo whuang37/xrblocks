@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import {raycastSortFunction} from 'uiblocks';
 import * as xb from 'xrblocks';
 
 import {GNMSpatialUI} from './GNMSpatialUI.js';
@@ -67,7 +66,7 @@ export class GNMScene extends xb.Script {
     /** Called with a status string (e.g. current tour expression). */
     this.onStatus = null;
 
-    // uiblocks UICore must be constructed with the owning Script.
+    // Flex UI cards are added directly to this owning Script.
     this.spatialUI = new GNMSpatialUI(this);
   }
 
@@ -211,10 +210,6 @@ export class GNMScene extends xb.Script {
     }
     this.add(hemisphere);
 
-    // Required for raycasting against uiblocks panels.
-    if (xb.core.input?.raycaster) {
-      xb.core.input.raycaster.sortFunction = raycastSortFunction;
-    }
     this.spatialUI.build();
 
     // First shape.

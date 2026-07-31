@@ -1,9 +1,8 @@
 import * as THREE from 'three';
-import {ManipulationBehavior, UICore, UIIcon, UIPanel, UIText} from 'uiblocks';
+import {ManipulationAction, UICard, UIIcon, UIPanel, UIText} from 'xrblocks';
 
 /**
- * GNMSpatialUI — in-headset control surface built with the uiblocks addon
- * (flexbox-laid-out spatial cards; see src/addons/uiblocks/SKILL.md).
+ * GNMSpatialUI — in-headset control surface built with XR Blocks flex UI.
  *
  * Three draggable UICards arranged around the head mirror the desktop panel:
  *   SAMPLE (left)          semantic identity recipe + all 20 expression
@@ -11,12 +10,12 @@ import {ManipulationBehavior, UICore, UIIcon, UIPanel, UIText} from 'uiblocks';
  *   MOTION (right, top)    gaze tracking and animation driver toggles.
  *   VIEW   (right, bottom) material modes and inspection overlays.
  *
- * Buttons are composed UIPanel + UIText (uiblocks has no button class) and
+ * Buttons are composed UIPanel + UIText and
  * reflect live scene state — also when changed from the DOM panel — via
  * update(), called from GNMScene.update().
  */
 
-// Design tokens (§6.1 of the uiblocks skill): one density, a small type
+// Design tokens: one density, a small type
 // scale, spacing rhythm, two radii, and a restrained hex palette.
 const PIXEL_SIZE = 0.0015;
 const SURFACE = '#12161f';
@@ -42,8 +41,6 @@ export class GNMSpatialUI {
     this.scene = scene;
     this.model = scene.model;
     this.samplers = scene.samplers;
-    this.uiCore = new UICore(scene);
-
     this._genderWeights = [1, 1];
     this._ethnicityWeights = [1, 1, 1, 1];
     this._chipPage = 0;
@@ -69,7 +66,7 @@ export class GNMSpatialUI {
   // ------------------------------------------------------------ primitives --
 
   _card(name, sizeX, sizeY, x, y, z, rotationY) {
-    return this.uiCore.createCard({
+    const card = new UICard({
       name,
       sizeX,
       sizeY,
@@ -78,15 +75,13 @@ export class GNMSpatialUI {
       rotation: new THREE.Quaternion().setFromEuler(
         new THREE.Euler(0, rotationY, 0)
       ),
-      behaviors: [
-        new ManipulationBehavior({
-          draggable: true,
-          faceCamera: true,
-          manipulationMargin: 24,
-          manipulationCornerRadius: RADIUS_CARD,
-        }),
-      ],
+      manipulation: {
+        actions: {translate: {faceCamera: true}},
+        handle: {action: ManipulationAction.Translate},
+      },
     });
+    this.scene.add(card);
+    return card;
   }
 
   _surface(card, {padding = 20, gap = 12} = {}) {

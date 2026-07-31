@@ -87,7 +87,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   options.reticles.enabled = false;
   options.simulator.handPosePanel.enabled = false;
   options.simulator.renderToRenderTexture = false;
-  options.uikit.enable(uikit);
   xb.add(new GlassesUISample());
   await xb.init(options);
 });

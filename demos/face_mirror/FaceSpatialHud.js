@@ -1,26 +1,27 @@
 import * as THREE from 'three';
-import {HeadLeashBehavior, UIPanel, UIText} from 'uiblocks';
+import {FaceCamera, FollowHead, UICard, UIPanel, UIText} from 'xrblocks';
 import {FEATURED_BLENDSHAPES} from './FaceMeshIndices.js';
 
 export class FaceSpatialHud {
-  constructor(uiCore) {
-    this.uiCore = uiCore;
+  constructor(owner) {
+    this.owner = owner;
     this.init();
   }
 
   init() {
-    this.hudCard = this.uiCore.createCard({
+    this.hudCard = new UICard({
       name: 'FaceHudCard',
       sizeX: 0.6,
       sizeY: 0.5,
-      behaviors: [
-        new HeadLeashBehavior({
-          offset: new THREE.Vector3(0.85, 0.35, -1.1),
-          posLerp: 0.1,
-          rotLerp: 0.1,
-        }),
-      ],
     });
+    this.hudCard.add(
+      new FollowHead({
+        offset: new THREE.Vector3(0.85, 0.35, -1.1),
+        smoothing: 0.1,
+      }),
+      new FaceCamera({mode: 'spherical', smoothing: 0.1})
+    );
+    this.owner.add(this.hudCard);
 
     const hudPanel = new UIPanel({
       width: '100%',

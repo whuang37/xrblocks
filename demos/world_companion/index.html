@@ -29,7 +29,6 @@
           "@pmndrs/msdfonts": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.64/dist/index.min.js",
           "@preact/signals-core": "https://cdn.jsdelivr.net/npm/@preact/signals-core@1.12.1/dist/signals-core.mjs",
           "yoga-layout/load": "https://cdn.jsdelivr.net/npm/yoga-layout@3.2.1/dist/src/load.js",
-          "uiblocks": "../../build/addons/uiblocks/src/index.js",
           "xrblocks": "../../build/xrblocks.js",
           "xrblocks/addons/": "../../build/addons/",
           "@google/genai": "https://cdn.jsdelivr.net/npm/@google/genai/+esm",
@@ -269,12 +268,12 @@
       import 'xrblocks/addons/simulator/SimulatorAddons.js';
       import {GeminiManager} from 'xrblocks/addons/ai/GeminiManager.js';
       import {
-        ManipulationBehavior,
-        UICore,
+        ManipulationAction,
+        UICard,
         UIIcon,
         UIPanel,
         UIText,
-      } from 'uiblocks';
+      } from 'xrblocks';
       import {Text} from 'troika-three-text';
       import {marked} from 'marked';
       import DOMPurify from 'dompurify';
@@ -972,7 +971,6 @@
       clearBtn.addEventListener('click', clearLabels);
 
       const options = new xb.Options();
-      options.enableUI();
       options.enableAI();
       options.enableCamera();
       options.enableDepth();
@@ -1009,17 +1007,20 @@
 
       // Immersive control panel built with uiblocks (preferred over the older
       // xb.SpatialPanel). Mirrors the DOM controls and shows live status. An
-      // xb.Script so UICore gets its lifecycle hooks; draggable so users can
-      // place it anywhere.
+      // xb.Script so the UI card gets lifecycle hooks and can be moved.
       class WorldCompanionPanel extends xb.Script {
         init() {
-          this.uiCore = new UICore(this);
-          const card = this.uiCore.createCard({
+          const card = new UICard({
             name: 'WorldCompanionControlCard',
             position: new THREE.Vector3(0, 1.3, -0.8),
             sizeX: 0.56,
             sizeY: 0.2,
+            manipulation: {
+              actions: {translate: {faceCamera: true}},
+              handle: {action: ManipulationAction.Translate},
+            },
           });
+          this.add(card);
           const panel = new UIPanel({
             width: '100%',
             height: '100%',
@@ -1068,9 +1069,6 @@
           panel.add(separator);
           panel.add(buttonRow);
           card.add(panel);
-          card.addBehavior(
-            new ManipulationBehavior({draggable: true, faceCamera: true})
-          );
         }
 
         // Icon + caption button mirroring a DOM control. renderOrder/depthTest

@@ -5,7 +5,6 @@ import * as xb from 'xrblocks';
 import {PoemGenerator} from './PoemGenerator.js';
 
 const options = new xb.Options();
-options.enableUI();
 options.enableAI();
 options.enableCamera();
 options.setAppTitle('XR Poet');

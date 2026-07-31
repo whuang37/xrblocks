@@ -1,6 +1,6 @@
 import * as xb from 'xrblocks';
 import * as THREE from 'three';
-import {UICore, UIText, UIPanel} from 'uiblocks';
+import {UICard, UIText, UIPanel} from 'xrblocks';
 
 export class SoundDisplay extends xb.Script {
   static dependencies = {camera: THREE.Camera, world: xb.World};
@@ -8,8 +8,6 @@ export class SoundDisplay extends xb.Script {
   init({camera, world}) {
     this.camera = camera;
     this.world = world;
-
-    this.uiCore = new UICore(this);
 
     this.lastClassification = '';
 
@@ -52,12 +50,13 @@ export class SoundDisplay extends xb.Script {
   }
 
   initHudText() {
-    this.hudCard = this.uiCore.createCard({
+    this.hudCard = new UICard({
       name: 'HUDCard',
       sizeX: 0.5,
       sizeY: 0.2,
       position: new THREE.Vector3(0, 0, -0.5),
     });
+    this.add(this.hudCard);
 
     const hudPanel = new UIPanel({
       width: '100%',

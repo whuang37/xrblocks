@@ -224,7 +224,6 @@ export class WindowReceiver extends xb.Script {
  */
 document.addEventListener('DOMContentLoaded', function () {
   const options = new xb.Options();
-  options.enableUI();
 
   xb.add(new WindowReceiver());
   xb.init(options);

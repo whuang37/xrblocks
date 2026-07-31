@@ -103,8 +103,6 @@ class UikitTemplate extends xb.Script {
 }
 
 const options = new xb.Options();
-options.enableUI();
-options.uikit.enable(uikit);
 
 document.addEventListener('DOMContentLoaded', async function () {
   xb.add(new UikitTemplate());

@@ -1,5 +1,4 @@
 import * as xb from 'xrblocks';
-import {UICore} from 'uiblocks';
 import {FEATURED_BLENDSHAPES} from './FaceMeshIndices.js';
 import {FaceWireframe} from './FaceWireframe.js';
 import {FaceSpatialHud} from './FaceSpatialHud.js';
@@ -12,15 +11,13 @@ export class FaceMirror extends xb.Script {
 
   init({world}) {
     this.world = world;
-    this.uiCore = new UICore(this);
-
     this.wireframe = new FaceWireframe();
     this.add(this.wireframe);
 
     this.statusEl = document.querySelector('face-mirror-status');
     this.statusEl.blendshapes = FEATURED_BLENDSHAPES;
 
-    this.spatialHud = new FaceSpatialHud(this.uiCore);
+    this.spatialHud = new FaceSpatialHud(this);
 
     if (this.world.faces) {
       this.world.faces.start(this);

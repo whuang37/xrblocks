@@ -5,7 +5,6 @@ import * as xb from 'xrblocks';
 import {GeminiManager} from './GeminiManager.js';
 
 const options = new xb.Options();
-options.enableUI();
 options.enableHands();
 options.enableAI();
 options.enableCamera();

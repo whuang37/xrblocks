@@ -1,20 +1,10 @@
 import 'xrblocks/addons/simulator/SimulatorAddons.js';
-import * as uikit from '@pmndrs/uikit';
 import * as THREE from 'three';
-import {UICore, UIPanel, UIText, raycastSortFunction} from 'uiblocks';
+import {UIButton, UICard, UIPanel, UIText} from 'xrblocks';
 import * as xb from 'xrblocks';
 
 class MainScript extends xb.Script {
-  constructor() {
-    super();
-    this.uiCore = new UICore(this);
-  }
-
   async init() {
-    if (xb.core.input.raycaster) {
-      xb.core.input.raycaster.sortFunction = raycastSortFunction;
-    }
-
     this.add(new THREE.HemisphereLight(0xffffff, 0x666666, 3));
 
     this.createUI();
@@ -33,12 +23,13 @@ class MainScript extends xb.Script {
   };
 
   createUI() {
-    const card = this.uiCore.createCard({
+    const card = new UICard({
       name: 'StatusCard',
       sizeX: 1.2,
       sizeY: 0.8,
       position: new THREE.Vector3(0, 1.5, -1.5),
     });
+    this.add(card);
 
     const panel = new UIPanel({
       width: '100%',
@@ -59,7 +50,8 @@ class MainScript extends xb.Script {
     });
     panel.add(this.statusText);
 
-    this.buttonPanel = new UIPanel({
+    this.buttonPanel = new UIButton({
+      ariaLabel: 'Toggle pointer lock',
       width: 360,
       height: 120,
       cornerRadius: 20,
@@ -92,8 +84,6 @@ class MainScript extends xb.Script {
 
 document.addEventListener('DOMContentLoaded', () => {
   const options = new xb.Options();
-  options.enableUI();
-  options.uikit.enable(uikit);
   options.setAppTitle('Pointer Lock Sample');
 
   // Configure simulator to start in Pointer Lock mode

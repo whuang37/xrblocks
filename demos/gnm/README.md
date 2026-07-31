@@ -20,8 +20,8 @@ The full GNM v3.0 forward function runs live in the browser:
 - **Inspection views** — studio / clay / normals / anatomical-region materials,
   quad wireframe, 68 barycentric facial landmarks, skeleton, per-component
   visibility toggles, and OBJ export of the current mesh.
-- **Spatial panels (uiblocks)** — inside XR, three draggable
-  [uiblocks](../../src/addons/uiblocks/SKILL.md) cards arranged around the head
+- **Spatial panels** — inside XR, three movable
+  [flex UI](../../docs/docs/manual/UIBlocks.mdx) cards arranged around the head
   (Sample / Motion / View) expose semantic sampling, all 20 expression classes
   (paged), gaze + animation toggles, material modes, and overlays. Their state
   stays in sync with the desktop DOM panel in both directions.

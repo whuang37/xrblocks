@@ -134,20 +134,12 @@ export class ModelViewerScene extends xb.Script {
   }
 
   async createModelInPanel() {
-    const panel = new xb.SpatialPanel({
-      backgroundColor: '#00000000',
-      width: 0.6,
-      height: 0.6,
-      useDefaultPosition: false,
-    });
-    panel.isRoot = true;
-    this.add(panel);
-    panel.position.set(0, 1.5, -2.0);
-
-    panel.updateLayouts();
+    const modelGroup = new THREE.Group();
+    modelGroup.position.set(0, 1.5, -2.0);
+    this.add(modelGroup);
 
     const model = new xb.ModelViewer({});
-    panel.add(model);
+    modelGroup.add(model);
     await model.loadGLTFModel({
       data: {
         scale: {x: 0.002, y: 0.002, z: 0.002},

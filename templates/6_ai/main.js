@@ -5,7 +5,6 @@ import * as xb from 'xrblocks';
 import {GeminiQueryManager} from './GeminiQueryManager.js';
 
 const options = new xb.Options();
-options.enableUI();
 options.enableAI();
 
 function start() {

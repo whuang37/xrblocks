@@ -1,11 +1,8 @@
 import * as THREE from 'three';
 import * as xb from 'xrblocks';
-import {ManipulationBehavior, UICore, UIIcon, UIPanel, UIText} from 'uiblocks';
+import {UIButton, UICard, UIIcon, UIPanel, UIText} from 'xrblocks';
 
-// Draggable spatial control panel for the magic window. Mirrors the uiblocks
-// pattern used by the other demos: a card with a ManipulationBehavior so it can
-// be grabbed and placed, plus deterministic renderOrder / depthTest on the
-// nested labels and icon so the text isn't occluded by its own backplate.
+// Movable spatial control panel for the magic window.
 export class ControlPanel extends xb.Script {
   constructor(magicWindow) {
     super();
@@ -14,13 +11,17 @@ export class ControlPanel extends xb.Script {
   }
 
   init() {
-    this.uiCore = new UICore(this);
-    const card = this.uiCore.createCard({
+    const card = new UICard({
       name: 'MagicWindowControlCard',
       position: new THREE.Vector3(0, 1.05, -1.0),
       sizeX: 0.5,
       sizeY: 0.24,
+      manipulation: {
+        actions: {translate: {faceCamera: true}},
+        handle: {action: xb.ManipulationAction.Translate},
+      },
     });
+    this.add(card);
     const panel = new UIPanel({
       width: '100%',
       height: '100%',
@@ -62,9 +63,6 @@ export class ControlPanel extends xb.Script {
     panel.add(row);
 
     card.add(panel);
-    card.addBehavior(
-      new ManipulationBehavior({draggable: true, faceCamera: true})
-    );
   }
 
   // A tap-to-cycle button showing the active backdrop. Tapping advances the
@@ -72,7 +70,8 @@ export class ControlPanel extends xb.Script {
   makeBackdropButton() {
     const idle = '#2a2a2a';
     const hover = '#3a3a3a';
-    const btn = new UIPanel({
+    const btn = new UIButton({
+      ariaLabel: 'Change backdrop',
       paddingTop: 8,
       paddingBottom: 8,
       paddingLeft: 16,

@@ -1,6 +1,5 @@
 import 'xrblocks/addons/simulator/SimulatorAddons.js';
 
-import * as uikit from '@pmndrs/uikit';
 import * as xb from 'xrblocks';
 
 import {GNMControls} from './GNMControls.js';
@@ -58,8 +57,6 @@ async function start() {
     setLoadingProgress(1, 'Starting XR Blocks…');
 
     const options = new xb.Options();
-    options.enableUI();
-    options.uikit.enable(uikit); // registers the uikit renderer for uiblocks
     options.enableReticles();
     options.setAppTitle('GNM Head Explorer');
     options.xrButton.startText = '<i id="xrlogo"></i> EXPLORE IN XR';

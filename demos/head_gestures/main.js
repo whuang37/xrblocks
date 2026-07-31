@@ -1,23 +1,18 @@
 import 'xrblocks/addons/simulator/SimulatorAddons.js';
 
-import * as uikit from '@pmndrs/uikit';
 import * as THREE from 'three';
-import {UICore, UIPanel, UIText} from 'uiblocks';
+import {UICard, UIPanel, UIText} from 'xrblocks';
 import * as xb from 'xrblocks';
 
 class HeadGestureDemo extends xb.Script {
-  constructor() {
-    super();
-    this.uiCore = new UICore(this);
-  }
-
   init() {
-    const card = this.uiCore.createCard({
+    const card = new UICard({
       name: 'HeadGestureCard',
       sizeX: 0.72,
       sizeY: 0.32,
       position: new THREE.Vector3(0, 1.45, -1.1),
     });
+    this.add(card);
 
     const panel = new UIPanel({
       width: '100%',
@@ -92,9 +87,7 @@ class HeadGestureDemo extends xb.Script {
 }
 
 const options = new xb.Options();
-options.enableUI();
 options.enableHeadGestures();
-options.uikit.enable(uikit);
 options.setAppTitle('Head Gestures');
 options.setAppDescription('Nod or shake your head to update the UI.');
 options.xrButton.showEnterSimulatorButton = true;

@@ -19,12 +19,11 @@
           "troika-worker-utils": "https://cdn.jsdelivr.net/gh/protectwise/troika@v0.52.4/packages/troika-worker-utils/src/index.js",
           "bidi-js": "https://esm.sh/bidi-js@%5E1.0.2?target=es2022",
           "webgl-sdf-generator": "https://esm.sh/webgl-sdf-generator@1.1.1/es2022/webgl-sdf-generator.mjs",
-          "@pmndrs/uikit": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit@1.0.56/dist/index.min.js",
-          "@pmndrs/uikit-pub-sub": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit-pub-sub@1.0.56/dist/index.min.js",
-          "@pmndrs/msdfonts": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.56/dist/index.min.js",
-          "@preact/signals-core": "https://cdn.jsdelivr.net/npm/@preact/signals-core@1.12.1/dist/signals-core.mjs",
+          "@pmndrs/uikit": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit@1.0.64/dist/index.min.js",
+          "@pmndrs/uikit-pub-sub": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit-pub-sub@1.0.64/dist/index.min.js",
+          "@pmndrs/msdfonts": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.64/dist/index.min.js",
+          "@preact/signals-core": "https://cdn.jsdelivr.net/npm/@preact/signals-core@1.14.0/dist/signals-core.mjs",
           "yoga-layout/load": "https://cdn.jsdelivr.net/npm/yoga-layout@3.2.1/dist/src/load.js",
-          "uiblocks": "../../build/addons/uiblocks/src/index.js",
           "xrblocks": "../../build/xrblocks.js"
         }
       }
@@ -33,49 +32,33 @@
 
   <body>
     <script type="module">
-      import * as uikit from '@pmndrs/uikit';
       import * as THREE from 'three';
       import {
-        UICore,
+        UIButton,
+        UICard,
         UIPanel,
         UIText,
         UIImage,
         UIIcon,
-        ManipulationBehavior,
-        raycastSortFunction,
-      } from 'uiblocks';
+      } from 'xrblocks';
       import * as xb from 'xrblocks';
 
       class MainScript extends xb.Script {
-        constructor() {
-          super();
-          this.uiCore = new UICore(this);
-        }
-
         async init() {
-          if (xb.core.input.raycaster) {
-            xb.core.input.raycaster.sortFunction = raycastSortFunction;
-          }
-
           this.add(new THREE.HemisphereLight(0xffffff, 0x666666, 3));
 
           this.createUI();
         }
 
         createUI() {
-          const card = this.uiCore.createCard({
+          const card = new UICard({
             name: 'ProfileCard',
             sizeX: 1.2,
             sizeY: 1.0,
             position: new THREE.Vector3(0, 1.5, -1.5),
-            behaviors: [
-              new ManipulationBehavior({
-                draggable: true,
-                manipulationMargin: 100,
-                manipulationCornerRadius: 60,
-              }),
-            ],
+            manipulation: true,
           });
+          this.add(card);
 
           const panel = new UIPanel({
             width: '100%',
@@ -128,7 +111,8 @@
           const createIconBtn = (iconName, color) => {
             let isHovered = false;
 
-            const button = new UIPanel({
+            const button = new UIButton({
+              ariaLabel: iconName,
               width: 160,
               height: 160,
               cornerRadius: 40,
@@ -178,7 +162,7 @@
           panel.add(iconPanel);
 
           const desc = new UIText(
-            'This sample card is built using uiblocks, featuring a panel, image, icons, and text. See more samples under the uiblocks folder.',
+            'This sample uses the XR Blocks flex UI, with a panel, image, icons, text, captured buttons, and shared manipulation.',
             {
               fontSize: 48,
               color: 'white',
@@ -193,9 +177,7 @@
 
       document.addEventListener('DOMContentLoaded', () => {
         const options = new xb.Options();
-        options.enableUI();
-        options.uikit.enable(uikit);
-        options.setAppTitle('uiblocks Sample');
+        options.setAppTitle('XR Blocks UI Sample');
         xb.add(new MainScript());
         xb.init(options);
       });

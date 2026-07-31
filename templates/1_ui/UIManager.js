@@ -1,49 +1,77 @@
+import * as THREE from 'three';
 import * as xb from 'xrblocks';
 
-/**
- * Rending a draggable spatial UI panel with SDF font libraries, and icons
- * buttons using XR Blocks.
- */
+/** Renders a movable spatial question card with two captured buttons. */
 export class UIManager extends xb.Script {
   constructor() {
     super();
 
-    // Adds an interactive SpatialPanel as a container for UI elements.
-    const panel = new xb.SpatialPanel({backgroundColor: '#2b2b2baa'});
-    this.add(panel);
-
-    const grid = panel.addGrid();
-    // `weight` defines the perentage of a view's dimension to its parent.
-    // Here, question occupies 70% of the height of the panel.
-    const question = grid.addRow({weight: 0.7}).addText({
-      text: 'Welcome to UI Playground! Is it your first time here?',
-      fontColor: '#ffffff',
-      fontSize: 0.08,
+    const card = new xb.UICard({
+      name: 'WelcomeCard',
+      position: new THREE.Vector3(0, 1.2, -1),
+      sizeX: 0.75,
+      sizeY: 0.34,
+      fillColor: '#00000000',
+      manipulation: true,
     });
-    this.question = question;
+    this.add(card);
 
-    // ctrlRow occupies 30% of the height of the panel.
-    const ctrlRow = grid.addRow({weight: 0.3});
+    const panel = new xb.UIPanel({
+      width: '100%',
+      height: '100%',
+      padding: 24,
+      gap: 18,
+      flexDirection: 'column',
+      alignItems: 'stretch',
+      justifyContent: 'center',
+      fillColor: 'rgba(43, 43, 43, 0.9)',
+      strokeColor: '#686868',
+      strokeWidth: 2,
+      cornerRadius: 20,
+    });
+    card.add(panel);
 
-    // The `text` field defines the icon of the button from Material Icons in
-    // https://fonts.google.com/icons
-    const yesButton = ctrlRow
-      .addCol({weight: 0.5})
-      .addIconButton({text: 'check_circle', fontSize: 0.5});
+    this.question = new xb.UIText(
+      'Welcome to UI Playground! Is it your first time here?',
+      {
+        width: '100%',
+        flexGrow: 1,
+        fontSize: 28,
+        color: '#ffffff',
+        textAlign: 'center',
+      }
+    );
+    panel.add(this.question);
 
-    // onTriggered defines unified behavior for `onSelected`, `onClicked`,
-    // `onPinched`, `onTouched` for buttons.
-    yesButton.onTriggered = () => {
-      this._onYes();
-    };
+    const controls = new xb.UIPanel({
+      width: '100%',
+      height: 96,
+      gap: 18,
+      flexDirection: 'row',
+      alignItems: 'stretch',
+      justifyContent: 'center',
+      fillColor: '#00000000',
+    });
+    controls.add(
+      this.createButton('check_circle', 'Yes', '#338a4b', () => this._onYes()),
+      this.createButton('cancel', 'No', '#a43e3e', () => this._onNo())
+    );
+    panel.add(controls);
+  }
 
-    const noButton = ctrlRow
-      .addCol({weight: 0.5})
-      .addIconButton({text: 'cancel', fontSize: 0.5});
-
-    noButton.onTriggered = () => {
-      this._onNo();
-    };
+  createButton(icon, ariaLabel, fillColor, onClick) {
+    const button = new xb.UIButton({
+      ariaLabel,
+      width: '50%',
+      height: '100%',
+      fillColor,
+      cornerRadius: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+      onClick,
+    });
+    button.add(new xb.UIIcon(icon, {width: 48, height: 48, color: '#ffffff'}));
+    return button;
   }
 
   _onYes() {

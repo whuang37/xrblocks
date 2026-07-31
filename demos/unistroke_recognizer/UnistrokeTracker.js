@@ -1,6 +1,6 @@
 import * as xb from 'xrblocks';
 import * as THREE from 'three';
-import {UICore, UIText, UIPanel, HeadLeashBehavior} from 'uiblocks';
+import {FaceCamera, FollowHead, UICard, UIText, UIPanel} from 'xrblocks';
 import {StrokeRenderer} from './StrokeRenderer.js';
 import {PerfectShapeRenderer} from './PerfectShapeRenderer.js';
 
@@ -21,7 +21,6 @@ export class UnistrokeTracker extends xb.Script {
     this.scene = scene;
     console.log('UnistrokeTracker initialized');
 
-    this.uiCore = new UICore(this);
     this.initHudText();
 
     this.strokeRenderer = new StrokeRenderer(this.scene);
@@ -73,19 +72,20 @@ export class UnistrokeTracker extends xb.Script {
    * Initializes the HUD display using uiblocks components.
    */
   initHudText() {
-    const card = this.uiCore.createCard({
+    const card = new UICard({
       name: 'HUDCard',
       sizeX: 0.5,
       sizeY: 0.2,
       position: new THREE.Vector3(0, 0.3, -1.0),
-      behaviors: [
-        new HeadLeashBehavior({
-          offset: new THREE.Vector3(0, 0.3, -1.0),
-          posLerp: 0.1,
-          rotLerp: 0.1,
-        }),
-      ],
     });
+    card.add(
+      new FollowHead({
+        offset: new THREE.Vector3(0, 0.3, -1.0),
+        smoothing: 0.1,
+      }),
+      new FaceCamera({mode: 'spherical', smoothing: 0.1})
+    );
+    this.add(card);
 
     const panel = new UIPanel({
       flexDirection: 'column',

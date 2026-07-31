@@ -342,16 +342,7 @@ export class AnimalOcclusionScene extends xb.Script {
     const isUIHit = uiHits.length > 0;
     const handled = isUIHit && !isPaletteHit;
 
-    if (handled) {
-      // Let the native xb.UI handle the button triggers natively if possible, but also intercept custom trigger events on explicit bgMeshes.
-      const interactiveHit = uiHits.find(
-        (hit) => typeof hit.object.userData?.onTrigger === 'function'
-      );
-      if (interactiveHit) {
-        interactiveHit.object.userData.onTrigger();
-        event?.stopPropagation();
-      }
-    }
+    if (handled) event?.stopPropagation();
 
     return {handled, isPaletteHit};
   }

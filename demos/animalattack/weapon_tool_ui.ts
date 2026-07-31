@@ -1,9 +1,6 @@
 import * as THREE from 'three';
 import * as xb from 'xrblocks';
-import {
-  createSpatialPanel,
-  buildSpatialActionPanel,
-} from './spatial_action_panel.js';
+import {buildSpatialActionPanel} from './spatial_action_panel.js';
 
 const PANEL_WIDTH = 0.3;
 const PANEL_HEIGHT = 0.3;
@@ -43,24 +40,21 @@ const WEAPON_INACTIVE_COLOR = 0x444444;
 export class WeaponToolUI {
   public weaponsEnabled = false;
   public rainActive = false;
-  public panels: xb.SpatialPanel[] = [];
-  public bgMeshes: THREE.Mesh[] = [];
-  public sourcePanel: xb.SpatialPanel;
+  public panels: xb.UICard[] = [];
+  public buttons: xb.UIButton[] = [];
+  public sourcePanel: THREE.Group;
   public sourceIcon: THREE.Group;
-  public weaponBtn: THREE.Mesh;
-  public rainBtn: THREE.Mesh;
+  public weaponBtn: xb.UIButton;
+  public rainBtn: xb.UIButton;
 
   public constructor(
     scene: THREE.Object3D,
     private onToggleCallback: (enabled: boolean) => void,
     private onRainToggleCallback: (active: boolean) => void
   ) {
-    this.sourcePanel = createSpatialPanel(
-      PANEL_WIDTH,
-      PANEL_HEIGHT,
-      new THREE.Vector3(PANEL_POS_X, PANEL_POS_Y, PANEL_POS_Z),
-      PANEL_ROT_X
-    );
+    this.sourcePanel = new THREE.Group();
+    this.sourcePanel.position.set(PANEL_POS_X, PANEL_POS_Y, PANEL_POS_Z);
+    this.sourcePanel.rotation.x = PANEL_ROT_X;
     scene.add(this.sourcePanel);
 
     this.sourceIcon = new THREE.Group();
@@ -95,17 +89,17 @@ export class WeaponToolUI {
       scene,
       new THREE.Vector3(WEAPON_PANEL_POS_X, PANEL_POS_Y, PANEL_POS_Z),
       'casino',
-      this.bgMeshes,
+      this.buttons,
       () => this.toggleWeapons()
     );
     this.panels.push(weaponUi.panel);
-    this.weaponBtn = weaponUi.bgMesh;
+    this.weaponBtn = weaponUi.button;
 
     const rainUi = buildSpatialActionPanel(
       scene,
       new THREE.Vector3(RAIN_PANEL_POS_X, PANEL_POS_Y, PANEL_POS_Z),
       'pets',
-      this.bgMeshes,
+      this.buttons,
       () => {
         this.rainActive = !this.rainActive;
         this.updatePanelState(this.rainBtn, this.rainActive, ACTIVE_COLOR);
@@ -113,7 +107,7 @@ export class WeaponToolUI {
       }
     );
     this.panels.push(rainUi.panel);
-    this.rainBtn = rainUi.bgMesh;
+    this.rainBtn = rainUi.button;
 
     this.toggleWeapons(true);
     this.rainActive = true;
@@ -123,16 +117,12 @@ export class WeaponToolUI {
 
   /** Updates the visual state of a UI panel to reflect its active status. */
   public updatePanelState(
-    bgMesh: THREE.Mesh,
+    button: xb.UIButton,
     isActive: boolean,
     activeColorHex: number
   ) {
-    (bgMesh.material as THREE.MeshBasicMaterial).color.setHex(
-      isActive ? activeColorHex : INACTIVE_COLOR
-    );
-    (bgMesh.userData.edgeLine.material as THREE.LineBasicMaterial).color.setHex(
-      isActive ? ACTIVE_EDGE_COLOR : INACTIVE_EDGE_COLOR
-    );
+    button.setFillColor(isActive ? activeColorHex : INACTIVE_COLOR);
+    button.setStrokeColor(isActive ? ACTIVE_EDGE_COLOR : INACTIVE_EDGE_COLOR);
   }
 
   /** Toggles the state of the weapons UI, optionally forcing it to be enabled. */
@@ -146,14 +136,12 @@ export class WeaponToolUI {
     this.sourceIcon.userData.mat.color.setHex(
       this.weaponsEnabled ? WEAPON_ACTIVE_COLOR : WEAPON_INACTIVE_COLOR
     );
-    this.sourcePanel.updateLayouts();
-
     this.onToggleCallback(this.weaponsEnabled);
   }
 
   /** Retrieves the meshes acting as hitboxes for UI interaction. */
   public getHitboxes() {
-    return this.bgMeshes;
+    return this.buttons;
   }
 
   /** Retrieves the array of managed spatial panels. */

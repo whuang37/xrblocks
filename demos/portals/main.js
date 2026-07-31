@@ -5,7 +5,6 @@ import * as xb from 'xrblocks';
 import {PortalGalleryScene} from './PortalGalleryScene.js';
 
 const options = new xb.Options();
-options.enableUI();
 options.reticles.enabled = true;
 
 // Real-world depth mesh so the portal can be placed on a wall/floor and the

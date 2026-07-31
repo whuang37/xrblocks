@@ -76,7 +76,6 @@ export class CameraViewManager extends xb.Script {
 
 document.addEventListener('DOMContentLoaded', function () {
   const options = new xb.Options();
-  options.enableUI();
   options.enableCamera();
   xb.add(new CameraViewManager());
   xb.init(options);

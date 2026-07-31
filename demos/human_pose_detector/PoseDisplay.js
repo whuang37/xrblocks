@@ -1,6 +1,6 @@
 import * as xb from 'xrblocks';
 import * as THREE from 'three';
-import {UICore, UIText, UIPanel} from 'uiblocks';
+import {UICard, UIText, UIPanel} from 'xrblocks';
 
 export class PoseDisplay extends xb.Script {
   static dependencies = {camera: THREE.Camera, world: xb.World};
@@ -8,8 +8,6 @@ export class PoseDisplay extends xb.Script {
   init({camera, world}) {
     this.camera = camera;
     this.world = world;
-    this.uiCore = new UICore(this);
-
     this.initHudText();
 
     this.initJointMarkers();
@@ -24,12 +22,13 @@ export class PoseDisplay extends xb.Script {
 
   initHudText() {
     // Define the premium glassmorphic display card
-    this.hudCard = this.uiCore.createCard({
+    this.hudCard = new UICard({
       name: 'PoseHUDCard',
       sizeX: 0.46,
       sizeY: 0.18,
       position: new THREE.Vector3(0, 0, -1.0),
     });
+    this.add(this.hudCard);
 
     const hudPanel = new UIPanel({
       width: '100%',

@@ -5,7 +5,6 @@ import {BalloonGame, GROUP_WORLD} from './BalloonPop.js';
 
 document.addEventListener('DOMContentLoaded', () => {
   const o = new xb.Options();
-  o.enableUI();
   o.physics.RAPIER = RAPIER;
   o.physics.useEventQueue = true;
   o.physics.worldStep = true;

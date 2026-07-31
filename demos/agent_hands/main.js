@@ -2,13 +2,15 @@ import 'xrblocks/addons/simulator/SimulatorAddons.js';
 
 import * as THREE from 'three';
 import {
-  HeadLeashBehavior,
-  ManipulationBehavior,
-  UICore,
+  UIButton,
+  FaceCamera,
+  FollowHead,
+  ManipulationAction,
+  UICard,
   UIIcon,
   UIPanel,
   UIText,
-} from 'uiblocks';
+} from 'xrblocks';
 import {
   AgentGestureAnimator,
   AgentHands,
@@ -311,13 +313,17 @@ class AgentHandsDemo extends xb.Script {
   // ---- spatial control panel (works in XR + simulator) ----
 
   buildSpatialPanel_() {
-    this.uiCore = new UICore(this);
-    const card = this.uiCore.createCard({
+    const card = new UICard({
       name: 'AgentHandsControlCard',
       position: new THREE.Vector3(0, 0.7, -0.8),
       sizeX: 0.62,
       sizeY: 0.22,
+      manipulation: {
+        actions: {translate: true},
+        handle: {action: ManipulationAction.Translate},
+      },
     });
+    this.add(card);
     const panel = new UIPanel({
       width: '100%',
       height: '100%',
@@ -369,16 +375,13 @@ class AgentHandsDemo extends xb.Script {
     }
     panel.add(row);
     card.add(panel);
-    card.addBehavior(
-      new ManipulationBehavior({draggable: true, faceCamera: false})
-    );
     // Gently follow the user so the controls stay in reach as they move.
-    card.addBehavior(
-      new HeadLeashBehavior({
+    card.add(
+      new FollowHead({
         offset: new THREE.Vector3(0, PANEL_HEIGHT_M, -PANEL_DISTANCE_M),
-        posLerp: 0.08,
-        rotLerp: 0.1,
-      })
+        smoothing: 0.08,
+      }),
+      new FaceCamera({mode: 'spherical', smoothing: 0.1})
     );
   }
 
@@ -388,7 +391,8 @@ class AgentHandsDemo extends xb.Script {
     // unmistakable (the old near-black hover was invisible against idle).
     const idle = '#3a3550';
     const hover = '#7a5fc7';
-    const btn = new UIPanel({
+    const btn = new UIButton({
+      ariaLabel: label,
       paddingTop: 8,
       paddingBottom: 8,
       paddingLeft: 16,
@@ -624,7 +628,6 @@ function start() {
   const options = new xb.Options();
   options.enableAI();
   // Spatial UI (the control panel) + reticle for pointing at it.
-  options.enableUI();
   options.reticles.enabled = true;
   options.sound.speechSynthesizer.enabled = true;
   options.sound.speechSynthesizer.allowInterruptions = true;

@@ -9,7 +9,6 @@ import {
 } from '@pmndrs/uikit';
 import {Signal} from '@preact/signals-core';
 import {ColorRepresentation, MeshBasicMaterial, Texture} from 'three';
-import {XRUI} from '../mixins/XRUI';
 
 /**
  * Properties for initializing a UIImage.
@@ -31,7 +30,7 @@ export type UIImageSrc =
  * A wrapper component for rendering layout mapped static 2D images or textures.
  * Inherits from standard \@pmndrs/uikit `Image` and overrides updates to correctly sync responsive standard layouts over to internal basic map items properly.
  */
-export class UIImage extends XRUI(Image) {
+export class UIImage extends Image {
   name = 'UIImage';
 
   /**

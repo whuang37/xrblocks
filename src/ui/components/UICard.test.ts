@@ -3,6 +3,7 @@ import {describe, expect, it} from 'vitest';
 
 import {FaceCamera} from '../../placement/FaceCamera';
 import {VisibilityTransition} from '../../placement/VisibilityTransition';
+import {ManipulationAction} from '../../interaction/manipulation/ManipulationTypes';
 import {UICard} from './UICard';
 import {UIPanel} from './UIPanel';
 
@@ -10,7 +11,13 @@ describe('UICard', () => {
   it('uses the shared manipulation configuration', () => {
     const card = new UICard({manipulation: true});
 
-    expect(card.xb?.manipulation).toBe(true);
+    expect(card.xb?.manipulation).toEqual({
+      actions: {translate: true, scale: true},
+      handle: {action: ManipulationAction.None},
+    });
+    expect(card.manipulationHandle?.xb?.manipulationHandle).toEqual({
+      action: ManipulationAction.Translate,
+    });
     expect(card.isUI).toBe(true);
 
     card.dispose();

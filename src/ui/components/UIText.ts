@@ -7,7 +7,6 @@ import {
   WithSignal,
 } from '@pmndrs/uikit';
 import {ColorRepresentation} from 'three';
-import {XRUI} from '../mixins/XRUI';
 
 /**
  * Properties for initializing a UIText.
@@ -18,9 +17,9 @@ export type UITextProperties = TextProperties;
 /**
  * UIText
  * A wrapper component for rendering flat 3D text nodes.
- * Inherits from standard \@pmndrs/uikit `Text` and mixes in `XRUI` for layout/styling adapters.
+ * Inherits from standard \@pmndrs/uikit `Text` for layout and styling.
  */
-export class UIText extends XRUI(Text) {
+export class UIText extends Text {
   name = 'UIText';
 
   /**

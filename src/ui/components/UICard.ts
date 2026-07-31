@@ -1,12 +1,12 @@
 import {Container} from '@pmndrs/uikit';
 import * as THREE from 'three';
 
+import {ScriptMixin} from '../../core/Script';
 import {
   ManipulationAction,
   type ManipulationOptions,
 } from '../../interaction/manipulation/ManipulationTypes';
 import {DEFAULT_CARD_PROPS} from '../constants/UICardConstants';
-import {XRUI} from '../mixins/XRUI';
 import {
   GradientPanel,
   type GradientPanelProperties,
@@ -21,6 +21,8 @@ export type UICardManipulationOptions = ManipulationOptions & {
   /** Adds the edge handle. The edge is enabled by default for UI cards. */
   edge?: boolean | UIManipulationHandleProperties;
 };
+
+const ScriptedGradientPanel = ScriptMixin(GradientPanel);
 
 /** Properties for a world-space UI root. */
 export type UICardOutProperties = Omit<
@@ -40,7 +42,7 @@ export type UICardOutProperties = Omit<
 };
 
 /** A UIKit flex container anchored in world space. */
-export class UICard extends XRUI(GradientPanel) {
+export class UICard extends ScriptedGradientPanel {
   static dependencies = {timer: THREE.Timer};
 
   name = 'UICard';
@@ -135,6 +137,10 @@ export class UICard extends XRUI(GradientPanel) {
     super.update();
     const update = Container.prototype['update'];
     if (update) update.call(this, this.timer?.getDelta() ?? 0);
+  }
+
+  override dispose(): void {
+    GradientPanel.prototype.dispose.call(this);
   }
 }
 

@@ -8,7 +8,6 @@ import {
 } from '@pmndrs/uikit';
 import {computed, signal, Signal} from '@preact/signals-core';
 import {ColorRepresentation} from 'three';
-import {XRUI} from '../mixins/XRUI';
 
 const SVG_BASE_PATH =
   'https://cdn.jsdelivr.net/gh/marella/material-symbols@v0.33.0/svg/{{weight}}/{{style}}/{{icon}}.svg';
@@ -41,7 +40,7 @@ export type UIIconProperties = InProperties<UIIconOutProperties>;
  * A reactive Material Symbol loader and renderer.
  * Automatically resolves `icon`, `iconStyle`, and `iconWeight` into structured CDN queries to fetch standard SVGs and mirrors them into `@pmndrs/uikit` Svg components.
  */
-export class UIIcon extends XRUI(Svg)<SvgOutProperties> {
+export class UIIcon extends Svg<SvgOutProperties> {
   name = 'UIIcon';
 
   private iconSignal: Signal<string | undefined>;

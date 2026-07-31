@@ -1,6 +1,5 @@
 import * as THREE from 'three';
-import type {SelectEvent} from '../../core/Script';
-import {XRUI} from '../mixins/XRUI';
+import {ScriptMixin, type SelectEvent} from '../../core/Script';
 import {
   GradientPanel,
   GradientPanelProperties,
@@ -24,9 +23,9 @@ export type UIPanelProperties = GradientPanelProperties & {
  * A unified component for both layout arrangement and visual styling.
  * Supports background gradients, shadows, borders, and flexbox styles.
  *
- * It is also the default entry point for capturing laser pointer Interactions via the XRUI mixin.
+ * It is also the default entry point for capturing laser pointer interactions.
  */
-export class UIPanel extends XRUI(GradientPanel) {
+export class UIPanel extends ScriptMixin(GradientPanel) {
   // Internal callback storage.
   private _onHoverEnter?: (controller: THREE.Object3D) => void;
   private _onHoverExit?: (controller: THREE.Object3D) => void;
@@ -78,5 +77,9 @@ export class UIPanel extends XRUI(GradientPanel) {
   onObjectSelectEnd(_event: SelectEvent) {
     if (this.onClick) this.onClick();
     return true;
+  }
+
+  override dispose(): void {
+    GradientPanel.prototype.dispose.call(this);
   }
 }

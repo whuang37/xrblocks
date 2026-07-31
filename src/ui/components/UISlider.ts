@@ -1,9 +1,8 @@
 import * as THREE from 'three';
 
-import type {SelectEvent} from '../../core/Script';
+import {ScriptMixin, type SelectEvent} from '../../core/Script';
 import {registerSemanticControl} from '../../interaction/SemanticControl';
 import {clamp} from '../../utils/utils';
-import {XRUI} from '../mixins/XRUI';
 import {
   GradientPanel,
   type GradientPanelProperties,
@@ -30,7 +29,7 @@ export interface UISliderProperties extends GradientPanelProperties {
   onChange?: (value: number) => void;
 }
 
-const SliderBase = XRUI(GradientPanel);
+const SliderBase = ScriptMixin(GradientPanel);
 
 /** A horizontal slider that captures one controller until selection ends. */
 export class UISlider extends SliderBase {
@@ -184,6 +183,10 @@ export class UISlider extends SliderBase {
     const controller = this.activeController;
     if (!controller || controller.userData.selected !== true) return;
     this.setValue(this.motion.getValueFromController(controller), true);
+  }
+
+  override dispose(): void {
+    GradientPanel.prototype.dispose.call(this);
   }
 
   private updateVisuals(): void {

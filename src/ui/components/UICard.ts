@@ -1,13 +1,26 @@
 import {Container} from '@pmndrs/uikit';
 import * as THREE from 'three';
 
-import type {ManipulationOptions} from '../../interaction/manipulation/ManipulationTypes';
+import {
+  ManipulationAction,
+  type ManipulationOptions,
+} from '../../interaction/manipulation/ManipulationTypes';
 import {DEFAULT_CARD_PROPS} from '../constants/UICardConstants';
 import {XRUI} from '../mixins/XRUI';
 import {
   GradientPanel,
   type GradientPanelProperties,
 } from '../primitives/GradientPanel';
+import {
+  UIManipulationHandle,
+  type UIManipulationHandleProperties,
+} from './UIManipulationHandle';
+
+/** Manipulation actions and optional shader edge for a UI card. */
+export type UICardManipulationOptions = ManipulationOptions & {
+  /** Adds the edge handle. The edge is enabled by default for UI cards. */
+  edge?: boolean | UIManipulationHandleProperties;
+};
 
 /** Properties for a world-space UI root. */
 export type UICardOutProperties = Omit<
@@ -23,7 +36,7 @@ export type UICardOutProperties = Omit<
   anchorX?: 'left' | 'right' | 'center' | number;
   anchorY?: 'bottom' | 'top' | 'center' | number;
   pixelSize?: number;
-  manipulation?: boolean | ManipulationOptions;
+  manipulation?: boolean | UICardManipulationOptions;
 };
 
 /** A UIKit flex container anchored in world space. */
@@ -40,6 +53,7 @@ export class UICard extends XRUI(GradientPanel) {
   readonly anchorX: number;
   readonly anchorY: number;
   readonly basePosition: THREE.Vector3;
+  readonly manipulationHandle?: UIManipulationHandle;
   private timer?: THREE.Timer;
 
   constructor(config: UICardOutProperties = {}) {
@@ -85,7 +99,16 @@ export class UICard extends XRUI(GradientPanel) {
     this.position.copy(this.basePosition);
     if (rotation) this.quaternion.copy(rotation);
     if (visible !== undefined) this.visible = visible;
-    if (manipulation !== undefined) this.xb = {manipulation};
+    if (manipulation !== undefined) {
+      const resolved = resolveCardManipulation(manipulation);
+      this.xb = {manipulation: resolved.owner};
+      if (resolved.edge !== false) {
+        this.manipulationHandle = new UIManipulationHandle(
+          resolved.edge === true ? {} : resolved.edge
+        );
+        this.add(this.manipulationHandle);
+      }
+    }
 
     // UIKit containers coordinate their own private hit surfaces. The public
     // card remains the logical interaction and manipulation owner.
@@ -113,6 +136,40 @@ export class UICard extends XRUI(GradientPanel) {
     const update = Container.prototype['update'];
     if (update) update.call(this, this.timer?.getDelta() ?? 0);
   }
+}
+
+function resolveCardManipulation(value: boolean | UICardManipulationOptions): {
+  owner: boolean | ManipulationOptions;
+  edge: boolean | UIManipulationHandleProperties;
+} {
+  if (value === false) {
+    return {owner: false, edge: false};
+  }
+  if (value === true) {
+    return {
+      owner: {
+        actions: {translate: true, scale: true},
+        handle: {action: ManipulationAction.None},
+      },
+      edge: true,
+    };
+  }
+
+  const {edge = true, ...options} = value;
+  const actions = options.actions ?? {translate: true, scale: true};
+  return {
+    owner: {
+      ...options,
+      actions,
+      handle: {
+        action:
+          edge === false
+            ? (options.handle?.action ?? ManipulationAction.Translate)
+            : ManipulationAction.None,
+      },
+    },
+    edge,
+  };
 }
 
 function resolveHorizontalAnchor(

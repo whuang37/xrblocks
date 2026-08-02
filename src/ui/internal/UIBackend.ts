@@ -14,7 +14,7 @@ export interface UIPresentationState {
   readonly hovered: boolean;
   readonly active: boolean;
   readonly disabled: boolean;
-  readonly cursorUVs: readonly THREE.Vector2[];
+  readonly cursorPoints: readonly THREE.Vector3[];
 }
 
 export interface UIMount {

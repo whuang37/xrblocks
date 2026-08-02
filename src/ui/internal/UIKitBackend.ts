@@ -248,8 +248,11 @@ function createNode(
 
     if (kind === 'card' && getUICardEdgeOptions(element as UICard)) {
       edge = new UICardEdge();
-      edge.setCursors(presentation.cursorUVs[0], presentation.cursorUVs[1]);
       panel.add(edge);
+      edge.setCursorPoints(
+        presentation.cursorPoints[0],
+        presentation.cursorPoints[1]
+      );
       mappings.push({
         physical: edge,
         logical: element,
@@ -296,7 +299,7 @@ function createNode(
       applyPresentation(state);
     }
     node.visible = element.visible;
-    edge?.setCursors(state.cursorUVs[0], state.cursorUVs[1]);
+    edge?.setCursorPoints(state.cursorPoints[0], state.cursorPoints[1]);
   });
 
   node.visible = element.visible;
@@ -312,7 +315,16 @@ function createNode(
       part: kind === 'card' ? {kind: 'card-surface'} : {kind: 'content'},
     });
   }
+  allowChildRaycasts(node);
   return node;
+}
+
+/** Prevents UIKit's false return from stopping XR Blocks scene traversal. */
+function allowChildRaycasts(node: THREE.Object3D): void {
+  const raycast = node.raycast.bind(node);
+  node.raycast = (raycaster, intersections) => {
+    raycast(raycaster, intersections);
+  };
 }
 
 function clearRemovedProperties(

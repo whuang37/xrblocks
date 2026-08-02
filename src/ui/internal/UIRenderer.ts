@@ -241,11 +241,9 @@ export class UIRenderer {
         hovered: this.interaction.isPointingAt(element),
         active: this.interaction.isSelectingAt(element),
         disabled: getSemanticControl(element)?.isDisabled() ?? false,
-        cursorUVs: this.interaction
+        cursorPoints: this.interaction
           .getIntersectionsAt(element)
-          .flatMap((intersection) =>
-            intersection.uv ? [intersection.uv] : []
-          ),
+          .map((intersection) => intersection.point),
       });
       if (signature !== record.signature) {
         record.signature = signature;

@@ -1,5 +1,9 @@
-import {InProperties, RenderContext, WithSignal} from '@pmndrs/uikit';
-import {effect} from '@preact/signals-core';
+import {
+  abortableEffect,
+  InProperties,
+  RenderContext,
+  WithSignal,
+} from '@pmndrs/uikit';
 import * as THREE from 'three';
 import {GradientInnerShadowFragmentShader} from '../../shaders/GradientInnerShadow.frag';
 import {Paint, StrokeAlign} from '../../types/ShaderTypes';
@@ -70,7 +74,7 @@ export class InnerShadowLayer extends PanelLayer<InnerShadowLayerProperties> {
 
     super(material, inputProperties, initialClasses, config);
 
-    effect(() => {
+    abortableEffect(() => {
       const signalProps = (
         this.properties as unknown as {
           signal: SignalProperties<
@@ -101,6 +105,6 @@ export class InnerShadowLayer extends PanelLayer<InnerShadowLayerProperties> {
         strokeWidth: signalProps.strokeWidth?.value,
         strokeAlign: signalProps.strokeAlign?.value,
       });
-    });
+    }, this.abortSignal);
   }
 }

@@ -31,6 +31,7 @@ export type UIBackendLoader = () => Promise<UIBackendModule>;
 const PRIVATE_NODES = new WeakSet<THREE.Object3D>();
 const WARNED_OVERLAY_TRANSFORMS = new WeakSet<UIElement>();
 const IDENTITY_MATRIX = new THREE.Matrix4();
+const STALE_UI_LOAD = new Error('Stale UI backend load.');
 
 /** Owns all private UI rendering state for one Core lifecycle. */
 export class UIRenderer {
@@ -46,6 +47,7 @@ export class UIRenderer {
   private scene?: THREE.Scene;
   private themeRevision = -1;
   private nextMountOrder = 0;
+  private generation = 0;
 
   constructor(
     private readonly interaction: Interaction,
@@ -62,6 +64,7 @@ export class UIRenderer {
     renderer: THREE.WebGLRenderer,
     camera: THREE.Camera
   ): Promise<void> {
+    this.generation++;
     this.scene = scene;
     this.renderer = renderer;
     this.camera = camera;
@@ -73,6 +76,7 @@ export class UIRenderer {
     try {
       backend = await this.loadBackend();
     } catch (cause) {
+      if (cause === STALE_UI_LOAD) return;
       this.backend?.dispose();
       this.backend = undefined;
       this.privateRoot.removeFromParent();
@@ -101,6 +105,13 @@ export class UIRenderer {
     for (const root of this.mounts.keys()) {
       if (!connected.has(root)) this.disconnect(root);
     }
+    for (const root of roots) {
+      const record = this.mounts.get(root);
+      if (record && !record.connected) {
+        record.connected = true;
+        record.signature = '';
+      }
+    }
     if (roots.length === 0) return;
 
     if (this.failed && roots.some((root) => !this.failedRoots.has(root))) {
@@ -112,6 +123,7 @@ export class UIRenderer {
     const backend = this.backend;
     if (!backend && !this.failed) {
       void this.loadBackend().catch((error) => {
+        if (error === STALE_UI_LOAD) return;
         this.failed = true;
         for (const root of roots) this.failedRoots.add(root);
         if (this.reportError) {
@@ -139,6 +151,7 @@ export class UIRenderer {
   }
 
   dispose(): void {
+    this.generation++;
     for (const root of [...this.mounts.keys()]) this.unmount(root);
     this.backend?.dispose();
     this.backend = undefined;
@@ -156,8 +169,13 @@ export class UIRenderer {
 
   private async loadBackend(): Promise<UIBackend> {
     if (this.backend) return this.backend;
+    const generation = this.generation;
     this.loadPromise ??= this.loader().then((module) => {
       const backend = module.createUIBackend();
+      if (generation !== this.generation || !this.initialized) {
+        backend.dispose();
+        throw STALE_UI_LOAD;
+      }
       this.backend = backend;
       if (this.renderer) {
         backend.configureRenderer?.(this.renderer);
@@ -221,29 +239,32 @@ export class UIRenderer {
         getUIElementKind(record.root) === 'overlay'
           ? `:${viewport.width}x${viewport.height}`
           : '';
-      const signature =
-        treeSignature(record.root, this.interaction) + viewportSignature;
-      if (signature === record.signature && !themeChanged) continue;
-      record.signature = signature;
-      for (const unregister of record.unregisterHits) unregister();
-      const mappings = record.mount.sync(
-        ui.theme,
-        viewport,
-        (element) => ({
-          hovered: this.interaction.isPointingAt(element),
-          active: this.interaction.isSelectingAt(element),
-          disabled: getSemanticControl(element)?.isDisabled() ?? false,
-          cursorUVs: this.interaction
-            .getIntersectionsAt(element)
-            .flatMap((intersection) =>
-              intersection.uv ? [intersection.uv] : []
-            ),
-        }),
-        record.order
-      );
-      record.unregisterHits = mappings.map((mapping) =>
-        this.registerHit(mapping)
-      );
+      const signature = treeSignature(record.root) + viewportSignature;
+      const stateFor = (element: UIElement) => ({
+        hovered: this.interaction.isPointingAt(element),
+        active: this.interaction.isSelectingAt(element),
+        disabled: getSemanticControl(element)?.isDisabled() ?? false,
+        cursorUVs: this.interaction
+          .getIntersectionsAt(element)
+          .flatMap((intersection) =>
+            intersection.uv ? [intersection.uv] : []
+          ),
+      });
+      if (signature !== record.signature || themeChanged) {
+        record.signature = signature;
+        for (const unregister of record.unregisterHits) unregister();
+        const mappings = record.mount.sync(
+          ui.theme,
+          viewport,
+          stateFor,
+          record.order
+        );
+        record.unregisterHits = mappings.map((mapping) =>
+          this.registerHit(mapping)
+        );
+      } else {
+        record.mount.present(stateFor);
+      }
     }
   }
 
@@ -333,18 +354,12 @@ function findUIRoot(object: THREE.Object3D): UIElement | undefined {
   return undefined;
 }
 
-function treeSignature(root: UIElement, interaction: Interaction): string {
+function treeSignature(root: UIElement): string {
   const values: string[] = [];
   root.traverse((object) => {
     if (!isUIElement(object)) return;
-    const cursorSignature = interaction
-      .getIntersectionsAt(object)
-      .map((intersection) =>
-        intersection.uv ? `${intersection.uv.x},${intersection.uv.y}` : '-'
-      )
-      .join(';');
     values.push(
-      `${object.uuid}:${getUIRevision(object)}:${object.visible}:${object.xb?.pointerEvents}:${object.xb?.interactionEnabled}:${interaction.isPointingAt(object)}:${interaction.isSelectingAt(object)}:${cursorSignature}`
+      `${object.uuid}:${getUIRevision(object)}:${object.visible}:${object.xb?.pointerEvents}:${object.xb?.interactionEnabled}`
     );
   });
   return values.join('|');

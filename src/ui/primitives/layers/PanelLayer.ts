@@ -6,7 +6,7 @@ import {
   RenderContext,
   WithSignal,
 } from '@pmndrs/uikit';
-import {effect, ReadonlySignal, Signal} from '@preact/signals-core';
+import {ReadonlySignal, Signal} from '@preact/signals-core';
 import * as THREE from 'three';
 import {PanelVertexShader} from '../../shaders/Panel.vert';
 
@@ -116,12 +116,12 @@ export abstract class PanelLayer<
     }, this.abortSignal);
 
     // Handle resizing.
-    effect(() => {
+    abortableEffect(() => {
       const size = this.size.value;
       if (size) {
         this.material.uniforms.u_resolution.value.set(size[0], size[1]);
       }
-    });
+    }, this.abortSignal);
   }
 
   /**

@@ -1,5 +1,9 @@
-import {InProperties, RenderContext, WithSignal} from '@pmndrs/uikit';
-import {effect} from '@preact/signals-core';
+import {
+  abortableEffect,
+  InProperties,
+  RenderContext,
+  WithSignal,
+} from '@pmndrs/uikit';
 import {GradientFillFragmentShader} from '../../shaders/GradientFill.frag';
 import {Paint} from '../../types/ShaderTypes';
 import {
@@ -52,7 +56,7 @@ export class FillLayer extends PanelLayer<FillLayerProperties> {
     super(material, inputProperties, initialClasses, config);
 
     // Sync Signals to Uniforms.
-    effect(() => {
+    abortableEffect(() => {
       const signalProps = (
         this.properties as unknown as {
           signal: SignalProperties<FillLayerProperties>;
@@ -64,6 +68,6 @@ export class FillLayer extends PanelLayer<FillLayerProperties> {
         signalProps.fillColor?.value,
         'u_fill_'
       );
-    });
+    }, this.abortSignal);
   }
 }

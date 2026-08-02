@@ -1,10 +1,5 @@
-import {
-  computed,
-  effect,
-  ReadonlySignal,
-  signal,
-  Signal,
-} from '@preact/signals-core';
+import {abortableEffect} from '@pmndrs/uikit';
+import {computed, ReadonlySignal, signal, Signal} from '@preact/signals-core';
 import * as THREE from 'three';
 import {DEFAULT_GRADIENT_PANEL_PROPS} from '../constants/GradientPanelConstants';
 import {Paint, StrokeAlign} from '../types/ShaderTypes';
@@ -333,7 +328,7 @@ export class GradientPanel extends ShaderPanel<GradientPanelProperties> {
 
     // Sync layout.
     const marginNeg = computed(() => -this.expansionMarginSignal.value);
-    effect(() => {
+    abortableEffect(() => {
       const m = marginNeg.value;
       const props = {
         positionTop: m,
@@ -345,10 +340,10 @@ export class GradientPanel extends ShaderPanel<GradientPanelProperties> {
       this.innerShadowLayer.setProperties(props);
       this.dropShadowLayer.setProperties(props);
       this.strokeLayer.setProperties(props);
-    });
+    }, this.abortSignal);
 
     // Sync Corner Radius & Stroke Width & Margin.
-    effect(() => {
+    abortableEffect(() => {
       const r = this.cornerRadiusSignal.value;
       const w = this.strokeWidthSignal.value;
       const m = this.expansionMarginSignal.value;
@@ -365,7 +360,7 @@ export class GradientPanel extends ShaderPanel<GradientPanelProperties> {
           layer.material.uniforms.u_drop_shadow_margin.value = m;
         }
       }
-    });
+    }, this.abortSignal);
 
     // Auto-calculate renderOrder based on Nesting Level to prevent nested Z-fighting.
     const nestingLevelSignal = computed(() => {
@@ -381,7 +376,7 @@ export class GradientPanel extends ShaderPanel<GradientPanelProperties> {
     });
     this.nestingLevelSignal = nestingLevelSignal;
 
-    effect(() => {
+    abortableEffect(() => {
       const level = nestingLevelSignal.value;
       // Physically separate sequential layers inside local Group Z-stack.
       const baseZ = level * 0.01;
@@ -409,7 +404,7 @@ export class GradientPanel extends ShaderPanel<GradientPanelProperties> {
           child.position.z = contentZ;
         }
       }
-    });
+    }, this.abortSignal);
   }
 
   /** Overrides add method to cascade physical Z-position offsets for nested panels. */

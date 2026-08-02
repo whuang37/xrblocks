@@ -37,6 +37,9 @@ const ICON_BASE =
 class UIKitMount implements UIMount {
   object: THREE.Object3D = new THREE.Group();
   private rendered?: Container;
+  private presentationUpdates: Array<
+    (stateFor: (element: UIElement) => UIPresentationState) => void
+  > = [];
 
   constructor(
     private readonly root: UIElement,
@@ -54,6 +57,7 @@ class UIKitMount implements UIMount {
   ): UIHitMapping[] {
     this.rendered?.removeFromParent();
     this.rendered?.dispose();
+    this.presentationUpdates = [];
     const mappings: UIHitMapping[] = [];
     this.rendered = createNode(
       this.root,
@@ -65,15 +69,21 @@ class UIKitMount implements UIMount {
         rootOrder * 1_000_000,
       {value: 0},
       this.icons,
-      this.images
+      this.images,
+      this.presentationUpdates
     ) as Container;
     this.object.add(this.rendered);
     return mappings;
   }
 
+  present(stateFor: (element: UIElement) => UIPresentationState): void {
+    for (const update of this.presentationUpdates) update(stateFor);
+  }
+
   dispose(): void {
     this.rendered?.dispose();
     this.rendered = undefined;
+    this.presentationUpdates = [];
     this.object.clear();
   }
 }
@@ -81,8 +91,14 @@ class UIKitMount implements UIMount {
 class UIKitBackend implements UIBackend {
   private readonly icons = new IconCache();
   private readonly images = new ImageCache();
+  private renderer?: THREE.WebGLRenderer;
+  private previousLocalClippingEnabled = false;
 
   configureRenderer(renderer: THREE.WebGLRenderer): void {
+    if (this.renderer === renderer) return;
+    this.restoreRenderer();
+    this.renderer = renderer;
+    this.previousLocalClippingEnabled = renderer.localClippingEnabled;
     renderer.localClippingEnabled = true;
     renderer.setTransparentSort(reversePainterSortStable);
   }
@@ -92,8 +108,16 @@ class UIKitBackend implements UIBackend {
   }
 
   dispose(): void {
+    this.restoreRenderer();
     this.icons.dispose();
     this.images.dispose();
+  }
+
+  private restoreRenderer(): void {
+    if (!this.renderer) return;
+    this.renderer.localClippingEnabled = this.previousLocalClippingEnabled;
+    this.renderer.setTransparentSort(null);
+    this.renderer = undefined;
   }
 }
 
@@ -110,52 +134,77 @@ function createNode(
   rootStack: number,
   sequence: {value: number},
   icons: IconCache,
-  images: ImageCache
+  images: ImageCache,
+  presentationUpdates: Array<
+    (stateFor: (element: UIElement) => UIPresentationState) => void
+  >
 ): THREE.Object3D {
   const kind = getUIElementKind(element);
   const presentation = stateFor(element);
-  const style = toUIKitStyle(resolveStyle(element, presentation));
+  const styleFor = (state: UIPresentationState) =>
+    toUIKitStyle(resolveStyle(element, state));
+  const style = styleFor(presentation);
   let node: THREE.Object3D;
   let blocksHits = true;
+  let applyPresentation: (state: UIPresentationState) => void;
+  let edge: UICardEdge | undefined;
 
   if (kind === 'text') {
     const text = element as UIText;
-    node = new Text({
-      text: text.text,
-      color:
-        (style.color as THREE.ColorRepresentation | undefined) ??
-        theme.colors.text,
-      ...style,
-      pointerEvents: element.xb?.pointerEvents ?? 'auto',
-    });
+    const propertiesFor = (state: UIPresentationState) => {
+      const nextStyle = styleFor(state);
+      return {
+        text: text.text,
+        color:
+          (nextStyle.color as THREE.ColorRepresentation | undefined) ??
+          theme.colors.text,
+        ...nextStyle,
+        pointerEvents: element.xb?.pointerEvents ?? 'auto',
+      };
+    };
+    const textNode = new Text(propertiesFor(presentation));
+    node = textNode;
+    applyPresentation = (state) =>
+      textNode.resetProperties(propertiesFor(state));
   } else if (kind === 'image') {
     const image = element as UIImage;
-    node = new Image({
+    const propertiesFor = (state: UIPresentationState) => ({
       src:
         typeof image.src === 'string'
           ? images.get(image.src, () => invalidateUIElement(image))
           : image.src,
-      ...style,
+      ...styleFor(state),
       pointerEvents: element.xb?.pointerEvents ?? 'auto',
     });
+    const imageNode = new Image(propertiesFor(presentation));
+    node = imageNode;
+    applyPresentation = (state) =>
+      imageNode.resetProperties(propertiesFor(state));
   } else if (kind === 'icon') {
     const icon = (element as UIIcon).icon || 'question_mark';
-    node = new Svg({
+    const propertiesFor = (state: UIPresentationState) => ({
       content: icons.get(icon, () => invalidateUIElement(element)),
-      ...style,
+      ...styleFor(state),
       pointerEvents: element.xb?.pointerEvents ?? 'auto',
     });
+    const iconNode = new Svg(propertiesFor(presentation));
+    node = iconNode;
+    applyPresentation = (state) =>
+      iconNode.resetProperties(propertiesFor(state));
   } else {
-    const panelStyle = panelDefaults(element, theme, style, viewport);
+    const propertiesFor = (state: UIPresentationState) =>
+      panelDefaults(element, theme, styleFor(state), viewport);
+    const panelStyle = propertiesFor(presentation);
     blocksHits =
       kind === 'button' ||
       kind === 'slider' ||
       !isTransparent(panelStyle.fillColor);
     const panel = new GradientPanel(panelStyle);
     node = panel;
+    let buttonContent: Array<Text | Svg> = [];
 
     if (kind === 'button') {
-      addButtonContent(
+      buttonContent = addButtonContent(
         panel,
         element as UIButton,
         theme,
@@ -178,13 +227,14 @@ function createNode(
           rootStack,
           sequence,
           icons,
-          images
+          images,
+          presentationUpdates
         )
       );
     }
 
     if (kind === 'card' && getUICardEdgeOptions(element as UICard)) {
-      const edge = new UICardEdge();
+      edge = new UICardEdge();
       edge.setCursors(presentation.cursorUVs[0], presentation.cursorUVs[1]);
       panel.add(edge);
       mappings.push({
@@ -193,7 +243,29 @@ function createNode(
         part: {kind: 'card-edge'},
       });
     }
+    applyPresentation = (state) => {
+      panel.setProperties(propertiesFor(state));
+      if (kind === 'button') {
+        updateButtonContent(
+          buttonContent,
+          element as UIButton,
+          theme,
+          styleFor(state).color as THREE.ColorRepresentation | undefined
+        );
+      }
+    };
   }
+
+  let presentationKey = stateKey(presentation);
+  presentationUpdates.push((stateFor) => {
+    const state = stateFor(element);
+    const nextKey = stateKey(state);
+    if (nextKey !== presentationKey) {
+      presentationKey = nextKey;
+      applyPresentation(state);
+    }
+    edge?.setCursors(state.cursorUVs[0], state.cursorUVs[1]);
+  });
 
   node.visible = element.visible;
   node.renderOrder =
@@ -219,6 +291,14 @@ function resolveStyle(element: UIElement, state: UIPresentationState): UIStyle {
     ...(state.active ? style[':active'] : undefined),
     ...(state.disabled ? style[':disabled'] : undefined),
   };
+}
+
+function stateKey(state: UIPresentationState): number {
+  return (
+    Number(state.hovered) |
+    (Number(state.active) << 1) |
+    (Number(state.disabled) << 2)
+  );
 }
 
 function isTransparent(color: unknown): boolean {
@@ -251,6 +331,10 @@ function panelDefaults(
             ? 'rgba(255, 255, 255, 0)'
             : 'rgba(0, 0, 0, 0)',
     cornerRadius: theme.borderRadius,
+    opacity: style.opacity ?? 1,
+    strokeColor: style.strokeColor ?? 'transparent',
+    strokeWidth: style.strokeWidth ?? 0,
+    color: style.color,
     pointerEvents: element.xb?.pointerEvents ?? 'auto',
     ...style,
   };
@@ -278,12 +362,13 @@ function addButtonContent(
   theme: UITheme,
   icons: IconCache,
   color?: THREE.ColorRepresentation
-): void {
+): Array<Text | Svg> {
+  const content: Array<Text | Svg> = [];
   const contentColor =
     color ??
     (button.disabled ? theme.colors.disabledText : theme.colors.primaryText);
   if (button.icon) {
-    panel.add(
+    content.push(
       new Svg({
         content: icons.get(button.icon, () => invalidateUIElement(button)),
         width: 24,
@@ -294,7 +379,7 @@ function addButtonContent(
     );
   }
   if (button.label) {
-    panel.add(
+    content.push(
       new Text({
         text: button.label,
         color: contentColor,
@@ -302,6 +387,20 @@ function addButtonContent(
       })
     );
   }
+  panel.add(...content);
+  return content;
+}
+
+function updateButtonContent(
+  content: readonly (Text | Svg)[],
+  button: UIButton,
+  theme: UITheme,
+  color?: THREE.ColorRepresentation
+): void {
+  const contentColor =
+    color ??
+    (button.disabled ? theme.colors.disabledText : theme.colors.primaryText);
+  for (const node of content) node.setProperties({color: contentColor});
 }
 
 const FALLBACK_ICON = `
@@ -313,6 +412,7 @@ const FALLBACK_ICON = `
 class IconCache {
   private readonly content = new Map<string, string>();
   private readonly pending = new Map<string, AbortController>();
+  private disposed = false;
 
   get(name: string, onChanged: () => void): string {
     const cached = this.content.get(name);
@@ -329,12 +429,13 @@ class IconCache {
           return response.text();
         })
         .then((content) => {
+          if (this.disposed) return;
           if (!content.includes('<svg')) throw new Error('Invalid icon SVG.');
           this.content.set(name, content);
           onChanged();
         })
         .catch(() => {
-          this.content.set(name, FALLBACK_ICON);
+          if (!this.disposed) this.content.set(name, FALLBACK_ICON);
         })
         .finally(() => this.pending.delete(name));
     }
@@ -342,6 +443,7 @@ class IconCache {
   }
 
   dispose(): void {
+    this.disposed = true;
     for (const controller of this.pending.values()) controller.abort();
     this.pending.clear();
     this.content.clear();

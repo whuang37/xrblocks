@@ -19,6 +19,11 @@ export function parseColorWithAlpha(
   if (value === undefined) return result;
 
   if (typeof value === 'string') {
+    if (value.trim().toLowerCase() === 'transparent') {
+      result.color.set(0x000000);
+      result.opacity = 0;
+      return result;
+    }
     // 1. Match rgb() or rgba() formats (e.g., rgba(255, 0, 0, 0.5)).
     const rgbaMatch = value.match(
       /rgba?\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+))?\s*\)/

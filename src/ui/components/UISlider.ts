@@ -48,6 +48,7 @@ export class UISlider extends UIElement {
       throw new Error('UISlider disabled must be a boolean.');
     }
     validateRange(min, max, step);
+    validateValue(value);
     super('slider', options);
     this.ariaLabel = ariaLabel;
     this._min = min;
@@ -76,7 +77,7 @@ export class UISlider extends UIElement {
   set min(value: number) {
     validateRange(value, this._max, this._step);
     this._min = value;
-    this.setProgrammaticValue(this._value);
+    this.requantizeInteraction();
   }
 
   get max(): number {
@@ -86,7 +87,7 @@ export class UISlider extends UIElement {
   set max(value: number) {
     validateRange(this._min, value, this._step);
     this._max = value;
-    this.setProgrammaticValue(this._value);
+    this.requantizeInteraction();
   }
 
   get step(): number {
@@ -96,7 +97,7 @@ export class UISlider extends UIElement {
   set step(value: number) {
     validateRange(this._min, this._max, value);
     this._step = value;
-    this.setProgrammaticValue(this._value);
+    this.requantizeInteraction();
   }
 
   get value(): number {
@@ -169,9 +170,29 @@ export class UISlider extends UIElement {
   }
 
   private setProgrammaticValue(value: number): void {
+    validateValue(value);
     const next = quantize(value, this._min, this._max, this._step);
+    if (this.interactionStart !== undefined) {
+      this.interactionStart = next;
+      this.interactionChanged = false;
+    }
     if (next === this._value) return;
     this._value = next;
+    this.markUIDirty();
+  }
+
+  private requantizeInteraction(): void {
+    const next = quantize(this._value, this._min, this._max, this._step);
+    if (this.interactionStart !== undefined) {
+      this.interactionStart = quantize(
+        this.interactionStart,
+        this._min,
+        this._max,
+        this._step
+      );
+      this.interactionChanged = next !== this.interactionStart;
+    }
+    if (next !== this._value) this._value = next;
     this.markUIDirty();
   }
 }
@@ -190,13 +211,18 @@ function validateRange(min: number, max: number, step: number): void {
   }
 }
 
+function validateValue(value: number): void {
+  if (!Number.isFinite(value)) {
+    throw new Error('UISlider value must be finite.');
+  }
+}
+
 function quantize(
   value: number,
   min: number,
   max: number,
   step: number
 ): number {
-  const finite = Number.isFinite(value) ? value : min;
-  const stepped = min + Math.round((finite - min) / step) * step;
+  const stepped = min + Math.round((value - min) / step) * step;
   return clamp(Number(stepped.toPrecision(12)), min, max);
 }

@@ -1,5 +1,9 @@
-import {InProperties, RenderContext, WithSignal} from '@pmndrs/uikit';
-import {effect} from '@preact/signals-core';
+import {
+  abortableEffect,
+  InProperties,
+  RenderContext,
+  WithSignal,
+} from '@pmndrs/uikit';
 import * as THREE from 'three';
 import {GradientDropShadowFragmentShader} from '../../shaders/GradientDropShadow.frag';
 import {Paint, StrokeAlign} from '../../types/ShaderTypes';
@@ -65,7 +69,7 @@ export class DropShadowLayer extends PanelLayer<DropShadowLayerProperties> {
 
     super(material, inputProperties, initialClasses, config);
 
-    effect(() => {
+    abortableEffect(() => {
       const signalProps = (
         this.properties as unknown as {
           signal: SignalProperties<DropShadowLayerProperties>;
@@ -94,6 +98,6 @@ export class DropShadowLayer extends PanelLayer<DropShadowLayerProperties> {
         strokeWidth: signalProps.strokeWidth?.value,
         strokeAlign: signalProps.strokeAlign?.value,
       });
-    });
+    }, this.abortSignal);
   }
 }

@@ -1,5 +1,9 @@
-import {InProperties, RenderContext, WithSignal} from '@pmndrs/uikit';
-import {effect} from '@preact/signals-core';
+import {
+  abortableEffect,
+  InProperties,
+  RenderContext,
+  WithSignal,
+} from '@pmndrs/uikit';
 import {GradientStrokeFragmentShader} from '../../shaders/GradientStroke.frag';
 import {Paint, StrokeAlign} from '../../types/ShaderTypes';
 import {
@@ -57,7 +61,7 @@ export class StrokeLayer extends PanelLayer<StrokeLayerProperties> {
 
     super(material, inputProperties, initialClasses, config);
 
-    effect(() => {
+    abortableEffect(() => {
       const signalProps = (
         this.properties as unknown as {
           signal: SignalProperties<StrokeLayerProperties>;
@@ -74,6 +78,6 @@ export class StrokeLayer extends PanelLayer<StrokeLayerProperties> {
         strokeWidth: signalProps.strokeWidth?.value,
         strokeAlign: signalProps.strokeAlign?.value,
       });
-    });
+    }, this.abortSignal);
   }
 }

@@ -1,9 +1,9 @@
 import {
+  abortableEffect,
   type InProperties,
   type RenderContext,
   type WithSignal,
 } from '@pmndrs/uikit';
-import {effect} from '@preact/signals-core';
 import * as THREE from 'three';
 
 import {UICardEdgeFragmentShader} from '../shaders/UICardEdge.frag';
@@ -79,7 +79,7 @@ class UICardEdgeLayer extends PanelLayer<HandleLayerProperties> {
       config
     );
 
-    effect(() => {
+    abortableEffect(() => {
       const signals = (
         this.properties as unknown as {
           signal: SignalProperties<HandleLayerProperties>;
@@ -112,7 +112,7 @@ class UICardEdgeLayer extends PanelLayer<HandleLayerProperties> {
       setVector2(this.material, 'u_cursor_uv_2', signals.u_cursor_uv_2?.value);
       setNumber(this.material, 'u_show_glow_2', signals.u_show_glow_2?.value);
       setNumber(this.material, 'u_debug', signals.u_debug?.value);
-    });
+    }, this.abortSignal);
   }
 
   setCursor(uv: THREE.Vector2 | undefined, index: 0 | 1): void {

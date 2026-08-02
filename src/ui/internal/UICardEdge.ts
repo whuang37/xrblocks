@@ -185,9 +185,18 @@ export class UICardEdge extends UICardEdgeLayer {
     };
   }
 
-  setCursors(first?: THREE.Vector2, second?: THREE.Vector2): void {
-    this.setCursor(first, 0);
-    this.setCursor(second, 1);
+  setCursorPoints(first?: THREE.Vector3, second?: THREE.Vector3): void {
+    this.setCursorPoint(first, 0);
+    this.setCursorPoint(second, 1);
+  }
+
+  private setCursorPoint(point: THREE.Vector3 | undefined, index: 0 | 1): void {
+    if (!point || !this.size.value) {
+      this.setCursor(undefined, index);
+      return;
+    }
+    const local = this.worldToLocal(point.clone());
+    this.setCursor(new THREE.Vector2(local.x + 0.5, local.y + 0.5), index);
   }
 }
 

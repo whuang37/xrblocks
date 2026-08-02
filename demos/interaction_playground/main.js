@@ -3,6 +3,11 @@ import * as xb from 'xrblocks';
 
 let activePlayground;
 
+const requestedRaycastMode = new URLSearchParams(window.location.search).get(
+  'raycast'
+);
+const raycastMode = requestedRaycastMode === 'select' ? 'select' : 'continuous';
+
 const UI_THEME = Object.freeze({
   surface: 'rgba(10, 17, 31, 0.96)',
   surfaceRaised: 'rgba(22, 35, 58, 0.96)',
@@ -19,7 +24,6 @@ const UI_THEME = Object.freeze({
   cardTitleSize: 64,
   cardSubtitleSize: 34,
   bodySize: 30,
-  buttonSize: 40,
   badgeSize: 24,
   sectionSize: 44,
   sampleSize: 32,
@@ -33,6 +37,15 @@ function report(message, feature) {
   activePlayground?.report(message, feature);
 }
 
+function describeSource(event) {
+  const source = event?.source;
+  return source ? `${source.type}/${source.handedness}` : 'unknown source';
+}
+
+function describeTarget(event) {
+  return event?.target?.name || event?.surface?.name || 'no target';
+}
+
 function makeMaterial(color) {
   return new THREE.MeshStandardMaterial({
     color,
@@ -43,50 +56,27 @@ function makeMaterial(color) {
   });
 }
 
-function createCard(
-  CardClass,
-  {
-    name,
-    position,
-    sizeX,
-    sizeY,
-    manipulation,
-    pointerEvents,
-    interactionEnabled,
-    reticleMode,
-    visible,
-    ...style
-  }
-) {
-  const card = new CardClass({
-    name,
-    position,
-    sizeX,
-    sizeY,
-    manipulation,
-    pointerEvents,
-    interactionEnabled,
-    reticleMode,
-    visible,
-    ...style,
-  });
+function createCard(CardClass, {name, position, ...options}) {
+  const card = new CardClass(options);
+  card.name = name;
+  if (position) card.position.copy(position);
   return card;
 }
 
-function createPanel(properties = {}) {
-  return new xb.UIPanel(properties);
+function createPanel(style = {}, options = {}) {
+  return new xb.UIPanel({...options, style});
 }
 
-function createText(text, properties = {}) {
-  return new xb.UIText(text, properties);
+function createText(text, style = {}, options = {}) {
+  return new xb.UIText({text, style, ...options});
 }
 
-function createIcon(icon, properties = {}) {
-  return new xb.UIIcon(icon, properties);
+function createIcon(icon, style = {}, options = {}) {
+  return new xb.UIIcon({icon, style, ...options});
 }
 
-function createImage(src, properties = {}) {
-  return new xb.UIImage(src, properties);
+function createImage(src, style = {}, options = {}) {
+  return new xb.UIImage({src, style, ...options});
 }
 
 class InteractiveObject extends xb.MeshScript {
@@ -105,12 +95,11 @@ class InteractiveObject extends xb.MeshScript {
     super(geometry, material);
     this.name = name;
     this.position.copy(position);
-    this.reticleMode = reticleMode;
-    this.interactionEnabled = interactionEnabled;
+    this.xb = {reticleMode, interactionEnabled};
     this.preventManipulation = preventManipulation;
     this.onActivate = onActivate;
     this.material = material;
-    if (manipulation !== undefined) this.xb = {manipulation};
+    if (manipulation !== undefined) this.xb.manipulation = manipulation;
   }
 
   flash(intensity = 0.8) {
@@ -121,9 +110,9 @@ class InteractiveObject extends xb.MeshScript {
     }, 220);
   }
 
-  onHoverEnter() {
+  onHoverEnter(event) {
     this.material.emissiveIntensity = 0.22;
-    report(`${this.name}: hover enter`, 'selection');
+    report(`${this.name}: hover enter (${describeSource(event)})`, 'selection');
     return true;
   }
 
@@ -133,23 +122,29 @@ class InteractiveObject extends xb.MeshScript {
     return true;
   }
 
-  onObjectSelectStart() {
+  onObjectSelectStart(event) {
     this.flash(0.5);
-    report(`${this.name}: select start`, 'selection');
+    report(
+      `${this.name}: select start (${describeSource(event)})`,
+      'selection'
+    );
     return true;
   }
 
-  onObjectSelectEnd() {
+  onObjectSelectEnd(event) {
     this.flash();
-    this.onActivate?.();
-    report(`${this.name}: select end`, 'selection');
+    if (event.completed) this.onActivate?.();
+    report(
+      `${this.name}: select end ${event.completed}/${event.reason} (${describeSource(event)})`,
+      'selection'
+    );
     return true;
   }
 
   onObjectLongSelect(event) {
     this.flash(1.4);
     report(
-      `${this.name}: long select at ${event.duration.toFixed(2)}s`,
+      `${this.name}: long select ${event.duration.toFixed(2)}s (${describeSource(event)})`,
       'long-select'
     );
     return true;
@@ -157,7 +152,10 @@ class InteractiveObject extends xb.MeshScript {
 
   onObjectTouchStart(event) {
     this.flash(0.7);
-    report(`${this.name}: hand ${event.handIndex} touch start`, 'touch');
+    report(
+      `${this.name}: hand ${event.handIndex} touch start (${describeSource(event)})`,
+      'touch'
+    );
     return true;
   }
 
@@ -168,13 +166,19 @@ class InteractiveObject extends xb.MeshScript {
 
   onObjectTouchEnd(event) {
     this.material.emissiveIntensity = 0.04;
-    report(`${this.name}: hand ${event.handIndex} touch end`, 'touch');
+    report(
+      `${this.name}: hand ${event.handIndex} touch end (${describeSource(event)})`,
+      'touch'
+    );
     return true;
   }
 
   onObjectGrabStart(event) {
     this.flash(1.1);
-    report(`${this.name}: hand ${event.handIndex} grab start`, 'touch');
+    report(
+      `${this.name}: hand ${event.handIndex} grab start (${describeSource(event)})`,
+      'touch'
+    );
   }
 
   onObjectGrabbing() {
@@ -183,17 +187,26 @@ class InteractiveObject extends xb.MeshScript {
 
   onObjectGrabEnd(event) {
     this.material.emissiveIntensity = 0.04;
-    report(`${this.name}: hand ${event.handIndex} grab end`, 'touch');
+    report(
+      `${this.name}: hand ${event.handIndex} grab end (${describeSource(event)})`,
+      'touch'
+    );
   }
 
   onObjectManipulate(event) {
     if (event.phase === 'start' && this.preventManipulation) {
       event.preventDefault();
-      report(`${this.name}: prevented ${event.action}`, 'manipulation');
+      report(
+        `${this.name}: prevented ${event.action} (${describeSource(event)})`,
+        'manipulation'
+      );
       return true;
     }
     if (event.phase !== 'update') {
-      report(`${this.name}: ${event.action} ${event.phase}`, 'manipulation');
+      report(
+        `${this.name}: ${event.action} ${event.phase} (${describeSource(event)})`,
+        'manipulation'
+      );
     }
     return true;
   }
@@ -265,13 +278,15 @@ class ReticleTarget extends xb.MeshScript {
     );
     this.name = name;
     this.position.copy(position);
-    this.reticleMode = reticleMode;
-    this.interactionEnabled = interactionEnabled;
+    this.xb = {reticleMode, interactionEnabled};
   }
 
-  onHoverEnter() {
+  onHoverEnter(event) {
     this.material.emissiveIntensity = 0.3;
-    report(`${this.name}: ${this.reticleMode} reticle`, 'reticle');
+    report(
+      `${this.name}: ${this.xb.reticleMode} reticle (${describeSource(event)})`,
+      'reticle'
+    );
     return true;
   }
 
@@ -282,45 +297,56 @@ class ReticleTarget extends xb.MeshScript {
 }
 
 class InstrumentedPanel extends xb.UIButton {
-  constructor({label, onClick, ...properties}) {
+  constructor({label, icon, onClick, ...properties}) {
     super({
+      label,
+      icon,
       ariaLabel: label,
       onClick,
       ...properties,
     });
     this.name = label;
-    this.label = label;
+    this.diagnosticLabel = label;
   }
 
-  onHoverEnter() {
-    this.setFillColor(UI_THEME.buttonHover);
-    report(`${this.label}: UI hover enter`, 'ui');
+  onHoverEnter(event) {
+    this.style.backgroundColor = UI_THEME.buttonHover;
+    report(
+      `${this.diagnosticLabel}: UI hover enter (${describeSource(event)})`,
+      'ui'
+    );
     return true;
   }
 
   onHoverExit() {
-    this.setFillColor(UI_THEME.button);
-    report(`${this.label}: UI hover exit`);
+    this.style.backgroundColor = UI_THEME.button;
+    report(`${this.diagnosticLabel}: UI hover exit`);
     return true;
   }
 
-  onObjectSelectStart() {
-    report(`${this.label}: UI select start`, 'selection');
+  onObjectSelectStart(event) {
+    report(
+      `${this.diagnosticLabel}: UI select start (${describeSource(event)})`,
+      'selection'
+    );
     return true;
   }
 
   onObjectSelectEnd(event) {
-    report(`${this.label}: UI select end`, 'ui');
+    report(
+      `${this.diagnosticLabel}: UI select end ${event.completed}/${event.reason} (${describeSource(event)})`,
+      'ui'
+    );
     return super.onObjectSelectEnd(event);
   }
 
   onObjectLongSelect(event) {
-    this.setFillColor(UI_THEME.buttonActive);
+    this.style.backgroundColor = UI_THEME.buttonActive;
     setTimeout(() => {
-      this.setFillColor(UI_THEME.button);
+      this.style.backgroundColor = UI_THEME.button;
     }, 260);
     report(
-      `${this.label}: UI long select at ${event.duration.toFixed(2)}s`,
+      `${this.diagnosticLabel}: UI long select ${event.duration.toFixed(2)}s (${describeSource(event)})`,
       'long-select'
     );
     return true;
@@ -330,7 +356,10 @@ class InstrumentedPanel extends xb.UIButton {
 class InstrumentedCard extends xb.UICard {
   onObjectManipulate(event) {
     if (event.phase !== 'update') {
-      report(`${this.name}: ${event.action} ${event.phase}`, 'manipulation');
+      report(
+        `${this.name}: ${event.action} ${event.phase} (${describeSource(event)})`,
+        'manipulation'
+      );
     }
   }
 }
@@ -358,15 +387,16 @@ function makeSectionLabel(text, position, color) {
   const label = createCard(xb.UICard, {
     name: `${text} section label`,
     position,
-    sizeX: 0.96,
-    sizeY: 0.14,
-    padding: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    fillColor: UI_THEME.surface,
-    strokeWidth: 2,
-    strokeColor: color,
-    cornerRadius: 22,
+    size: {width: 0.96, height: 0.14},
+    style: {
+      padding: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: UI_THEME.surface,
+      borderWidth: 2,
+      borderColor: color,
+      borderRadius: 22,
+    },
     pointerEvents: 'none',
   });
   label.add(
@@ -375,7 +405,6 @@ function makeSectionLabel(text, position, color) {
       fontSize: UI_THEME.sectionSize,
       fontWeight: 'bold',
       color,
-      letterSpacing: 2,
       textAlign: 'center',
     })
   );
@@ -386,15 +415,16 @@ function makeSampleLabel(text, position, color) {
   const label = createCard(xb.UICard, {
     name: `${text} sample label`,
     position,
-    sizeX: 0.5,
-    sizeY: 0.11,
-    padding: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    fillColor: UI_THEME.surfaceRaised,
-    strokeWidth: 1.5,
-    strokeColor: color,
-    cornerRadius: 16,
+    size: {width: 0.5, height: 0.11},
+    style: {
+      padding: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: UI_THEME.surfaceRaised,
+      borderWidth: 1.5,
+      borderColor: color,
+      borderRadius: 16,
+    },
     pointerEvents: 'none',
   });
   label.add(
@@ -403,44 +433,41 @@ function makeSampleLabel(text, position, color) {
       fontSize: UI_THEME.sampleSize,
       fontWeight: 'bold',
       color,
-      letterSpacing: 0.5,
       textAlign: 'center',
     })
   );
   return label;
 }
 
-function makeButton(label, icon, onClick) {
+function makeButton(label, icon, onClick, {disabled = false} = {}) {
   const button = new InstrumentedPanel({
     label,
-    minWidth: 270,
-    height: 118,
-    paddingLeft: 30,
-    paddingRight: 30,
-    gap: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cornerRadius: 22,
-    fillColor: UI_THEME.button,
-    strokeWidth: 2,
-    strokeColor: UI_THEME.mint,
+    icon,
+    disabled,
     onClick,
-  });
-  button.xb = {manipulationHandle: 'none'};
-  button.add(
-    createIcon(icon, {
-      width: 48,
-      height: 48,
-      color: UI_THEME.mint,
-      iconStyle: 'rounded',
-    }),
-    createText(label, {
-      fontSize: UI_THEME.buttonSize,
-      fontWeight: 'bold',
+    style: {
+      minWidth: 230,
+      height: 104,
+      paddingLeft: 24,
+      paddingRight: 24,
+      gap: 14,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: 22,
+      backgroundColor: UI_THEME.button,
       color: UI_THEME.text,
-    })
-  );
+      borderWidth: 2,
+      borderColor: UI_THEME.mint,
+      ':hover': {backgroundColor: UI_THEME.buttonHover},
+      ':active': {backgroundColor: UI_THEME.buttonActive},
+      ':disabled': {
+        backgroundColor: 'rgba(71, 85, 105, 0.45)',
+        color: UI_THEME.textDim,
+      },
+    },
+  });
+  button.xb = {...button.xb, manipulationHandle: 'none'};
   return button;
 }
 
@@ -448,6 +475,7 @@ class InteractionPlayground extends xb.Script {
   resettableObjects = [];
   eventMessages = [];
   featureBadges = new Map();
+  alternateTheme = false;
 
   async init() {
     xb.core.scene.background = new THREE.Color(0x090d18);
@@ -458,11 +486,12 @@ class InteractionPlayground extends xb.Script {
     this.addPlacementObjects();
     this.addReticleTargets();
     this.addUICards();
+    this.addModeOverlay();
 
     const depthMesh = xb.core.depth?.depthMesh;
     if (depthMesh) {
       depthMesh.name = 'Depth reticle surface';
-      depthMesh.reticleMode = 'surface';
+      depthMesh.xb = {...depthMesh.xb, reticleMode: 'surface'};
     }
 
     this.rememberInitialTransforms();
@@ -475,21 +504,15 @@ class InteractionPlayground extends xb.Script {
     this.guideCard = createCard(xb.UICard, {
       name: 'XR scene guide',
       position: new THREE.Vector3(-1.35, 2.08, -2.85),
-      sizeX: 1.16,
-      sizeY: 0.72,
-      padding: 28,
-      gap: 12,
-      fillColor: {
-        gradientType: 'linear',
-        rotation: 20,
-        stops: [
-          {position: 0, color: '#0c172a'},
-          {position: 1, color: '#16344b'},
-        ],
+      size: {width: 1.16, height: 0.72},
+      style: {
+        padding: 28,
+        gap: 12,
+        backgroundColor: '#10283d',
+        borderWidth: 3,
+        borderColor: '#38bdf8',
+        borderRadius: 30,
       },
-      strokeWidth: 3,
-      strokeColor: '#38bdf8',
-      cornerRadius: 30,
       pointerEvents: 'none',
     });
     this.guideCard.add(
@@ -498,7 +521,6 @@ class InteractionPlayground extends xb.Script {
         fontSize: 56,
         fontWeight: 'bold',
         color: '#7dd3fc',
-        letterSpacing: 1.5,
         textAlign: 'center',
       }),
       createText('XR-native manual coverage for the UI refactor', {
@@ -527,27 +549,19 @@ class InteractionPlayground extends xb.Script {
     this.statusCard = createCard(InstrumentedCard, {
       name: 'XR coverage and controls',
       position: new THREE.Vector3(1.35, 2.08, -2.85),
-      sizeX: 1.16,
-      sizeY: 0.76,
+      size: {width: 1.16, height: 0.76},
       manipulation: {
         actions: {translate: true, scale: {minScale: 0.75, maxScale: 1.5}},
       },
-      manipulationEdge: {
-        spotlightColor: '#c4b5fd',
+      edge: {translateFromSurface: true},
+      style: {
+        padding: 28,
+        gap: 15,
+        backgroundColor: '#211a3d',
+        borderWidth: 3,
+        borderColor: '#8b5cf6',
+        borderRadius: 30,
       },
-      padding: 28,
-      gap: 15,
-      fillColor: {
-        gradientType: 'linear',
-        rotation: -20,
-        stops: [
-          {position: 0, color: '#12172c'},
-          {position: 1, color: '#261b45'},
-        ],
-      },
-      strokeWidth: 3,
-      strokeColor: '#8b5cf6',
-      cornerRadius: 30,
     });
     this.statusCard.add(
       createText('LIVE COVERAGE + CONTROLS', {
@@ -555,7 +569,6 @@ class InteractionPlayground extends xb.Script {
         fontSize: 52,
         fontWeight: 'bold',
         color: '#c4b5fd',
-        letterSpacing: 1,
         textAlign: 'center',
       })
     );
@@ -573,23 +586,26 @@ class InteractionPlayground extends xb.Script {
         gap: 10,
       });
       for (const feature of features) {
-        const badge = createPanel({
-          minWidth: 118,
-          height: 46,
-          alignItems: 'center',
-          justifyContent: 'center',
-          fillColor: UI_THEME.surfaceSubtle,
-          strokeWidth: 1.5,
-          strokeColor: 'rgba(255, 255, 255, 0.24)',
-          cornerRadius: 15,
-          pointerEvents: 'none',
-        });
+        const badge = createPanel(
+          {
+            minWidth: 118,
+            height: 46,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: UI_THEME.surfaceSubtle,
+            borderWidth: 1.5,
+            borderColor: 'rgba(255, 255, 255, 0.24)',
+            borderRadius: 15,
+          },
+          {
+            pointerEvents: 'none',
+          }
+        );
         badge.add(
           createText(featureLabels[feature], {
             fontSize: UI_THEME.badgeSize,
             fontWeight: 'bold',
             color: UI_THEME.textDim,
-            letterSpacing: 0.8,
           })
         );
         this.featureBadges.set(feature, badge);
@@ -614,20 +630,29 @@ class InteractionPlayground extends xb.Script {
     });
     this.statusCard.add(this.statusText, this.eventLogText);
 
-    const controls = createPanel({
+    const primaryControls = createPanel({
       width: '100%',
       flexDirection: 'row',
-      flexWrap: 'wrap',
       justifyContent: 'center',
       gap: 12,
     });
-    controls.add(
+    primaryControls.add(
       makeButton('Reset', 'restart_alt', () => this.reset()),
-      makeButton('UI panel', 'visibility', () => this.toggleUITransition()),
-      makeButton('3D object', 'animation', () => this.toggleObjectTransition())
+      makeButton('UI panel', 'visibility', () => this.toggleUITransition())
+    );
+    const secondaryControls = createPanel({
+      width: '100%',
+      flexDirection: 'row',
+      justifyContent: 'center',
+      gap: 12,
+    });
+    secondaryControls.add(
+      makeButton('3D object', 'animation', () => this.toggleObjectTransition()),
+      makeButton('Theme', 'palette', () => this.toggleTheme())
     );
     this.statusCard.add(
-      controls,
+      primaryControls,
+      secondaryControls,
       new xb.FollowHead({
         offset: new THREE.Vector3(1.35, 0.48, -2.85),
         smoothing: 0.08,
@@ -643,20 +668,20 @@ class InteractionPlayground extends xb.Script {
     const badge = this.featureBadges.get(feature);
     if (!badge || badge.userData.checked) return;
     badge.userData.checked = true;
-    badge.setFillColor('rgba(16, 185, 129, 0.25)');
-    badge.setStrokeColor('#5eead4');
+    badge.style.backgroundColor = 'rgba(16, 185, 129, 0.25)';
+    badge.style.borderColor = '#5eead4';
     for (const child of badge.children) {
-      if (child instanceof xb.UIText) child.setColor('#99f6e4');
+      if (child instanceof xb.UIText) child.style.color = '#99f6e4';
     }
   }
 
   report(message, feature) {
     if (feature) this.markFeature(feature);
-    this.statusText?.setText(message);
+    if (this.statusText) this.statusText.text = message;
     this.eventMessages.unshift(message);
     this.eventMessages.length = Math.min(this.eventMessages.length, 4);
     if (this.eventLogText) {
-      this.eventLogText.setText(this.eventMessages.join('\n'));
+      this.eventLogText.text = this.eventMessages.join('\n');
     }
   }
 
@@ -670,7 +695,7 @@ class InteractionPlayground extends xb.Script {
   addBackdrop() {
     const grid = new THREE.GridHelper(7, 28, 0x35516f, 0x172334);
     grid.name = 'Pointer-ignored floor grid';
-    grid.pointerEvents = 'none';
+    grid.xb = {pointerEvents: 'none'};
     grid.position.y = -0.35;
     this.add(grid);
 
@@ -684,7 +709,7 @@ class InteractionPlayground extends xb.Script {
       })
     );
     halo.name = 'Pointer-ignored backdrop';
-    halo.pointerEvents = 'none';
+    halo.xb = {pointerEvents: 'none'};
     halo.position.set(0, 1.25, -3.75);
     this.add(halo);
   }
@@ -810,7 +835,7 @@ class InteractionPlayground extends xb.Script {
       })
     );
     this.followAnchor.name = 'Animated follow anchor';
-    this.followAnchor.pointerEvents = 'none';
+    this.followAnchor.xb = {pointerEvents: 'none'};
     this.followAnchor.position.set(-1.55, 0.56, -2.5);
 
     const follower = new InteractiveObject({
@@ -924,7 +949,7 @@ class InteractionPlayground extends xb.Script {
     );
     ignoredDecoration.name = 'Pointer-ignored wireframe';
     ignoredDecoration.position.set(1.2, -0.08, -2.31);
-    ignoredDecoration.pointerEvents = 'none';
+    ignoredDecoration.xb = {pointerEvents: 'none'};
 
     const labels = [
       makeSampleLabel(
@@ -964,30 +989,24 @@ class InteractionPlayground extends xb.Script {
     this.galleryCard = createCard(InstrumentedCard, {
       name: 'UI component card',
       position: new THREE.Vector3(0, 2.08, -2.85),
-      sizeX: 1.16,
-      sizeY: 0.76,
+      size: {width: 1.16, height: 0.76},
       manipulation: {
         actions: {
           translate: true,
           scale: {minScale: 0.7, maxScale: 1.8},
         },
       },
-      manipulationEdge: {
-        spotlightColor: '#8ff0df',
+      edge: {
+        scale: true,
       },
-      padding: 30,
-      gap: 16,
-      fillColor: {
-        gradientType: 'linear',
-        rotation: 30,
-        stops: [
-          {position: 0, color: '#0d1825'},
-          {position: 1, color: '#2c2050'},
-        ],
+      style: {
+        padding: 30,
+        gap: 16,
+        backgroundColor: '#201b3e',
+        borderWidth: 3,
+        borderColor: '#6ee7d8',
+        borderRadius: 32,
       },
-      strokeWidth: 3,
-      strokeColor: '#6ee7d8',
-      cornerRadius: 32,
     });
 
     this.galleryCard.add(
@@ -996,7 +1015,6 @@ class InteractionPlayground extends xb.Script {
         fontSize: UI_THEME.cardTitleSize,
         fontWeight: 'bold',
         color: UI_THEME.mint,
-        letterSpacing: 1.5,
         textAlign: 'center',
       }),
       createText('Panels, text, icons, images, and media', {
@@ -1015,23 +1033,22 @@ class InteractionPlayground extends xb.Script {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
-      fillColor: UI_THEME.surfaceSubtle,
-      strokeWidth: 1.5,
-      strokeColor: 'rgba(143, 240, 223, 0.3)',
-      cornerRadius: 24,
+      backgroundColor: UI_THEME.surfaceSubtle,
+      borderWidth: 1.5,
+      borderColor: 'rgba(143, 240, 223, 0.3)',
+      borderRadius: 24,
     });
     mediaRow.add(
       createIcon('deployed_code', {
         width: 72,
         height: 72,
         color: '#fbbf24',
-        iconStyle: 'rounded',
       }),
       createImage(imageSource, {
         width: 88,
         height: 88,
         borderRadius: 20,
-        keepAspectRatio: true,
+        objectFit: 'contain',
       }),
       createText('UIKit primitives\ninside UICard', {
         fontSize: UI_THEME.bodySize,
@@ -1046,10 +1063,10 @@ class InteractionPlayground extends xb.Script {
       height: 76,
       alignItems: 'center',
       justifyContent: 'center',
-      fillColor: '#153d44',
-      strokeWidth: 2,
-      strokeColor: '#5eead4',
-      cornerRadius: 20,
+      backgroundColor: '#153d44',
+      borderWidth: 2,
+      borderColor: '#5eead4',
+      borderRadius: 20,
     });
     this.transitionPanel.add(
       createText('VisibilityTransition attached to UIPanel', {
@@ -1060,6 +1077,33 @@ class InteractionPlayground extends xb.Script {
     this.uiTransition = new xb.VisibilityTransition({duration: 0.28});
     this.transitionPanel.add(this.uiTransition);
     this.galleryCard.add(this.transitionPanel);
+
+    this.sliderValueText = createText('Slider 50%', {
+      width: '100%',
+      fontSize: 24,
+      color: UI_THEME.textMuted,
+      textAlign: 'center',
+    });
+    this.slider = new xb.UISlider({
+      ariaLabel: 'Interaction value',
+      min: 0,
+      max: 100,
+      step: 5,
+      value: 50,
+      style: {
+        width: '100%',
+        height: 54,
+        borderRadius: 18,
+      },
+      onInput: (value) => {
+        this.sliderValueText.text = `Slider ${value}%`;
+        report(`Slider input ${value}`, 'ui');
+      },
+      onChange: (value) => {
+        report(`Slider change ${value}`, 'ui');
+      },
+    });
+    this.galleryCard.add(this.sliderValueText, this.slider);
 
     const buttonRow = createPanel({
       width: '100%',
@@ -1073,7 +1117,8 @@ class InteractionPlayground extends xb.Script {
       }),
       makeButton('Toggle panel', 'visibility', () => {
         this.toggleUITransition();
-      })
+      }),
+      makeButton('Disabled', 'block', () => {}, {disabled: true})
     );
     this.galleryCard.add(buttonRow);
     this.galleryCard.add(
@@ -1082,6 +1127,40 @@ class InteractionPlayground extends xb.Script {
 
     this.add(this.galleryCard);
     this.resettableObjects.push(this.galleryCard);
+  }
+
+  addModeOverlay() {
+    const modeBadge = createPanel(
+      {
+        padding: 16,
+        flexDirection: 'row',
+        gap: 12,
+        backgroundColor: 'rgba(10, 17, 31, 0.9)',
+        borderWidth: 2,
+        borderColor: raycastMode === 'select' ? '#fbbf24' : '#22d3ee',
+        borderRadius: 18,
+      },
+      {pointerEvents: 'none'}
+    );
+    modeBadge.add(
+      createIcon('radar', {width: 32, height: 32, color: UI_THEME.accent}),
+      createText(`RAYCAST: ${raycastMode.toUpperCase()}`, {
+        fontSize: 24,
+        fontWeight: 'bold',
+        color: UI_THEME.text,
+      })
+    );
+    this.modeOverlay = new xb.UIOverlay({
+      pointerEvents: 'none',
+      style: {
+        alignItems: 'flex-start',
+        justifyContent: 'flex-start',
+        padding: 24,
+      },
+      children: [modeBadge],
+    });
+    this.modeOverlay.name = 'Raycast mode overlay';
+    this.add(this.modeOverlay);
   }
 
   update(time = 0) {
@@ -1100,6 +1179,30 @@ class InteractionPlayground extends xb.Script {
   toggleObjectTransition() {
     this.objectTransition?.toggle();
     report('Object3D visibility toggled', 'placement');
+  }
+
+  toggleTheme() {
+    this.alternateTheme = !this.alternateTheme;
+    xb.ui.theme = this.alternateTheme
+      ? {
+          colors: {
+            primary: '#fbbf24',
+            primaryText: '#111827',
+            raisedSurface: '#3f2d20',
+            outline: '#f59e0b',
+          },
+          borderRadius: 24,
+        }
+      : {
+          colors: {
+            primary: '#8ab4f8',
+            primaryText: '#202124',
+            raisedSurface: '#303134',
+            outline: '#5f6368',
+          },
+          borderRadius: 16,
+        };
+    report(`UI theme ${this.alternateTheme ? 'alternate' : 'default'}`, 'ui');
   }
 
   rememberInitialTransforms() {
@@ -1125,23 +1228,34 @@ class InteractionPlayground extends xb.Script {
     }
     this.uiTransition?.show();
     this.objectTransition?.show();
+    if (this.slider) this.slider.value = 50;
+    if (this.sliderValueText) this.sliderValueText.text = 'Slider 50%';
     report('Objects and placement baselines reset');
   }
 
-  onSelectStart() {
-    markFeature('selection');
+  onSelectStart(event) {
+    report(
+      `Global start: ${describeTarget(event)} (${describeSource(event)})`,
+      'selection'
+    );
   }
 
   onSelecting() {
     markFeature('selection');
   }
 
-  onSelect() {
-    markFeature('selection');
+  onSelect(event) {
+    report(
+      `Global select: ${describeTarget(event)} (${describeSource(event)})`,
+      'selection'
+    );
   }
 
-  onSelectEnd() {
-    markFeature('selection');
+  onSelectEnd(event) {
+    report(
+      `Global end: ${event.completed}/${event.reason} (${describeSource(event)})`,
+      'selection'
+    );
   }
 }
 
@@ -1158,7 +1272,8 @@ options.depth.depthMesh.updateVertexNormals = true;
 options.depth.depthMesh.updateFullResolutionGeometry = true;
 options.reticles.enabled = true;
 options.reticles.maxDistance = 4;
-options.reticles.fadeDistance = 0.75;
+options.reticles.defaultRenderDistance = 1.5;
+options.interaction.raycastMode = raycastMode;
 options.controllers.visualizeRays = true;
 
 xb.add(playground);

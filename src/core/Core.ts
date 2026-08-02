@@ -546,7 +546,7 @@ export class Core {
       this.uiRenderer.initialize(this.scene, this.renderer, this.camera),
       this.scriptsManager.syncScriptsWithScene(this.scene),
     ]);
-    this.uiRenderer.update();
+    this.uiRenderer.update(0);
 
     this.renderer.setAnimationLoop(this.update);
 
@@ -615,7 +615,7 @@ export class Core {
 
     // Public state changes first, then one UI flush, then fresh hit sampling.
     this.scriptsManager.update(time, frame);
-    this.uiRenderer.update();
+    this.uiRenderer.update(this.timer.getDelta());
     this.interaction.syncTouchCandidates(
       this.scriptsManager.directTouchCandidates
     );

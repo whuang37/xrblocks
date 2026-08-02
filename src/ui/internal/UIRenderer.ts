@@ -91,11 +91,11 @@ export class UIRenderer {
       );
     }
     for (const root of roots) this.mount(root, backend);
-    this.flush();
+    this.flush(0);
   }
 
   /** Reconciles roots and flushes changed public state once for this frame. */
-  update(): void {
+  update(deltaSeconds: number): void {
     if (!this.initialized || !this.scene) return;
     const roots = this.findAndValidateRoots(this.scene);
     const connected = new Set(roots);
@@ -138,7 +138,7 @@ export class UIRenderer {
     for (const root of roots) {
       if (!this.mounts.has(root)) this.mount(root, backend);
     }
-    this.flush();
+    this.flush(deltaSeconds);
   }
 
   /** Cancels hit mappings and releases one disconnected public root. */
@@ -219,7 +219,7 @@ export class UIRenderer {
     this.mounts.delete(root);
   }
 
-  private flush(): void {
+  private flush(deltaSeconds: number): void {
     const viewport = {
       width: window.innerWidth,
       height: window.innerHeight,
@@ -265,6 +265,7 @@ export class UIRenderer {
       } else {
         record.mount.present(stateFor);
       }
+      record.mount.update(deltaSeconds);
     }
   }
 

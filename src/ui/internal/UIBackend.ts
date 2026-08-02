@@ -26,6 +26,7 @@ export interface UIMount {
     rootOrder: number
   ): UIHitMapping[];
   present(stateFor: (element: UIElement) => UIPresentationState): void;
+  update(deltaSeconds: number): void;
   dispose(): void;
 }
 

@@ -80,6 +80,10 @@ class UIKitMount implements UIMount {
     for (const update of this.presentationUpdates) update(stateFor);
   }
 
+  update(deltaSeconds: number): void {
+    this.rendered?.update(deltaSeconds);
+  }
+
   dispose(): void {
     this.rendered?.dispose();
     this.rendered = undefined;
@@ -387,7 +391,7 @@ function addButtonContent(
       })
     );
   }
-  panel.add(...content);
+  if (content.length > 0) panel.add(...content);
   return content;
 }
 

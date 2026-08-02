@@ -13,6 +13,9 @@ const version = packageJson.version;
 const buildTarget = process.env.XRBLOCKS_BUILD ?? 'all';
 const buildExamples = buildTarget !== 'sdk';
 
+// Private chunks are generated files and must not survive across builds.
+fs.rmSync(path.join('build', 'internal'), {recursive: true, force: true});
+
 // Get the current commit ID (short hash)
 let commitId = 'unknown';
 try {
@@ -95,7 +98,9 @@ const sdkBuilds = [
     input: 'src/entry.ts',
     external: externalPackages,
     output: {
-      file: 'build/xrblocks.js',
+      dir: 'build',
+      entryFileNames: 'xrblocks.js',
+      chunkFileNames: 'internal/[name].js',
       format: 'esm',
       banner: bannerText,
       sourcemap: true,
@@ -123,7 +128,9 @@ const sdkBuilds = [
     input: 'src/entry.ts',
     external: externalPackages,
     output: {
-      file: 'build/xrblocks.min.js',
+      dir: 'build',
+      entryFileNames: 'xrblocks.min.js',
+      chunkFileNames: 'internal/[name].min.js',
       format: 'esm',
       sourcemap: true,
     },

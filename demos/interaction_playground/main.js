@@ -454,7 +454,6 @@ class InteractionPlayground extends xb.Script {
   async init() {
     xb.core.scene.background = new THREE.Color(0x090d18);
     this.addLights();
-    this.addBackdrop();
     this.addXRDashboard();
     this.addManipulationObjects();
     this.addPlacementObjects();
@@ -465,6 +464,8 @@ class InteractionPlayground extends xb.Script {
     const depthMesh = xb.core.depth?.depthMesh;
     if (depthMesh) {
       depthMesh.name = 'Depth reticle surface';
+      depthMesh.visible = true;
+      depthMesh.material.visible = false;
       depthMesh.xb = {...depthMesh.xb, reticleMode: 'surface'};
     }
 
@@ -596,29 +597,19 @@ class InteractionPlayground extends xb.Script {
     });
     this.statusCard.add(this.statusText, this.eventLogText);
 
-    const primaryControls = createPanel({
+    const controls = createPanel({
       width: '100%',
       flexDirection: 'row',
       justifyContent: 'center',
       gap: 12,
     });
-    primaryControls.add(
+    controls.add(
       makeButton('Reset', 'restart_alt', () => this.reset()),
-      makeButton('UI panel', 'visibility', () => this.toggleUITransition())
-    );
-    const secondaryControls = createPanel({
-      width: '100%',
-      flexDirection: 'row',
-      justifyContent: 'center',
-      gap: 12,
-    });
-    secondaryControls.add(
       makeButton('3D object', 'animation', () => this.toggleObjectTransition()),
       makeButton('Theme', 'palette', () => this.toggleTheme())
     );
     this.statusCard.add(
-      primaryControls,
-      secondaryControls,
+      controls,
       new xb.FollowHead({
         offset: new THREE.Vector3(1.35, 0.48, -2.85),
         smoothing: 0.08,
@@ -656,28 +647,6 @@ class InteractionPlayground extends xb.Script {
     const keyLight = new THREE.DirectionalLight(0xffffff, 3.3);
     keyLight.position.set(-1.5, 3, 1.5);
     this.add(keyLight);
-  }
-
-  addBackdrop() {
-    const grid = new THREE.GridHelper(7, 28, 0x35516f, 0x172334);
-    grid.name = 'Pointer-ignored floor grid';
-    grid.xb = {pointerEvents: 'none'};
-    grid.position.y = -0.35;
-    this.add(grid);
-
-    const halo = new THREE.Mesh(
-      new THREE.CircleGeometry(2.8, 64),
-      new THREE.MeshBasicMaterial({
-        color: 0x132238,
-        transparent: true,
-        opacity: 0.42,
-        side: THREE.DoubleSide,
-      })
-    );
-    halo.name = 'Pointer-ignored backdrop';
-    halo.xb = {pointerEvents: 'none'};
-    halo.position.set(0, 1.25, -3.75);
-    this.add(halo);
   }
 
   addManipulationObjects() {
@@ -1020,26 +989,6 @@ class InteractionPlayground extends xb.Script {
     );
     this.galleryCard.add(mediaRow);
 
-    this.transitionPanel = createPanel({
-      width: '100%',
-      height: 76,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: '#153d44',
-      borderWidth: 2,
-      borderColor: '#5eead4',
-      borderRadius: 20,
-    });
-    this.transitionPanel.add(
-      createText('VisibilityTransition attached to UIPanel', {
-        fontSize: UI_THEME.bodySize,
-        color: '#d5fffa',
-      })
-    );
-    this.uiTransition = new xb.VisibilityTransition({duration: 0.28});
-    this.transitionPanel.add(this.uiTransition);
-    this.galleryCard.add(this.transitionPanel);
-
     this.sliderValueText = createText('Slider 50%', {
       width: '100%',
       fontSize: 24,
@@ -1076,9 +1025,6 @@ class InteractionPlayground extends xb.Script {
     buttonRow.add(
       makeButton('Click or hold', 'touch_app', () => {
         report('UI button clicked', 'ui');
-      }),
-      makeButton('Toggle panel', 'visibility', () => {
-        this.toggleUITransition();
       }),
       makeButton('Disabled', 'block', () => {}, {disabled: true})
     );
@@ -1133,11 +1079,6 @@ class InteractionPlayground extends xb.Script {
     this.followAnchor.rotation.y = seconds;
   }
 
-  toggleUITransition() {
-    this.uiTransition?.toggle();
-    report('UIPanel visibility toggled', 'placement');
-  }
-
   toggleObjectTransition() {
     this.objectTransition?.toggle();
     report('Object3D visibility toggled', 'placement');
@@ -1170,7 +1111,6 @@ class InteractionPlayground extends xb.Script {
         if (child instanceof xb.TransformScript) child.resume();
       }
     }
-    this.uiTransition?.show();
     this.objectTransition?.show();
     if (this.slider) this.slider.value = 50;
     if (this.sliderValueText) this.sliderValueText.text = 'Slider 50%';

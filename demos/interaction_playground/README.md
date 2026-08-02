@@ -14,8 +14,8 @@ The scene covers:
 - Surface, target, hidden, disabled, and pass-through reticle cases.
 - `UICard`, `UIPanel`, `UIButton`, `UIText`, `UIIcon`, and `UIImage`.
 - Fill, border, flex layout, UI clicks, and UI long-select.
-- `FaceCamera`, `FollowHead`, `FollowObject`, and `VisibilityTransition` on UI
-  components and ordinary 3D objects.
+- `FaceCamera` on UI and `FollowHead`, `FollowObject`, and
+  `VisibilityTransition` on ordinary 3D objects.
 - Transform-script suspension and rebasing while an object is manipulated.
 - Depth sensing for physical or simulated environment reticles.
 
@@ -25,4 +25,4 @@ second free source to test two-source scaling.
 
 Hold the gold object or the **Click or hold** UI button for at least 0.75
 seconds to test long-select. Use the XR control card to reset the scene or
-toggle visibility samples.
+toggle the 3D visibility sample.

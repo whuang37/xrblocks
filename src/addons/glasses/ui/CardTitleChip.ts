@@ -3,9 +3,9 @@ import {
   Container,
   InProperties,
   RenderContext,
+  Text,
   WithSignal,
 } from '@pmndrs/uikit';
-import {TextWithEmoji} from 'xrblocks';
 
 export type CardTitleChipOutProperties = BaseOutProperties & {
   text: string;
@@ -38,7 +38,7 @@ export class CardTitleChip<
       } as InProperties<OutProperties>,
       ...config,
     });
-    const text = new TextWithEmoji({
+    const text = new Text({
       text: this.properties.signal.text,
       fontSize: 24,
       color: 'white',

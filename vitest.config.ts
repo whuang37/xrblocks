@@ -10,17 +10,11 @@ export default defineConfig({
   },
   test: {
     include: ['src/**/*.test.ts'],
-    exclude: ['src/addons/**/*.test.ts'],
     environment: 'jsdom',
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
-      exclude: [
-        'src/addons/**',
-        'src/**/*.test.ts',
-        'src/**/*.d.ts',
-        'src/**/samples/**',
-      ],
+      exclude: ['src/**/*.test.ts', 'src/**/*.d.ts', 'src/**/samples/**'],
       reporter: ['text-summary', 'html'],
     },
   },

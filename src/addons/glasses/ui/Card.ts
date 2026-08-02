@@ -5,9 +5,9 @@ import {
   contentDefaults,
   Image,
   InProperties,
+  Text,
 } from '@pmndrs/uikit';
 import {computed} from '@preact/signals-core';
-import {TextWithEmoji} from 'xrblocks';
 
 import {ActionButton} from './ActionButton';
 import {ButtonProperties} from './ButtonProperties';
@@ -132,7 +132,7 @@ export class Card extends Container<CardProperties> {
     });
     contentArea.add(textArea);
 
-    const titleText = new TextWithEmoji({
+    const titleText = new Text({
       text: computed(() => this.properties.signal.title.value ?? ''),
       fontSize: 24,
       lineHeight: '32px',
@@ -147,7 +147,7 @@ export class Card extends Container<CardProperties> {
     });
     textArea.add(titleText);
 
-    const subtitleText = new TextWithEmoji({
+    const subtitleText = new Text({
       text: computed(() => this.properties.signal.subtitle.value ?? ''),
       fontSize: 18,
       lineHeight: '32px',
@@ -162,7 +162,7 @@ export class Card extends Container<CardProperties> {
     });
     textArea.add(subtitleText);
 
-    const bodyText = new TextWithEmoji({
+    const bodyText = new Text({
       text: computed(() => this.properties.signal.body.value ?? ''),
       fontSize: 20,
       lineHeight: '32px',

@@ -4,10 +4,6 @@ import {TextBillboard} from 'xrblocks/addons/ui/TextBillboard.js';
 class ReticleVisualizer extends xb.Script {
   activeControllerToBillboardMap = new Map();
 
-  init() {
-    xb.showReticleOnDepthMesh(true);
-  }
-
   onSelectStart(event) {
     const controller = event.target;
     const intersection = xb.core.user.select(
@@ -50,6 +46,8 @@ class ReticleVisualizer extends xb.Script {
 
 document.addEventListener('DOMContentLoaded', function () {
   const options = new xb.Options();
+  options.reticles.enabled = true;
+  options.reticles.projectOnDepthMesh = true;
   options.depth = new xb.DepthOptions(xb.xrDepthMeshOptions);
   options.setAppTitle('XR Reticle');
   xb.add(new ReticleVisualizer());

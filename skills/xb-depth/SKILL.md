@@ -7,7 +7,7 @@ description: >-
   occlusion (a person walks in front of a virtual object), depth-aware reticles, or
   depth-mesh collision for physics. Covers `enableDepth()`, the `DepthOptions`
   presets (`xrDepthMeshOptions`, `xrDepthMeshPhysicsOptions`), `colliderUpdateFps`,
-  and `showReticleOnDepthMesh`. Pair with xb-physics for geometry-aware collisions.
+  and depth-mesh reticle projection. Pair with xb-physics for geometry-aware collisions.
 ---
 
 # xb-depth: depth sensing & occlusion
@@ -50,8 +50,8 @@ options.physics.RAPIER = RAPIER;
 
 ## Useful APIs
 
-- `xb.showReticleOnDepthMesh(true)` — let the reticle target the depth mesh.
-- `xb.core.depth.depthMesh` — the depth mesh object (e.g. `ignoreReticleRaycast`).
+- `options.reticles.projectOnDepthMesh = true` — project reticles onto the depth mesh.
+- `xb.core.depth.depthMesh` — the live depth mesh object.
 - Occlusion is handled by the depth subsystem ([`src/depth/occlusion/`](../../src/depth/occlusion));
   `demos/occlusion` shows real-people-in-front-of-virtual-objects.
 

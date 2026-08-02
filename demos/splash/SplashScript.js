@@ -34,8 +34,6 @@ export class SplashScript extends xb.Script {
 
   init() {
     this.addLights();
-    xb.core.input.addReticles();
-    xb.showReticleOnDepthMesh(true);
     xb.core.camera.add(this.listener);
   }
 

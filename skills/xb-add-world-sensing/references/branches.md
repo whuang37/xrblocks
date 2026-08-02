@@ -72,9 +72,9 @@ camera-relative physical surface:
 
 ```js
 options.enableDepth();
+options.reticles.projectOnDepthMesh = true;
 
 const meters = xb.depth.getDepth(u, v);
-xb.showReticleOnDepthMesh(true);
 ```
 
 `enableDepth()` installs `xb.xrDepthMeshOptions` and requests the required

@@ -146,18 +146,6 @@ export function getElapsedTime() {
 }
 
 /**
- * Toggles whether the reticle can target the depth-sensing mesh.
- * @param value - True to add the depth mesh as a target, false to
- * remove it.
- */
-export function showReticleOnDepthMesh(value: boolean) {
-  if (core.depth.depthMesh) {
-    core.depth.depthMesh.xb ??= {};
-    core.depth.depthMesh.xb.pointerEvents = value ? 'auto' : 'none';
-  }
-}
-
-/**
  * Retrieves the left camera from the stereoscopic XR camera rig.
  * @returns The left eye's camera.
  */

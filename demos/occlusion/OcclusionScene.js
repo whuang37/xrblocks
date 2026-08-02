@@ -28,7 +28,6 @@ export class OcclusionScene extends xb.Script {
 
   init() {
     this.addLights();
-    xb.showReticleOnDepthMesh(true);
     this.addPanel();
   }
 

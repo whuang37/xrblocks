@@ -103,9 +103,11 @@ export class DepthMesh extends MeshScript {
       material.depthWrite = false;
     }
 
+    material.visible = options.showDebugTexture || options.renderShadow;
     super(geometry, material);
 
-    this.visible = options.showDebugTexture || options.renderShadow;
+    this.visible = true;
+    this.xb = {pointerEvents: 'none', reticleMode: 'surface'};
     this.options = options;
     this.lastColliderUpdateTime = performance.now();
     this.updateVertexNormals = options.updateVertexNormals;
@@ -198,6 +200,7 @@ export class DepthMesh extends MeshScript {
 
     if (this.options.updateVertexNormals) {
       this.geometry.computeVertexNormals();
+      this.downsampledGeometry?.computeVertexNormals();
     }
 
     this.updateColliderIfNeeded();

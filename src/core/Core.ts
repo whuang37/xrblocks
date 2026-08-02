@@ -434,6 +434,13 @@ export class Core {
         this.registry,
         this.scene
       );
+      if (this.depth.depthMesh) {
+        this.depth.depthMesh.xb = {
+          ...this.depth.depthMesh.xb,
+          pointerEvents: options.reticles.projectOnDepthMesh ? 'auto' : 'none',
+          reticleMode: 'surface',
+        };
+      }
     }
     if (options.hands.enabled) {
       webXRRequiredFeatures.push('hand-tracking');

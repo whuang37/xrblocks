@@ -4,6 +4,8 @@ import {LightingScene} from './LightingScene.js';
 
 // Set up depth mesh optinos. Need depth mesh to render shadows to.
 let options = new xb.Options();
+options.reticles.enabled = true;
+options.reticles.projectOnDepthMesh = true;
 options.depth = new xb.DepthOptions(xb.xrDepthMeshOptions);
 options.depth.enabled = true;
 options.depth.depthMesh.enabled = true;

@@ -12,6 +12,8 @@ const depthMeshColliderUpdateFps = xb.getUrlParamFloat(
 const splashScript = new SplashScript();
 
 let options = new xb.Options();
+options.reticles.enabled = true;
+options.reticles.projectOnDepthMesh = true;
 options.depth = new xb.DepthOptions(xb.xrDepthMeshPhysicsOptions);
 options.depth.depthMesh.colliderUpdateFps = depthMeshColliderUpdateFps;
 options.xrButton = {

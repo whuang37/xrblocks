@@ -75,7 +75,6 @@ export class AnimalOcclusionScene extends xb.Script {
 
   public async init() {
     this.addLights();
-    xb.showReticleOnDepthMesh(true);
 
     this.sliderUI = new AnimalSlider(
       this,

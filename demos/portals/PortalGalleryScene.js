@@ -117,8 +117,6 @@ export class PortalGalleryScene extends xb.Script {
     }
 
     this.add(new THREE.AmbientLight(0x223355, 0.6));
-    xb.showReticleOnDepthMesh?.(true);
-
     // Exit label shown above cosmic portal in immersive mode.
     this._exitLabel = new xb.SpatialPanel({
       width: 0.7,

@@ -16,10 +16,6 @@ export class LightingScene extends xb.Script {
     this.modelManager.layers.enable(xb.OCCLUDABLE_ITEMS_LAYER);
     this.add(this.modelManager);
   }
-  init() {
-    xb.core.input.addReticles();
-    xb.showReticleOnDepthMesh(true);
-  }
   updatePointerPosition(event) {
     // (-1 to +1) for both components
     this.pointer.x = (event.clientX / window.innerWidth) * 2 - 1;

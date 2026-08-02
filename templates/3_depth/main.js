@@ -46,8 +46,8 @@ class PawnPlacer extends xb.Script {
 document.addEventListener('DOMContentLoaded', async function () {
   const options = new xb.Options();
   options.reticles.enabled = true;
+  options.reticles.projectOnDepthMesh = true;
   options.depth = new xb.DepthOptions(xb.xrDepthMeshOptions);
   await xb.init(options);
-  xb.showReticleOnDepthMesh(true);
   xb.add(new PawnPlacer());
 });

@@ -461,14 +461,6 @@ class InteractionPlayground extends xb.Script {
     this.addUICards();
     this.addModeOverlay();
 
-    const depthMesh = xb.core.depth?.depthMesh;
-    if (depthMesh) {
-      depthMesh.name = 'Depth reticle surface';
-      depthMesh.visible = true;
-      depthMesh.material.visible = false;
-      depthMesh.xb = {...depthMesh.xb, reticleMode: 'surface'};
-    }
-
     this.rememberInitialTransforms();
     markFeature('ui');
     markFeature('placement');
@@ -1155,6 +1147,7 @@ options.enableDepth();
 options.depth.depthMesh.updateVertexNormals = true;
 options.depth.depthMesh.updateFullResolutionGeometry = true;
 options.reticles.enabled = true;
+options.reticles.projectOnDepthMesh = true;
 options.reticles.maxDistance = 4;
 options.reticles.defaultRenderDistance = 1.5;
 options.interaction.raycastMode = raycastMode;

@@ -4,6 +4,7 @@ import {OcclusionScene} from './OcclusionScene.js';
 
 const options = new xb.Options();
 options.reticles.enabled = true;
+options.reticles.projectOnDepthMesh = true;
 options.depth = new xb.DepthOptions(xb.xrDepthMeshOptions);
 options.depth.depthMesh.updateFullResolutionGeometry = true;
 options.depth.depthMesh.renderShadow = true;

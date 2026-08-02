@@ -10,7 +10,6 @@ export class MeasureScene extends xb.Script {
   currentColorIndex = 0;
 
   init() {
-    xb.showReticleOnDepthMesh(true);
     this.setupLights();
   }
 

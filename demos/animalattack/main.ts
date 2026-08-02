@@ -4,6 +4,7 @@ import {AnimalOcclusionScene} from './animal_occlusion_scene.js';
 async function startApp() {
   const options = new xb.Options();
   options.reticles.enabled = true;
+  options.reticles.projectOnDepthMesh = true;
   options.depth = new xb.DepthOptions(xb.xrDepthMeshOptions);
   const {depthMesh, depthTexture, occlusion} = options.depth;
 

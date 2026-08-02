@@ -6,6 +6,7 @@ import {PortalGalleryScene} from './PortalGalleryScene.js';
 
 const options = new xb.Options();
 options.reticles.enabled = true;
+options.reticles.projectOnDepthMesh = true;
 
 // Real-world depth mesh so the portal can be placed on a wall/floor and the
 // galaxy hides behind real geometry around the rim.

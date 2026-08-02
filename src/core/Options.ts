@@ -42,6 +42,8 @@ export class InputOptions {
  */
 export class ReticleOptions {
   enabled = true;
+  /** Whether reticles use the real-world depth mesh as a surface. */
+  projectOnDepthMesh = false;
   /**
    * Maximum reticle drawing distance in meters. It does not limit targeting.
    */

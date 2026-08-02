@@ -29,6 +29,10 @@ import {
   type SelectionCapture,
 } from './InteractionTypes.js';
 import {dispatchInteractionPath, isSelectionValid} from './InteractionUtils.js';
+import {
+  createPlanarSurfaceProjector,
+  type PlanarSurfaceProjector,
+} from './PlanarSurface.js';
 import {ReticlePresenter} from './ReticlePresenter.js';
 import {ManipulationManager} from './manipulation/ManipulationManager.js';
 import {
@@ -46,6 +50,7 @@ interface TargetCapture {
   ancestry: readonly THREE.Object3D[];
   semantic?: SemanticControlState;
   semanticControl?: THREE.Object3D;
+  sliderProjector?: PlanarSurfaceProjector;
   exclusiveControl?: THREE.Object3D;
   longSelectDuration: number;
   longSelectFired: boolean;
@@ -455,6 +460,12 @@ export class Interaction {
       action = 'manipulate';
     }
     if (gaze && semantic?.kind !== 'button') action = 'none';
+    const sliderProjector =
+      action === 'semantic' && semantic?.kind === 'slider'
+        ? createPlanarSurfaceProjector(
+            this.registry.resolve(resolved.hitObject).physical
+          )
+        : undefined;
 
     const capture: TargetCapture = {
       kind: 'target',
@@ -463,6 +474,7 @@ export class Interaction {
       ancestry: Object.freeze([...resolved.objectPath]),
       semantic,
       semanticControl: resolved.semanticControl,
+      sliderProjector,
       exclusiveControl:
         action === 'semantic' && semantic?.kind === 'slider'
           ? resolved.semanticControl
@@ -491,7 +503,7 @@ export class Interaction {
     }
     if (action === 'semantic') {
       this.invokeSemantic(capture, () =>
-        semantic?.begin?.(semanticInput(snapshot, resolved))
+        semantic?.begin?.(semanticInput(snapshot, resolved, sliderProjector))
       );
     }
     this.callbacks.invokeGlobal('onSelectStart', event);
@@ -792,8 +804,24 @@ export class Interaction {
     if (capture.action !== 'semantic' || capture.semantic?.kind !== 'slider') {
       return;
     }
+    const projection = snapshot.ray
+      ? capture.sliderProjector?.(snapshot.ray)
+      : undefined;
+    if (projection) {
+      this.invokeSemantic(capture, () =>
+        capture.semantic?.update?.({
+          source: snapshot.source,
+          point: projection.point,
+          uv: projection.uv,
+        })
+      );
+      return;
+    }
     const resolved = this.resolvedRays.get(snapshot.controller);
-    if (resolved) {
+    if (
+      resolved?.surface === capture.selection.surface &&
+      resolved.semanticControl === capture.semanticControl
+    ) {
       this.invokeSemantic(capture, () =>
         capture.semantic?.update?.(semanticInput(snapshot, resolved))
       );
@@ -1025,12 +1053,14 @@ export class Interaction {
 
 function semanticInput(
   snapshot: InteractionSourceSnapshot,
-  resolved: ResolvedRay
+  resolved: ResolvedRay,
+  projector?: PlanarSurfaceProjector
 ) {
+  const projection = snapshot.ray ? projector?.(snapshot.ray) : undefined;
   return {
     source: snapshot.source,
-    point: resolved.intersection.point.clone(),
-    uv: resolved.intersection.uv?.clone(),
+    point: projection?.point ?? resolved.intersection.point.clone(),
+    uv: projection?.uv ?? resolved.intersection.uv?.clone(),
   };
 }
 

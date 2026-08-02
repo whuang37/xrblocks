@@ -201,7 +201,6 @@ export class ManipulationManager {
         ? capture.hitPart.corner
         : undefined;
     if (edge?.scale && corner) {
-      session.primaryAction = undefined;
       session.cornerScale = {primaryCorner: corner};
     }
     const baseline = session.primaryAction

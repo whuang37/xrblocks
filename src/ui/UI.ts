@@ -1,5 +1,5 @@
-import type {UITheme, UIThemeUpdate} from './UITheme';
-import {createTheme, defaultTheme} from './UITheme';
+import type {UITheme, UIThemePresetName, UIThemeUpdate} from './UITheme';
+import {createTheme, defaultTheme, uiThemePresets} from './UITheme';
 
 /** Lightweight global UI settings. It does not load the rendering backend. */
 export class UI {
@@ -9,8 +9,14 @@ export class UI {
     return this.themeState.proxy;
   }
 
-  set theme(value: UIThemeUpdate) {
-    this.themeState.assign(value);
+  set theme(value: UIThemePresetName | UIThemeUpdate) {
+    if (typeof value === 'string') {
+      const preset = uiThemePresets[value];
+      if (!preset) throw new Error(`Unknown UI theme preset "${value}".`);
+      this.themeState.replace(preset);
+    } else {
+      this.themeState.assign(value);
+    }
   }
 
   /** Internal revision used by the private renderer. */

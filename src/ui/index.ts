@@ -31,4 +31,10 @@ export type {
   UIStyle,
   UIUnit,
 } from './UIElement';
-export type {UITheme, UIThemeColors, UIThemeUpdate} from './UITheme';
+export type {
+  UITheme,
+  UIThemeColors,
+  UIThemePresetName,
+  UIThemeStyles,
+  UIThemeUpdate,
+} from './UITheme';

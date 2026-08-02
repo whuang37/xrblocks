@@ -355,13 +355,15 @@ function treeSignature(root: UIElement): string {
   root.traverse((object) => {
     if (!isUIElement(object)) return;
     const kind = getUIElementKind(object);
+    const backgroundColor =
+      object.style.backgroundColor ?? ui.theme.styles?.[kind]?.backgroundColor;
     const shape =
       kind === 'card'
-        ? `edge:${Boolean((object as UICard).edge)}:hit:${object.style.backgroundColor === undefined || !isTransparentColor(object.style.backgroundColor)}`
+        ? `edge:${Boolean((object as UICard).edge)}:hit:${backgroundColor === undefined || !isTransparentColor(backgroundColor)}`
         : kind === 'button'
           ? buttonContentShape(object as UIButton)
           : kind === 'panel' || kind === 'overlay'
-            ? `hit:${!isTransparentColor(object.style.backgroundColor)}`
+            ? `hit:${!isTransparentColor(backgroundColor)}`
             : '';
     values.push(
       `${object.parent?.uuid ?? ''}:${object.uuid}:${kind}:${shape}:${object.style.zIndex ?? 0}`

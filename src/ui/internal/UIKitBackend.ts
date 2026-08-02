@@ -153,7 +153,7 @@ function createNode(
   const kind = getUIElementKind(element);
   const presentation = stateFor(element);
   const styleFor = (state: UIPresentationState) =>
-    toUIKitStyle(resolveStyle(element, state));
+    toUIKitStyle(resolveStyle(element, state, theme));
   const style = styleFor(presentation);
   let node: THREE.Object3D;
   let blocksHits = true;
@@ -338,12 +338,21 @@ function clearRemovedProperties(
   return properties;
 }
 
-function resolveStyle(element: UIElement, state: UIPresentationState): UIStyle {
+function resolveStyle(
+  element: UIElement,
+  state: UIPresentationState,
+  theme: UITheme
+): UIStyle {
+  const themeStyle = theme.styles?.[getUIElementKind(element)] ?? {};
   const style = element.style;
   return {
+    ...themeStyle,
     ...style,
+    ...(state.hovered ? themeStyle[':hover'] : undefined),
     ...(state.hovered ? style[':hover'] : undefined),
+    ...(state.active ? themeStyle[':active'] : undefined),
     ...(state.active ? style[':active'] : undefined),
+    ...(state.disabled ? themeStyle[':disabled'] : undefined),
     ...(state.disabled ? style[':disabled'] : undefined),
   };
 }

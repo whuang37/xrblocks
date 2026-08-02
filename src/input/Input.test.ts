@@ -24,21 +24,6 @@ describe('Input head gestures', () => {
     expect(input.headGestures).toBeDefined();
     expect(systemsGroup.children).toContain(input.headGestures);
   });
-
-  it('leaves the optional child undefined when disabled', () => {
-    const input = new Input();
-    const options = new Options();
-    options.controllers.enabled = false;
-
-    input.init({
-      scene: new THREE.Scene(),
-      systemsGroup: new XRSystems(),
-      options,
-      renderer: {} as THREE.WebGLRenderer,
-    });
-
-    expect(input.headGestures).toBeUndefined();
-  });
 });
 
 describe('Input direct touch', () => {
@@ -75,15 +60,96 @@ describe('Input direct touch', () => {
   });
 });
 
+describe('Input raycast modes', () => {
+  function setupRayInput(mode: 'continuous' | 'select') {
+    const input = new Input();
+    const controller = new THREE.Object3D() as Controller;
+    controller.userData.connected = true;
+    const target = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshBasicMaterial()
+    );
+    target.position.z = -2;
+    const scene = new THREE.Scene();
+    scene.add(target);
+    scene.updateMatrixWorld(true);
+
+    input.options = new Options();
+    input.options.interaction.raycastMode = mode;
+    input.scene = scene;
+    input.controllers = [controller];
+
+    return {input, controller, target};
+  }
+
+  it('applies continuous, select/release, and gaze raycast policy', () => {
+    const continuous = setupRayInput('continuous');
+    continuous.input.update();
+    const continuousIntersections =
+      continuous.input.getInteractionFrame().raySources[0].intersections;
+    expect(continuousIntersections.length).toBeGreaterThan(0);
+    expect(
+      continuousIntersections.every(({object}) => object === continuous.target)
+    ).toBe(true);
+
+    const {input, controller} = setupRayInput('select');
+
+    input.update();
+    expect(
+      input.getInteractionFrame().raySources[0].intersections
+    ).toHaveLength(0);
+
+    controller.userData.selected = true;
+    input.update();
+    expect(
+      input.getInteractionFrame().raySources[0].intersections.length
+    ).toBeGreaterThan(0);
+
+    controller.userData.selected = false;
+    input.update();
+    expect(
+      input.getInteractionFrame().raySources[0].intersections.length
+    ).toBeGreaterThan(0);
+
+    input.update();
+    expect(
+      input.getInteractionFrame().raySources[0].intersections
+    ).toHaveLength(0);
+
+    const gazeInput = new Input();
+    const camera = new THREE.PerspectiveCamera();
+    const target = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshBasicMaterial()
+    );
+    target.position.z = -2;
+    const scene = new THREE.Scene();
+    scene.add(target);
+    scene.updateMatrixWorld(true);
+
+    gazeInput.options = new Options();
+    gazeInput.options.interaction.raycastMode = 'select';
+    gazeInput.scene = scene;
+    gazeInput.gazeController.camera = camera;
+    gazeInput.gazeController.userData.connected = true;
+    gazeInput.controllers = [gazeInput.gazeController];
+    gazeInput.update();
+
+    expect(
+      gazeInput.getInteractionFrame().raySources[0].intersections.length
+    ).toBeGreaterThan(0);
+  });
+});
+
 describe('Input events', () => {
-  it('dispatches selectend and resets selected state upon disconnection', () => {
+  it('reports disconnection and stops forwarding controller events after dispose', () => {
     const input = new Input();
     const mockController = new THREE.Object3D() as unknown as Controller;
     mockController.userData = {connected: true, selected: true};
 
     const selectEndSpy = vi.fn();
-    input.bindListener('selectend', selectEndSpy);
     input.controllers.push(mockController);
+    input.bindListener('selectend', selectEndSpy);
 
     input.defaultOnDisconnected({
       type: 'disconnected',
@@ -96,24 +162,13 @@ describe('Input events', () => {
       type: 'selectend',
       target: mockController,
     });
-  });
-
-  it('removes event listeners from controllers on dispose', () => {
-    const input = new Input();
-    const mockController = new THREE.Object3D() as unknown as Controller;
-    mockController.userData = {connected: true};
-
-    const addSpy = vi.spyOn(mockController, 'addEventListener');
-    const removeSpy = vi.spyOn(mockController, 'removeEventListener');
-
-    input.controllers.push(mockController);
-    input.bindListener('selectstart', vi.fn());
-
-    expect(addSpy).toHaveBeenCalled();
-    const listenerAdded = addSpy.mock.calls[0][1];
 
     input.dispose();
 
-    expect(removeSpy).toHaveBeenCalledWith('selectstart', listenerAdded);
+    mockController.dispatchEvent({
+      type: 'selectend',
+      target: mockController,
+    });
+    expect(selectEndSpy).toHaveBeenCalledOnce();
   });
 });

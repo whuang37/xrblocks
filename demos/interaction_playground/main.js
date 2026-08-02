@@ -9,12 +9,7 @@ const requestedRaycastMode = new URLSearchParams(window.location.search).get(
 const raycastMode = requestedRaycastMode === 'select' ? 'select' : 'continuous';
 
 const UI_THEME = Object.freeze({
-  surface: 'rgba(10, 17, 31, 0.96)',
-  surfaceRaised: 'rgba(22, 35, 58, 0.96)',
   surfaceSubtle: 'rgba(255, 255, 255, 0.08)',
-  button: '#233653',
-  buttonHover: '#315274',
-  buttonActive: '#7c3aed',
   text: '#f8fafc',
   textMuted: '#cbd5e1',
   textDim: '#94a3b8',
@@ -310,7 +305,6 @@ class InstrumentedPanel extends xb.UIButton {
   }
 
   onHoverEnter(event) {
-    this.style.backgroundColor = UI_THEME.buttonHover;
     report(
       `${this.diagnosticLabel}: UI hover enter (${describeSource(event)})`,
       'ui'
@@ -319,7 +313,6 @@ class InstrumentedPanel extends xb.UIButton {
   }
 
   onHoverExit() {
-    this.style.backgroundColor = UI_THEME.button;
     report(`${this.diagnosticLabel}: UI hover exit`);
     return true;
   }
@@ -341,10 +334,6 @@ class InstrumentedPanel extends xb.UIButton {
   }
 
   onObjectLongSelect(event) {
-    this.style.backgroundColor = UI_THEME.buttonActive;
-    setTimeout(() => {
-      this.style.backgroundColor = UI_THEME.button;
-    }, 260);
     report(
       `${this.diagnosticLabel}: UI long select ${event.duration.toFixed(2)}s (${describeSource(event)})`,
       'long-select'
@@ -392,10 +381,8 @@ function makeSectionLabel(text, position, color) {
       padding: 14,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: UI_THEME.surface,
       borderWidth: 2,
       borderColor: color,
-      borderRadius: 22,
     },
     pointerEvents: 'none',
   });
@@ -420,10 +407,8 @@ function makeSampleLabel(text, position, color) {
       padding: 10,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: UI_THEME.surfaceRaised,
       borderWidth: 1.5,
       borderColor: color,
-      borderRadius: 16,
     },
     pointerEvents: 'none',
   });
@@ -454,17 +439,6 @@ function makeButton(label, icon, onClick, {disabled = false} = {}) {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
-      borderRadius: 22,
-      backgroundColor: UI_THEME.button,
-      color: UI_THEME.text,
-      borderWidth: 2,
-      borderColor: UI_THEME.mint,
-      ':hover': {backgroundColor: UI_THEME.buttonHover},
-      ':active': {backgroundColor: UI_THEME.buttonActive},
-      ':disabled': {
-        backgroundColor: 'rgba(71, 85, 105, 0.45)',
-        color: UI_THEME.textDim,
-      },
     },
   });
   button.xb = {...button.xb, manipulationHandle: 'none'};
@@ -508,10 +482,6 @@ class InteractionPlayground extends xb.Script {
       style: {
         padding: 28,
         gap: 12,
-        backgroundColor: '#10283d',
-        borderWidth: 3,
-        borderColor: '#38bdf8',
-        borderRadius: 30,
       },
       pointerEvents: 'none',
     });
@@ -557,10 +527,6 @@ class InteractionPlayground extends xb.Script {
       style: {
         padding: 28,
         gap: 15,
-        backgroundColor: '#211a3d',
-        borderWidth: 3,
-        borderColor: '#8b5cf6',
-        borderRadius: 30,
       },
     });
     this.statusCard.add(
@@ -1002,10 +968,6 @@ class InteractionPlayground extends xb.Script {
       style: {
         padding: 30,
         gap: 16,
-        backgroundColor: '#201b3e',
-        borderWidth: 3,
-        borderColor: '#6ee7d8',
-        borderRadius: 32,
       },
     });
 
@@ -1183,26 +1145,8 @@ class InteractionPlayground extends xb.Script {
 
   toggleTheme() {
     this.alternateTheme = !this.alternateTheme;
-    xb.ui.theme = this.alternateTheme
-      ? {
-          colors: {
-            primary: '#fbbf24',
-            primaryText: '#111827',
-            raisedSurface: '#3f2d20',
-            outline: '#f59e0b',
-          },
-          borderRadius: 24,
-        }
-      : {
-          colors: {
-            primary: '#8ab4f8',
-            primaryText: '#202124',
-            raisedSurface: '#303134',
-            outline: '#5f6368',
-          },
-          borderRadius: 16,
-        };
-    report(`UI theme ${this.alternateTheme ? 'alternate' : 'default'}`, 'ui');
+    xb.ui.theme = this.alternateTheme ? 'colorful' : 'grayGlass';
+    report(`UI theme ${this.alternateTheme ? 'colorful' : 'grayGlass'}`, 'ui');
   }
 
   rememberInitialTransforms() {

@@ -44,6 +44,12 @@ void main() {
     vec2 innerHalfSize = max(vec2(0.0), halfSize - margin);
     float innerRadius = max(0.0, effR - margin);
     float distToInner = sdRoundedBox(p, innerHalfSize, innerRadius);
+    float innerAA = fwidth(distToInner);
+    float edgeBandMask = smoothstep(
+        -0.5 * innerAA,
+        0.5 * innerAA,
+        distToInner
+    );
 
     if (u_debug > 0.5) {
         if (distToInner < 0.0) {
@@ -72,6 +78,8 @@ void main() {
         float d2 = distToCursor2 * distToCursor2;
         glowAlpha = max(glowAlpha, exp(-0.5 * d2 / (sigma * sigma)));
     }
+
+    glowAlpha *= edgeBandMask;
 
     if (glowAlpha > 0.001) {
         vec4 glow = u_cursor_spotlight_color;

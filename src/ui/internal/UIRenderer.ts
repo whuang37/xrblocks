@@ -2,12 +2,9 @@ import * as THREE from 'three';
 
 import type {Interaction} from '../../interaction/Interaction';
 import {ui} from '../UI';
-import {
-  getUIElementKind,
-  getUIRevision,
-  isUIElement,
-  type UIElement,
-} from '../UIElement';
+import type {UIButton} from '../components/UIButton';
+import type {UICard} from '../components/UICard';
+import {getUIElementKind, isUIElement, type UIElement} from '../UIElement';
 import type {
   UIBackend,
   UIBackendModule,
@@ -250,7 +247,7 @@ export class UIRenderer {
             intersection.uv ? [intersection.uv] : []
           ),
       });
-      if (signature !== record.signature || themeChanged) {
+      if (signature !== record.signature) {
         record.signature = signature;
         for (const unregister of record.unregisterHits) unregister();
         const mappings = record.mount.sync(
@@ -263,7 +260,7 @@ export class UIRenderer {
           this.registerHit(mapping)
         );
       } else {
-        record.mount.present(stateFor);
+        record.mount.present(stateFor, themeChanged);
       }
       record.mount.update(deltaSeconds);
     }
@@ -359,11 +356,35 @@ function treeSignature(root: UIElement): string {
   const values: string[] = [];
   root.traverse((object) => {
     if (!isUIElement(object)) return;
+    const kind = getUIElementKind(object);
+    const shape =
+      kind === 'card'
+        ? `edge:${Boolean((object as UICard).edge)}:hit:${object.style.backgroundColor === undefined || !isTransparentColor(object.style.backgroundColor)}`
+        : kind === 'button'
+          ? buttonContentShape(object as UIButton)
+          : kind === 'panel' || kind === 'overlay'
+            ? `hit:${!isTransparentColor(object.style.backgroundColor)}`
+            : '';
     values.push(
-      `${object.uuid}:${getUIRevision(object)}:${object.visible}:${object.xb?.pointerEvents}:${object.xb?.interactionEnabled}`
+      `${object.parent?.uuid ?? ''}:${object.uuid}:${kind}:${shape}:${object.style.zIndex ?? 0}`
     );
   });
   return values.join('|');
+}
+
+function buttonContentShape(button: UIButton): string {
+  return `icon:${button.icon !== undefined}:label:${button.label !== undefined}`;
+}
+
+function isTransparentColor(color: unknown): boolean {
+  if (color === undefined || color === 'transparent') return true;
+  if (typeof color !== 'string') return false;
+  const compact = color.replace(/\s/g, '').toLowerCase();
+  return (
+    /^#[0-9a-f]{3}0$/u.test(compact) ||
+    /^#[0-9a-f]{6}00$/u.test(compact) ||
+    /^(?:rgba|hsla)\([^)]*,0(?:\.0+)?\)$/u.test(compact)
+  );
 }
 
 function effectiveVisible(object: THREE.Object3D): boolean {

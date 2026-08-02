@@ -16,6 +16,7 @@ import {UISlider} from '../components/UISlider';
 import {UIText} from '../components/UIText';
 import {
   getUIElementKind,
+  getUIRevision,
   invalidateUIElement,
   isUIElement,
   type UIElement,
@@ -34,12 +35,15 @@ import type {
 const ICON_BASE =
   'https://cdn.jsdelivr.net/gh/marella/material-symbols@v0.33.0/svg/400/outlined/';
 
+type PresentationUpdate = (
+  stateFor: (element: UIElement) => UIPresentationState,
+  themeChanged: boolean
+) => void;
+
 class UIKitMount implements UIMount {
   object: THREE.Object3D = new THREE.Group();
   private rendered?: Container;
-  private presentationUpdates: Array<
-    (stateFor: (element: UIElement) => UIPresentationState) => void
-  > = [];
+  private presentationUpdates: PresentationUpdate[] = [];
 
   constructor(
     private readonly root: UIElement,
@@ -76,8 +80,13 @@ class UIKitMount implements UIMount {
     return mappings;
   }
 
-  present(stateFor: (element: UIElement) => UIPresentationState): void {
-    for (const update of this.presentationUpdates) update(stateFor);
+  present(
+    stateFor: (element: UIElement) => UIPresentationState,
+    themeChanged: boolean
+  ): void {
+    for (const update of this.presentationUpdates) {
+      update(stateFor, themeChanged);
+    }
   }
 
   update(deltaSeconds: number): void {
@@ -139,9 +148,7 @@ function createNode(
   sequence: {value: number},
   icons: IconCache,
   images: ImageCache,
-  presentationUpdates: Array<
-    (stateFor: (element: UIElement) => UIPresentationState) => void
-  >
+  presentationUpdates: PresentationUpdate[]
 ): THREE.Object3D {
   const kind = getUIElementKind(element);
   const presentation = stateFor(element);
@@ -205,7 +212,9 @@ function createNode(
       !isTransparent(panelStyle.fillColor);
     const panel = new GradientPanel(panelStyle);
     node = panel;
+    let previousPanelProperties = panelStyle;
     let buttonContent: Array<Text | Svg> = [];
+    let updateSliderContent: (() => void) | undefined;
 
     if (kind === 'button') {
       buttonContent = addButtonContent(
@@ -216,7 +225,7 @@ function createNode(
         style.color as THREE.ColorRepresentation | undefined
       );
     } else if (kind === 'slider') {
-      addSliderContent(panel, element as UISlider, theme);
+      updateSliderContent = addSliderContent(panel, element as UISlider, theme);
     }
 
     for (const child of element.children) {
@@ -248,26 +257,45 @@ function createNode(
       });
     }
     applyPresentation = (state) => {
-      panel.setProperties(propertiesFor(state));
+      const nextPanelProperties = propertiesFor(state);
+      panel.setProperties(
+        clearRemovedProperties(previousPanelProperties, nextPanelProperties)
+      );
+      previousPanelProperties = nextPanelProperties;
       if (kind === 'button') {
         updateButtonContent(
           buttonContent,
           element as UIButton,
           theme,
+          icons,
           styleFor(state).color as THREE.ColorRepresentation | undefined
         );
+      } else if (kind === 'slider') {
+        updateSliderContent?.();
       }
     };
   }
 
+  let revision = getUIRevision(element);
   let presentationKey = stateKey(presentation);
-  presentationUpdates.push((stateFor) => {
+  let pointerEvents = element.xb?.pointerEvents;
+  presentationUpdates.push((stateFor, themeChanged) => {
     const state = stateFor(element);
+    const nextRevision = getUIRevision(element);
     const nextKey = stateKey(state);
-    if (nextKey !== presentationKey) {
+    const nextPointerEvents = element.xb?.pointerEvents;
+    if (
+      themeChanged ||
+      nextRevision !== revision ||
+      nextKey !== presentationKey ||
+      nextPointerEvents !== pointerEvents
+    ) {
+      revision = nextRevision;
       presentationKey = nextKey;
+      pointerEvents = nextPointerEvents;
       applyPresentation(state);
     }
+    node.visible = element.visible;
     edge?.setCursors(state.cursorUVs[0], state.cursorUVs[1]);
   });
 
@@ -285,6 +313,17 @@ function createNode(
     });
   }
   return node;
+}
+
+function clearRemovedProperties(
+  previous: Record<string, unknown>,
+  next: Record<string, unknown>
+): Record<string, unknown> {
+  const properties = {...next};
+  for (const key of Object.keys(previous)) {
+    if (!(key in next)) properties[key] = undefined;
+  }
+  return properties;
 }
 
 function resolveStyle(element: UIElement, state: UIPresentationState): UIStyle {
@@ -344,6 +383,9 @@ function panelDefaults(
   };
   if (kind === 'card') {
     const card = element as UICard;
+    defaults.flexDirection = style.flexDirection ?? 'column';
+    defaults.justifyContent = style.justifyContent ?? 'center';
+    defaults.alignItems = style.alignItems ?? 'stretch';
     defaults.pixelSize = 0.001;
     defaults.sizeX = card.size.width;
     defaults.sizeY = card.size.height;
@@ -399,12 +441,31 @@ function updateButtonContent(
   content: readonly (Text | Svg)[],
   button: UIButton,
   theme: UITheme,
+  icons: IconCache,
   color?: THREE.ColorRepresentation
 ): void {
   const contentColor =
     color ??
     (button.disabled ? theme.colors.disabledText : theme.colors.primaryText);
-  for (const node of content) node.setProperties({color: contentColor});
+  let index = 0;
+  if (button.icon) {
+    const icon = content[index++] as Svg;
+    icon.resetProperties({
+      content: icons.get(button.icon, () => invalidateUIElement(button)),
+      width: 24,
+      height: 24,
+      color: contentColor,
+      pointerEvents: 'none',
+    });
+  }
+  if (button.label) {
+    const label = content[index] as Text;
+    label.resetProperties({
+      text: button.label,
+      color: contentColor,
+      pointerEvents: 'none',
+    });
+  }
 }
 
 const FALLBACK_ICON = `
@@ -516,47 +577,51 @@ function addSliderContent(
   panel: GradientPanel,
   slider: UISlider,
   theme: UITheme
-): void {
-  const ratio =
-    slider.max === slider.min
-      ? 0
-      : (slider.value - slider.min) / (slider.max - slider.min);
-  panel.add(
-    new GradientPanel({
-      positionType: 'absolute',
-      positionLeft: 0,
-      positionRight: 0,
-      positionTop: '50%',
-      height: 10,
-      fillColor: theme.colors.outline,
-      cornerRadius: 5,
-      pointerEvents: 'none',
-    }),
-    new GradientPanel({
-      positionType: 'absolute',
-      positionLeft: 0,
-      positionTop: '50%',
-      width: `${ratio * 100}%`,
-      height: 10,
-      fillColor: slider.disabled
-        ? theme.colors.disabledText
-        : theme.colors.primary,
-      cornerRadius: 5,
-      pointerEvents: 'none',
-    }),
-    new GradientPanel({
-      positionType: 'absolute',
+): () => void {
+  const track = new GradientPanel({
+    positionType: 'absolute',
+    positionLeft: 0,
+    positionRight: 0,
+    positionTop: '50%',
+    height: 10,
+    fillColor: theme.colors.outline,
+    cornerRadius: 5,
+    pointerEvents: 'none',
+  });
+  const fill = new GradientPanel({
+    positionType: 'absolute',
+    positionLeft: 0,
+    positionTop: '50%',
+    height: 10,
+    cornerRadius: 5,
+    pointerEvents: 'none',
+  });
+  const thumb = new GradientPanel({
+    positionType: 'absolute',
+    positionTop: '50%',
+    width: 28,
+    height: 28,
+    cornerRadius: 14,
+    pointerEvents: 'none',
+  });
+  const update = () => {
+    const ratio =
+      slider.max === slider.min
+        ? 0
+        : (slider.value - slider.min) / (slider.max - slider.min);
+    const color = slider.disabled
+      ? theme.colors.disabledText
+      : theme.colors.primary;
+    track.setProperties({fillColor: theme.colors.outline});
+    fill.setProperties({width: `${ratio * 100}%`, fillColor: color});
+    thumb.setProperties({
       positionLeft: `${ratio * 100}%`,
-      positionTop: '50%',
-      width: 28,
-      height: 28,
-      fillColor: slider.disabled
-        ? theme.colors.disabledText
-        : theme.colors.primary,
-      cornerRadius: 14,
-      pointerEvents: 'none',
-    })
-  );
+      fillColor: color,
+    });
+  };
+  update();
+  panel.add(track, fill, thumb);
+  return update;
 }
 
 function toUIKitStyle(style: UIStyle): Record<string, unknown> {

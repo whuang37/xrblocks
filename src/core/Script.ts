@@ -96,8 +96,8 @@ export function ScriptMixin<TBase extends Constructor<THREE.Object3D>>(
     isXRScript = true;
 
     /**
-     * Initializes an instance with XR controllers, grips, hands, raycaster, and
-     * default options. We allow all scripts to quickly access its user (e.g.,
+     * Initializes an instance with XR controllers, grips, hands, and default
+     * options. We allow all scripts to quickly access its user (e.g.,
      * user.isSelecting(), user.hands), world (e.g., physical depth mesh,
      * lighting estimation, and recognized objects), and scene (the root of
      * three.js's scene graph). If this returns a promise, we will wait for it.
@@ -157,12 +157,12 @@ export function ScriptMixin<TBase extends Constructor<THREE.Object3D>>(
 
     /**
      * Called whenever gamepad trigger starts, globally.
-     * @param _event - event.target holds its controller.
+     * @param _event - `event.source.controller` identifies the controller.
      */
     onSqueezeStart(_event: SelectEvent) {}
     /**
      * Called whenever gamepad trigger stops, globally.
-     * @param _event - event.target holds its controller.
+     * @param _event - `event.source.controller` identifies the controller.
      */
     onSqueezeEnd(_event: SelectEvent) {}
 
@@ -173,7 +173,7 @@ export function ScriptMixin<TBase extends Constructor<THREE.Object3D>>(
 
     /**
      * Called whenever gamepad trigger successfully completes, globally.
-     * @param _event - event.target holds its controller.
+     * @param _event - `event.source.controller` identifies the controller.
      */
     onSqueeze(_event: SelectEvent) {}
 
@@ -181,7 +181,8 @@ export function ScriptMixin<TBase extends Constructor<THREE.Object3D>>(
     /**
      * Called when the controller starts selecting this object the script
      * represents, e.g. View, ModelView.
-     * @param _event - event.target holds its controller.
+     * @param _event - `event.target` is the logical object and
+     * `event.source.controller` identifies the controller.
      * @returns Whether the event was handled. If true, the event will not bubble up.
      */
     onObjectSelectStart(_event: SelectEvent): boolean | void {}

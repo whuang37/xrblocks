@@ -11,24 +11,24 @@ describe('ScriptsManager lifecycle', () => {
 
   it('disposes active and pending generations once', async () => {
     let finishInitialization: (() => void) | undefined;
-    const manager = new ScriptsManager(
-      () =>
-        new Promise<void>((resolve) => {
-          finishInitialization = resolve;
-        })
-    );
     const active = new Script();
     const pending = new Script();
+    const manager = new ScriptsManager((script) =>
+      script === active
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => {
+            finishInitialization = resolve;
+          })
+    );
     const disposeActive = vi.spyOn(active, 'dispose');
     const disposePending = vi.spyOn(pending, 'dispose');
-    manager.scripts.add(active);
+    await manager.initScript(active);
     const initialization = manager.initScript(pending);
     await vi.waitFor(() => expect(finishInitialization).toBeDefined());
 
     const disposal = manager.dispose();
 
     expect(manager.dispose()).toBe(disposal);
-    expect(manager.scripts.size).toBe(0);
     await vi.waitFor(() => expect(disposeActive).toHaveBeenCalledOnce());
     expect(disposePending).not.toHaveBeenCalled();
 
@@ -41,7 +41,7 @@ describe('ScriptsManager lifecycle', () => {
     );
   });
 
-  it('attempts every disposal phase before propagating an error', () => {
+  it('attempts every disposal phase before propagating an error', async () => {
     const manager = new ScriptsManager(async () => {});
     const script = new Script();
     const dispose = vi
@@ -52,13 +52,12 @@ describe('ScriptsManager lifecycle', () => {
     });
     manager.afterDispose = vi.fn();
     manager.catchExceptions = false;
-    manager.scripts.add(script);
+    await manager.initScript(script);
 
     expect(() => manager.uninitScript(script)).toThrow('cancel failed');
 
     expect(dispose).toHaveBeenCalledOnce();
     expect(manager.afterDispose).toHaveBeenCalledOnce();
-    expect(manager.scripts.has(script)).toBe(false);
   });
 
   it('disposes a stale initialization and starts a new generation after reconnect', async () => {
@@ -73,6 +72,7 @@ describe('ScriptsManager lifecycle', () => {
     const scene = new THREE.Scene();
     const script = new Script();
     const dispose = vi.spyOn(script, 'dispose');
+    const update = vi.spyOn(script, 'update');
 
     scene.add(script);
     const firstSync = manager.syncScriptsWithScene(scene);
@@ -86,24 +86,23 @@ describe('ScriptsManager lifecycle', () => {
     resolvers[0]();
     await vi.waitFor(() => expect(initialize).toHaveBeenCalledTimes(2));
     expect(dispose).toHaveBeenCalledOnce();
-    expect(manager.scripts.has(script)).toBe(false);
+    manager.update(0, {} as XRFrame);
+    expect(update).not.toHaveBeenCalled();
 
     resolvers[1]();
     await Promise.all([firstSync, removalSync, reconnectSync]);
 
-    expect(manager.scripts.has(script)).toBe(true);
+    manager.update(0, {} as XRFrame);
+    expect(update).toHaveBeenCalledOnce();
   });
 
   it('catches callback errors by default and propagates them when disabled', () => {
-    const manager = new ScriptsManager(async () => {});
+    const reportError = vi.fn();
+    const manager = new ScriptsManager(async () => {}, reportError);
     const first = new Script();
     const second = new Script();
     const visited: Script[] = [];
-    const events: string[] = [];
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    manager.addEventListener('exception', (event) => {
-      events.push(event.context);
-    });
 
     expect(
       manager.callTargeted([first, second], 'update', (script) => {
@@ -112,7 +111,9 @@ describe('ScriptsManager lifecycle', () => {
       })
     ).toBe(false);
     expect(visited).toEqual([second]);
-    expect(events).toEqual(['update']);
+    expect(reportError).toHaveBeenCalledWith(
+      expect.objectContaining({context: 'update'})
+    );
 
     manager.catchExceptions = false;
     expect(() =>
@@ -120,6 +121,6 @@ describe('ScriptsManager lifecycle', () => {
         throw new Error('callback failed again');
       })
     ).toThrow('callback failed again');
-    expect(events).toEqual(['update']);
+    expect(reportError).toHaveBeenCalledTimes(1);
   });
 });

@@ -19,6 +19,11 @@ import * as THREE from 'three';
 import {Core} from './Core';
 import {Options} from './Options';
 import {Script} from './Script';
+import {ScriptsManager} from './components/ScriptsManager';
+
+function scripts(core: Core): ScriptsManager {
+  return (core as unknown as {scriptsManager: ScriptsManager}).scriptsManager;
+}
 
 describe('Core frame and simulator lifecycle', () => {
   let core: Core;
@@ -39,8 +44,7 @@ describe('Core frame and simulator lifecycle', () => {
     } as unknown as THREE.WebGLRenderer;
     core.depth.update = vi.fn();
     core.input.sampleSources = vi.fn();
-    core.input.raycast = vi.fn();
-    core.scriptsManager.syncScriptsWithScene = vi.fn();
+    scripts(core).syncScriptsWithScene = vi.fn();
     core.waitFrame.onFrame = vi.fn();
     core.screenshotSynthesizer.onAfterRender = vi.fn();
   });
@@ -49,10 +53,10 @@ describe('Core frame and simulator lifecycle', () => {
     vi.restoreAllMocks();
   });
 
-  it('runs script callbacks and renders through one Core frame', () => {
+  it('runs script callbacks and renders through one Core frame', async () => {
     const script = new Script();
     const update = vi.spyOn(script, 'update');
-    core.scriptsManager.scripts = new Set([script]);
+    await scripts(core).initScript(script);
 
     (
       core as unknown as {update: (time: number, frame: XRFrame) => void}
@@ -70,13 +74,13 @@ describe('Core frame and simulator lifecycle', () => {
     await core.init(core.options);
 
     let finishInit: (() => void) | undefined;
-    core.scriptsManager.initScript = vi.fn(
+    scripts(core).initScript = vi.fn(
       () =>
         new Promise<void>((resolve) => {
           finishInit = resolve;
         })
     );
-    core.scriptsManager.onSimulatorStarted = vi.fn();
+    scripts(core).onSimulatorStarted = vi.fn();
 
     const startSimulator = (
       core as unknown as {startSimulator: () => Promise<void>}
@@ -85,18 +89,18 @@ describe('Core frame and simulator lifecycle', () => {
     const firstStart = startSimulator();
     const secondStart = startSimulator();
 
-    expect(core.scriptsManager.initScript).toHaveBeenCalledOnce();
+    expect(scripts(core).initScript).toHaveBeenCalledOnce();
     expect(core.simulatorRunning).toBe(false);
 
     finishInit?.();
     await Promise.all([firstStart, secondStart]);
 
     expect(core.simulatorRunning).toBe(true);
-    expect(core.scriptsManager.onSimulatorStarted).toHaveBeenCalledOnce();
+    expect(scripts(core).onSimulatorStarted).toHaveBeenCalledOnce();
 
     await startSimulator();
 
-    expect(core.scriptsManager.initScript).toHaveBeenCalledOnce();
-    expect(core.scriptsManager.onSimulatorStarted).toHaveBeenCalledOnce();
+    expect(scripts(core).initScript).toHaveBeenCalledOnce();
+    expect(scripts(core).onSimulatorStarted).toHaveBeenCalledOnce();
   });
 });

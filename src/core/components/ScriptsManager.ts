@@ -137,24 +137,18 @@ const DIRECT_TOUCH_TARGET_HOOKS = Object.freeze([
   'onObjectGrabEnd',
 ] as const satisfies readonly TargetedInteractionHook[]);
 
-export enum ScriptsManagerEventType {
-  EXCEPTION = 'exception',
+const SCRIPT_READY = Promise.resolve();
+const NO_SCRIPT_CHANGES = Promise.resolve<PromiseSettledResult<void>[]>([]);
+
+export interface ScriptError {
+  readonly scriptName: string;
+  readonly context: string;
+  readonly error: Error;
+  readonly timestamp: number;
 }
 
-export type ScriptsManagerEventMap = THREE.Object3DEventMap & {
-  [ScriptsManagerEventType.EXCEPTION]: {
-    scriptName: string;
-    context: string;
-    error: Error;
-    timestamp: number;
-  };
-};
-
-export class ScriptsManager
-  extends THREE.EventDispatcher<ScriptsManagerEventMap>
-  implements InteractionCallbackDispatch
-{
-  private activeScripts = new Set<Script>();
+export class ScriptsManager implements InteractionCallbackDispatch {
+  private readonly activeScripts = new Set<Script>();
   private readonly hookScripts = new Map<IndexedScriptHook, Set<Script>>();
   private readonly pendingInitializations = new Map<
     Script,
@@ -172,23 +166,14 @@ export class ScriptsManager
   beforeDispose?: (script: Script) => void;
   afterDispose?: (script: Script) => void;
 
-  constructor(private initScriptFunction: (script: Script) => Promise<void>) {
-    super();
-  }
-
-  /** The set of all currently initialized scripts. */
-  get scripts(): Set<Script> {
-    return this.activeScripts;
-  }
+  constructor(
+    private readonly initScriptFunction: (script: Script) => Promise<void>,
+    private readonly onScriptError?: (event: ScriptError) => void
+  ) {}
 
   /** Objects found during the lifecycle traversal that direct touch can use. */
   get directTouchCandidates(): ReadonlySet<THREE.Object3D> {
     return this.interactionCandidates;
-  }
-
-  set scripts(scripts: Set<Script>) {
-    this.activeScripts = scripts;
-    this.rebuildHookIndex();
   }
 
   isScript = (object: THREE.Object3D): boolean =>
@@ -198,9 +183,7 @@ export class ScriptsManager
     object: THREE.Object3D,
     sourceType: InteractionSourceType
   ): boolean => {
-    if (!this.isScript(object) || !this.activeScripts.has(object as Script)) {
-      return false;
-    }
+    if (!this.isScript(object)) return false;
 
     const script = object as Script;
     const hooks =
@@ -208,8 +191,8 @@ export class ScriptsManager
         ? DIRECT_TOUCH_TARGET_HOOKS
         : RAY_TARGET_HOOKS;
     return (
-      hooks.some((hook) => this.hasOverriddenHook(script, hook)) ||
-      this.hasOverriddenHook(script, 'onObjectManipulate')
+      hooks.some((hook) => this.hasIndexedHook(script, hook)) ||
+      this.hasIndexedHook(script, 'onObjectManipulate')
     );
   };
 
@@ -217,9 +200,7 @@ export class ScriptsManager
     object: THREE.Object3D,
     hook: TargetedInteractionHook
   ): boolean =>
-    this.isScript(object) &&
-    this.activeScripts.has(object as Script) &&
-    this.hasOverriddenHook(object as Script, hook);
+    this.isScript(object) && this.hasIndexedHook(object as Script, hook);
 
   invokeTarget = (
     object: THREE.Object3D,
@@ -269,8 +250,7 @@ export class ScriptsManager
       error
     );
 
-    this.dispatchEvent({
-      type: ScriptsManagerEventType.EXCEPTION,
+    this.onScriptError?.({
       scriptName: script.name || script.constructor.name,
       context,
       error,
@@ -324,8 +304,8 @@ export class ScriptsManager
     if (this.disposed) {
       return Promise.reject(new Error('ScriptsManager has been disposed.'));
     }
-    if (this.activeScripts.has(script)) return Promise.resolve();
-    if (this.failedScripts.has(script)) return Promise.resolve();
+    if (this.activeScripts.has(script)) return SCRIPT_READY;
+    if (this.failedScripts.has(script)) return SCRIPT_READY;
 
     const pending = this.pendingInitializations.get(script);
     if (pending) {
@@ -337,12 +317,10 @@ export class ScriptsManager
 
     const entry: PendingInitialization = {
       script,
-      promise: Promise.resolve(),
+      promise: SCRIPT_READY,
       connection: 'connected',
     };
-    entry.promise = Promise.resolve().then(() =>
-      this.finishInitialization(entry)
-    );
+    entry.promise = SCRIPT_READY.then(() => this.finishInitialization(entry));
     this.pendingInitializations.set(script, entry);
     return entry.promise;
   }
@@ -479,8 +457,10 @@ export class ScriptsManager
     }
     if ((object as MaybeScript).isXRScript) {
       const script = object as Script;
-      this.syncPromises.push(this.initScript(script));
       this.seenScripts.add(script);
+      if (!this.activeScripts.has(script) && !this.failedScripts.has(script)) {
+        this.syncPromises.push(this.initScript(script));
+      }
     }
   };
 
@@ -516,7 +496,9 @@ export class ScriptsManager
       }
     }
 
-    return Promise.allSettled(this.syncPromises);
+    return this.syncPromises.length === 0
+      ? NO_SCRIPT_CHANGES
+      : Promise.allSettled(this.syncPromises);
   }
 
   callSelecting = (event: SelectEvent): void => {
@@ -595,11 +577,16 @@ export class ScriptsManager
     hook: GlobalScriptHook,
     callback: (script: Script) => void
   ): void {
-    this.callTargeted(this.getLiveHookSet(hook), hook, callback);
+    const scripts = this.hookScripts.get(hook);
+    if (scripts) this.callTargeted(scripts, hook, callback);
   }
 
   private hasOverriddenHook(script: Script, hook: IndexedScriptHook): boolean {
     return !isDefaultScriptMethod(Reflect.get(script, hook));
+  }
+
+  private hasIndexedHook(script: Script, hook: IndexedScriptHook): boolean {
+    return this.hookScripts.get(hook)?.has(script) ?? false;
   }
 
   private getHookSet(hook: IndexedScriptHook): Set<Script> {
@@ -607,18 +594,6 @@ export class ScriptsManager
     if (!scripts) {
       scripts = new Set<Script>();
       this.hookScripts.set(hook, scripts);
-    }
-    return scripts;
-  }
-
-  private getLiveHookSet(hook: IndexedScriptHook): Set<Script> {
-    const scripts = this.getHookSet(hook);
-    for (const script of this.activeScripts) {
-      if (this.hasOverriddenHook(script, hook)) scripts.add(script);
-      else scripts.delete(script);
-    }
-    for (const script of [...scripts]) {
-      if (!this.activeScripts.has(script)) scripts.delete(script);
     }
     return scripts;
   }
@@ -633,11 +608,6 @@ export class ScriptsManager
 
   private unindexScript(script: Script): void {
     for (const scripts of this.hookScripts.values()) scripts.delete(script);
-  }
-
-  private rebuildHookIndex(): void {
-    this.hookScripts.clear();
-    for (const script of this.activeScripts) this.indexScript(script);
   }
 }
 

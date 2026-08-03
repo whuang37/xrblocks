@@ -20,7 +20,7 @@ export interface DirectTouchContact {
   readonly hand?: THREE.Object3D;
   readonly point: THREE.Vector3;
   readonly selected: boolean;
-  readonly endReason?: 'released' | 'target-changed' | 'source-lost';
+  readonly endReason?: 'left-target' | 'target-changed' | 'source-lost';
 }
 
 interface ActiveContact {
@@ -106,7 +106,7 @@ export class DirectTouch {
           this.endContact(
             input.controller,
             input.selected,
-            resolved?.target ? 'target-changed' : 'released',
+            resolved?.target ? 'target-changed' : 'left-target',
             snapshot,
             input.handIndex,
             input.hand,

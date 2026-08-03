@@ -155,7 +155,7 @@ function describeSemanticObject(
   if (override?.role || override?.name) {
     return {
       role: override.role ?? inferRole(object),
-      name: inferName(object),
+      name: override.name ?? inferName(object),
       source: override.source ?? 'app',
       text: override.text ?? inferText(object),
       traits: override.traits ?? inferTraits(object),

@@ -38,3 +38,10 @@ export type {
   UIThemeStyles,
   UIThemeUpdate,
 } from './UITheme';
+export type {
+  ColorStop,
+  GradientPaint,
+  GradientType,
+  Paint,
+  SolidPaint,
+} from './types/ShaderTypes';

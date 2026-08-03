@@ -2,15 +2,17 @@ import * as THREE from 'three';
 
 import {Script} from '../core/Script';
 import type {PointerEvents, ReticleMode} from '../interaction/InteractionTypes';
+import {MAX_GRADIENT_STOPS} from './constants/GradientPanelConstants';
+import type {GradientPaint, Paint} from './types/ShaderTypes';
 
 export type UIUnit = number | `${number}%` | 'auto';
-export type UIColor = THREE.ColorRepresentation | 'transparent';
+export type UIColor = Paint;
 
 export interface UIStateStyle {
   backgroundColor?: UIColor;
   color?: THREE.ColorRepresentation;
   opacity?: number;
-  borderColor?: THREE.ColorRepresentation;
+  borderColor?: Paint;
   borderWidth?: number;
   borderRadius?: number;
 }
@@ -52,6 +54,11 @@ export interface UIStyle extends UIStateStyle {
   fontWeight?: number | 'normal' | 'medium' | 'bold';
   lineHeight?: number;
   textAlign?: 'left' | 'center' | 'right';
+  innerShadowColor?: Paint;
+  innerShadowBlur?: number;
+  dropShadowColor?: Paint;
+  dropShadowBlur?: number;
+  dropShadowSpread?: number;
   overflow?: 'visible' | 'hidden';
   objectFit?: 'contain' | 'cover' | 'fill';
   whiteSpace?: 'normal' | 'nowrap';
@@ -128,6 +135,11 @@ const STYLE_KEYS = new Set<keyof UIStyle>([
   'fontWeight',
   'lineHeight',
   'textAlign',
+  'innerShadowColor',
+  'innerShadowBlur',
+  'dropShadowColor',
+  'dropShadowBlur',
+  'dropShadowSpread',
   'overflow',
   'objectFit',
   'whiteSpace',
@@ -176,13 +188,19 @@ const NUMBER_KEYS = new Set<keyof UIStyle>([
   'borderRadius',
   'fontSize',
   'lineHeight',
+  'innerShadowBlur',
+  'dropShadowBlur',
+  'dropShadowSpread',
 ]);
 
-const COLOR_KEYS = new Set<keyof UIStyle>([
+const PAINT_KEYS = new Set<keyof UIStyle>([
   'backgroundColor',
-  'color',
   'borderColor',
+  'innerShadowColor',
+  'dropShadowColor',
 ]);
+
+const COLOR_KEYS = new Set<keyof UIStyle>(['color']);
 
 const NONNEGATIVE_KEYS = new Set<keyof UIStyle>([
   'width',
@@ -206,6 +224,8 @@ const NONNEGATIVE_KEYS = new Set<keyof UIStyle>([
   'borderRadius',
   'fontSize',
   'lineHeight',
+  'innerShadowBlur',
+  'dropShadowBlur',
 ]);
 
 const ENUM_VALUES: Partial<Record<keyof UIStyle, readonly unknown[]>> = {
@@ -360,14 +380,11 @@ function validateStyle(
   ) {
     throw new Error(`UI style "${property}" must be a finite number.`);
   }
+  if (PAINT_KEYS.has(property as keyof UIStyle) && !isPaint(value)) {
+    throw new Error(`UI style "${property}" must be a valid paint.`);
+  }
   if (COLOR_KEYS.has(property as keyof UIStyle)) {
-    const valid =
-      value instanceof THREE.Color ||
-      (typeof value === 'number' && Number.isFinite(value)) ||
-      (typeof value === 'string' &&
-        value.trim().length > 0 &&
-        (property === 'backgroundColor' || value !== 'transparent'));
-    if (!valid) {
+    if (!isSolidColor(value) || value === 'transparent') {
       throw new Error(`UI style "${property}" must be a valid color.`);
     }
   }
@@ -433,9 +450,67 @@ function isUIUnit(value: unknown): value is UIUnit {
   );
 }
 
+function isPaint(value: unknown): value is Paint {
+  if (isSolidColor(value)) return true;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+
+  const gradient = value as Partial<GradientPaint>;
+  if (
+    !['linear', 'radial', 'angular', 'diamond'].includes(
+      gradient.gradientType ?? ''
+    ) ||
+    !Array.isArray(gradient.stops) ||
+    gradient.stops.length < 2 ||
+    gradient.stops.length > MAX_GRADIENT_STOPS ||
+    (gradient.rotation !== undefined &&
+      (!Number.isFinite(gradient.rotation) ||
+        typeof gradient.rotation !== 'number')) ||
+    !isVector2Like(gradient.center) ||
+    !isVector2Like(gradient.scale)
+  ) {
+    return false;
+  }
+
+  let previousPosition = -Infinity;
+  return gradient.stops.every((stop) => {
+    const valid =
+      !!stop &&
+      typeof stop === 'object' &&
+      typeof stop.position === 'number' &&
+      Number.isFinite(stop.position) &&
+      stop.position >= 0 &&
+      stop.position <= 1 &&
+      stop.position >= previousPosition &&
+      isSolidColor(stop.color);
+    previousPosition = stop?.position ?? previousPosition;
+    return valid;
+  });
+}
+
+function isSolidColor(value: unknown): value is THREE.ColorRepresentation {
+  return (
+    value instanceof THREE.Color ||
+    (typeof value === 'number' && Number.isFinite(value)) ||
+    (typeof value === 'string' && value.trim().length > 0)
+  );
+}
+
+function isVector2Like(value: unknown): boolean {
+  if (value === undefined || value instanceof THREE.Vector2) return true;
+  return (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    value.every((component) =>
+      typeof component === 'number' ? Number.isFinite(component) : false
+    )
+  );
+}
+
 function cloneStyleValue(value: unknown): unknown {
   if (value instanceof THREE.Color) return value.clone();
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  if (value instanceof THREE.Vector2) return value.clone();
+  if (Array.isArray(value)) return value.map(cloneStyleValue);
+  if (!value || typeof value !== 'object') return value;
   return Object.fromEntries(
     Object.entries(value).map(([key, nested]) => [key, cloneStyleValue(nested)])
   );

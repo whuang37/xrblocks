@@ -37,7 +37,6 @@ const STALE_UI_LOAD = new Error('Stale UI backend load.');
 
 /** Owns all private UI rendering state for one Core lifecycle. */
 export class UIRenderer {
-  private readonly privateScene = new THREE.Scene();
   private readonly privateRoot = new THREE.Group();
   private readonly mounts = new Map<UIElement, MountRecord>();
   private readonly roots: UIElement[] = [];
@@ -60,8 +59,7 @@ export class UIRenderer {
     private readonly reportError?: (error: unknown, root: UIElement) => void
   ) {
     this.privateRoot.name = 'XR Blocks private UI';
-    markPrivateUI(this.privateRoot);
-    this.privateScene.add(this.privateRoot);
+    this.privateRoot.userData.xrblocksPrivate = true;
   }
 
   /** Mounts UI roots already connected when Core initializes. */
@@ -73,6 +71,7 @@ export class UIRenderer {
     this.publicScene = scene;
     this.renderer = renderer;
     this.initialized = true;
+    scene.add(this.privateRoot);
     const roots = this.collectConnectedRoots();
     if (roots.length === 0) return;
     let backend: UIBackend;
@@ -82,6 +81,7 @@ export class UIRenderer {
       if (cause === STALE_UI_LOAD) return;
       this.backend?.dispose();
       this.backend = undefined;
+      this.privateRoot.removeFromParent();
       this.loadPromise = undefined;
       this.initialized = false;
       this.publicScene = undefined;
@@ -161,26 +161,13 @@ export class UIRenderer {
     }
   }
 
-  /** Renders connected world UI into the current spatial render target. */
-  renderWorld(camera: THREE.Camera): void {
-    if (this.mounts.size === 0 || !this.renderer) return;
-    this.privateRoot.updateWorldMatrix(true, true);
-
-    const originalLayers = camera.layers.mask;
-    const originalAutoClear = this.renderer.autoClear;
-    try {
-      camera.layers.disable(UI_OVERLAY_LAYER);
-      this.renderer.autoClear = false;
-      this.renderer.render(this.privateScene, camera);
-    } finally {
-      camera.layers.mask = originalLayers;
-      this.renderer.autoClear = originalAutoClear;
-    }
-  }
-
   /** Renders connected overlays through the camera used for the world pass. */
   renderOverlay(camera: THREE.Camera): void {
-    if (this.connectedOverlayCount === 0 || !this.renderer) {
+    if (
+      this.connectedOverlayCount === 0 ||
+      !this.renderer ||
+      !this.publicScene
+    ) {
       return;
     }
     for (const record of this.mounts.values()) {
@@ -188,15 +175,13 @@ export class UIRenderer {
         syncRootTransform(record.root, record.mount.object, camera);
       }
     }
-    this.privateRoot.updateWorldMatrix(true, true);
-
     const originalLayers = camera.layers.mask;
     const originalAutoClear = this.renderer.autoClear;
     try {
       camera.layers.set(UI_OVERLAY_LAYER);
       this.renderer.autoClear = false;
       this.renderer.clearDepth();
-      this.renderer.render(this.privateScene, camera);
+      this.renderer.render(this.publicScene, camera);
     } finally {
       camera.layers.mask = originalLayers;
       this.renderer.autoClear = originalAutoClear;
@@ -226,6 +211,7 @@ export class UIRenderer {
     this.viewport.width = 0;
     this.viewport.height = 0;
     this.connectedOverlayCount = 0;
+    this.privateRoot.removeFromParent();
     this.initialized = false;
     this.publicScene = undefined;
     this.renderer = undefined;
@@ -251,7 +237,6 @@ export class UIRenderer {
 
   private mount(root: UIElement, backend: UIBackend, order: number): void {
     const mount = backend.createMount(root);
-    markPrivateUI(mount.object);
     this.privateRoot.add(mount.object);
     this.mounts.set(root, {
       root,
@@ -341,7 +326,6 @@ export class UIRenderer {
   });
 
   private registerHit(mapping: UIHitMapping): () => void {
-    mapping.physical.traverse(markPrivateUI);
     mapping.physical.userData.xrblocksHitOrder = mapping.physical.renderOrder;
     return this.interaction.registerHitSurface(
       mapping.physical,
@@ -365,10 +349,6 @@ export class UIRenderer {
     this.roots.length = connectedCount;
     return this.roots;
   }
-}
-
-export function markPrivateUI(object: THREE.Object3D): void {
-  object.userData.xrblocksPrivate = true;
 }
 
 function effectiveVisible(object: THREE.Object3D): boolean {

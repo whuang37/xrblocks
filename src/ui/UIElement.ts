@@ -2,6 +2,7 @@ import * as THREE from 'three';
 
 import {Script} from '../core/Script';
 import type {PointerEvents, ReticleMode} from '../interaction/InteractionTypes';
+import {TransformScript} from '../placement/TransformScript';
 import {MAX_GRADIENT_STOPS} from './constants/GradientPanelConstants';
 import type {GradientPaint, Paint} from './types/ShaderTypes';
 
@@ -415,18 +416,12 @@ function validateUIChild(parent: UIElement, child: THREE.Object3D): void {
     }
     return;
   }
-  const isScript =
-    child.userData.isXRScript === true ||
-    (child as THREE.Object3D & {isXRScript?: boolean}).isXRScript === true;
-  const isRenderable =
-    (child as THREE.Mesh).isMesh === true ||
-    (child as THREE.Line).isLine === true ||
-    (child as THREE.Points).isPoints === true;
-  if (isRenderable || !isScript) {
-    throw new Error(
-      'UI trees accept UI elements and non-rendering Scripts only.'
-    );
+  if (getUIElementKind(parent) === 'card' && child instanceof TransformScript) {
+    return;
   }
+  throw new Error(
+    'UI elements accept UI children. UICard also accepts TransformScript children.'
+  );
 }
 
 function findUIRoot(object: THREE.Object3D): UIElement | undefined {

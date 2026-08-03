@@ -158,6 +158,7 @@ export class ScriptsManager implements InteractionCallbackDispatch {
   private readonly interactionCandidates = new Set<THREE.Object3D>();
   private readonly failedScripts = new Set<Script>();
   private readonly syncPromises: Promise<void>[] = [];
+  private readonly traversalStack: THREE.Object3D[] = [];
   private disposed = false;
   private disposalPromise?: Promise<void>;
 
@@ -464,6 +465,20 @@ export class ScriptsManager implements InteractionCallbackDispatch {
     }
   };
 
+  private scanScene(scene: THREE.Scene): void {
+    const stack = this.traversalStack;
+    stack.length = 0;
+    stack.push(scene);
+    while (stack.length > 0) {
+      const object = stack.pop()!;
+      if (object.userData.xrblocksPrivate === true) continue;
+      this.checkScript(object);
+      for (let index = object.children.length - 1; index >= 0; index--) {
+        stack.push(object.children[index]);
+      }
+    }
+  }
+
   /**
    * Finds all scripts in the scene and initializes them or uninitializes them.
    * Returns a promise which resolves when all new scripts finish initializing.
@@ -478,7 +493,7 @@ export class ScriptsManager implements InteractionCallbackDispatch {
     this.seenScripts.clear();
     this.interactionCandidates.clear();
     this.syncPromises.length = 0;
-    scene.traverse(this.checkScript);
+    this.scanScene(scene);
 
     for (const script of this.activeScripts) {
       if (!this.seenScripts.has(script)) this.uninitScript(script);

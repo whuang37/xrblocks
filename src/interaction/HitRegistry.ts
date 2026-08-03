@@ -19,7 +19,6 @@ export class HitRegistry {
     THREE.Object3D,
     RegisteredHitSurface
   >();
-  private readonly detachedRaycastSurfaces = new Set<THREE.Object3D>();
 
   constructor() {
     this.raycaster.layers.enable(UI_OVERLAY_LAYER);
@@ -79,14 +78,21 @@ export class HitRegistry {
     this.raycaster.ray.copy(ray);
     this.raycaster.intersectObject(scene, true, intersections);
 
-    this.detachedRaycastSurfaces.clear();
-    for (const entry of this.registered) {
-      if (this.hasAncestor(entry.physical, scene)) continue;
-      this.detachedRaycastSurfaces.add(entry.physical);
+    let publicCount = 0;
+    for (const intersection of intersections) {
+      if (hasPrivateAncestor(intersection.object)) continue;
+      intersections[publicCount++] = intersection;
     }
-    for (const physical of this.detachedRaycastSurfaces) {
-      physical.updateWorldMatrix(true, true);
-      this.raycaster.intersectObject(physical, true, intersections);
+    intersections.length = publicCount;
+
+    for (const {physical} of this.registered) {
+      if (this.isBelowScene(physical, scene) && !hasPrivateAncestor(physical)) {
+        continue;
+      }
+      if (!effectiveVisible(physical)) continue;
+      if (!physical.layers.test(this.raycaster.layers)) continue;
+      physical.updateWorldMatrix(true, false);
+      physical.raycast(this.raycaster, intersections);
     }
     intersections.sort(compareRayIntersections);
     return intersections;
@@ -119,12 +125,10 @@ export class HitRegistry {
     return intersections;
   }
 
-  private hasAncestor(object: THREE.Object3D, scene: THREE.Scene): boolean {
+  private isBelowScene(object: THREE.Object3D, scene: THREE.Scene): boolean {
     let current = object.parent;
     while (current) {
       if (current === scene) return true;
-      const mapping = this.mappings.get(current);
-      if (mapping && this.registered.has(mapping)) return true;
       current = current.parent;
     }
     return false;
@@ -138,14 +142,8 @@ function compareRayIntersections(
   const aOverlay = a.object.layers.isEnabled(UI_OVERLAY_LAYER);
   const bOverlay = b.object.layers.isEnabled(UI_OVERLAY_LAYER);
   if (aOverlay !== bOverlay) return aOverlay ? -1 : 1;
-  if (aOverlay) {
-    const order =
-      (getInteractionHitOrder(b.object) ?? b.object.renderOrder) -
-      (getInteractionHitOrder(a.object) ?? a.object.renderOrder);
-    if (order !== 0) return order;
-  }
   const distance = a.distance - b.distance;
-  if (Math.abs(distance) > 0.00001) return distance;
+  if (distance !== 0) return distance;
   if (a.object.renderOrder !== b.object.renderOrder) {
     return b.object.renderOrder - a.object.renderOrder;
   }
@@ -182,6 +180,15 @@ function getInteractionHitOrder(object: THREE.Object3D): number | undefined {
     current = current.parent;
   }
   return undefined;
+}
+
+function hasPrivateAncestor(object: THREE.Object3D): boolean {
+  let current: THREE.Object3D | null = object;
+  while (current) {
+    if (current.userData.xrblocksPrivate === true) return true;
+    current = current.parent;
+  }
+  return false;
 }
 
 function effectiveVisible(object: THREE.Object3D): boolean {

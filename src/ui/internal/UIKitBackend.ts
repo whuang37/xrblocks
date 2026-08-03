@@ -68,8 +68,10 @@ class UIKitMount implements UIMount {
       mappings,
       viewport,
       stateFor,
-      Number(this.root.style.zIndex ?? 0) * 1_000_000_000 +
-        rootOrder * 1_000_000,
+      getUIElementKind(this.root) === 'overlay'
+        ? Number(this.root.style.zIndex ?? 0) * 1_000_000_000 +
+            rootOrder * 1_000_000
+        : undefined,
       {value: 0},
       this.icons,
       this.images,
@@ -140,7 +142,7 @@ function createNode(
   mappings: UIHitMapping[],
   viewport: {width: number; height: number},
   stateFor: (element: UIElement) => UIPresentationState,
-  rootStack: number,
+  rootStack: number | undefined,
   sequence: {value: number},
   icons: IconCache,
   images: ImageCache,
@@ -297,8 +299,10 @@ function createNode(
   });
 
   node.visible = element.visible;
-  node.renderOrder =
-    rootStack + Number(element.style.zIndex ?? 0) * 1_000 + sequence.value++;
+  if (rootStack !== undefined) {
+    node.renderOrder =
+      rootStack + Number(element.style.zIndex ?? 0) * 1_000 + sequence.value++;
+  }
   if (kind === 'overlay') {
     node.traverse((object) => object.layers.set(UI_OVERLAY_LAYER));
   }
@@ -308,19 +312,7 @@ function createNode(
       logical: element,
     });
   }
-  allowChildRaycasts(node);
   return node;
-}
-
-/**
- * UIKit returns false after raycasting a panel, which tells Three.js not to
- * visit its children. Discard that return so nested logical UI remains hittable.
- */
-function allowChildRaycasts(node: THREE.Object3D): void {
-  const raycast = node.raycast.bind(node);
-  node.raycast = (raycaster, intersections) => {
-    raycast(raycaster, intersections);
-  };
 }
 
 function clearRemovedProperties(

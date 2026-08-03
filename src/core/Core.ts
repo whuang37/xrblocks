@@ -108,11 +108,6 @@ export class Core {
   private renderSceneCallback = (cameraOverride?: THREE.Camera) =>
     this.renderScene(cameraOverride);
 
-  private renderSpatialScene = (camera: THREE.Camera) => {
-    this.renderer.render(this.scene, camera);
-    this.uiRenderer.renderWorld(camera);
-  };
-
   /** Manages the desktop XR simulator. */
   simulator = new Simulator(this.renderSceneCallback);
 
@@ -670,11 +665,7 @@ export class Core {
 
     // Sets up postprocessing effects.
     if (options.usePostprocessing) {
-      this.effects = new XREffects(
-        this.renderer,
-        this.renderSpatialScene,
-        this.timer
-      );
+      this.effects = new XREffects(this.renderer, this.scene, this.timer);
       this.simulator.effects = this.effects;
     }
 
@@ -912,11 +903,10 @@ export class Core {
     const camera = cameraOverride ?? this.camera;
     if (this.renderSceneOverride) {
       this.renderSceneOverride(this.renderer, this.scene, camera);
-      this.uiRenderer.renderWorld(camera);
     } else if (this.effects) {
       this.effects.render(camera);
     } else {
-      this.renderSpatialScene(camera);
+      this.renderer.render(this.scene, camera);
     }
     this.uiRenderer.renderOverlay(camera);
     this.reticlePresenter.render(this.renderer, camera);

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 
+import {UI_OVERLAY_LAYER} from '../../constants';
 import type {Interaction} from '../../interaction/Interaction';
 import {ui} from '../UI';
 import type {UIButton} from '../components/UIButton';
@@ -41,9 +42,10 @@ export class UIRenderer {
   private readonly failedRoots = new Set<UIElement>();
   private initialized = false;
   private renderer?: THREE.WebGLRenderer;
-  private camera?: THREE.Camera;
   private scene?: THREE.Scene;
   private themeRevision = -1;
+  private presentationThemeChanged = false;
+  private connectedOverlayCount = 0;
   private nextMountOrder = 0;
   private generation = 0;
 
@@ -59,13 +61,11 @@ export class UIRenderer {
   /** Mounts UI roots already connected when Core initializes. */
   async initialize(
     scene: THREE.Scene,
-    renderer: THREE.WebGLRenderer,
-    camera: THREE.Camera
+    renderer: THREE.WebGLRenderer
   ): Promise<void> {
     this.generation++;
     this.scene = scene;
     this.renderer = renderer;
-    this.camera = camera;
     this.initialized = true;
     const roots = this.findAndValidateRoots(scene);
     if (roots.length === 0) return;
@@ -82,18 +82,16 @@ export class UIRenderer {
       this.initialized = false;
       this.scene = undefined;
       this.renderer = undefined;
-      this.camera = undefined;
       throw new Error(
         'XR Blocks could not load the UI renderer during initialization.',
         {cause}
       );
     }
     for (const root of roots) this.mount(root, backend);
-    this.flush(0);
   }
 
-  /** Reconciles roots and flushes changed public state once for this frame. */
-  update(deltaSeconds: number): void {
+  /** Reconciles public UI and updates current hit geometry. */
+  reconcile(deltaSeconds: number, camera: THREE.Camera): void {
     if (!this.initialized || !this.scene) return;
     const roots = this.findAndValidateRoots(this.scene);
     const connected = new Set(roots);
@@ -108,6 +106,9 @@ export class UIRenderer {
       if (record && !record.connected) {
         record.connected = true;
         record.signature = '';
+        if (getUIElementKind(root) === 'overlay') {
+          this.connectedOverlayCount++;
+        }
       }
     }
     if (roots.length === 0) return;
@@ -136,7 +137,44 @@ export class UIRenderer {
     for (const root of roots) {
       if (!this.mounts.has(root)) this.mount(root, backend);
     }
-    this.flush(deltaSeconds);
+    this.reconcileMounts(deltaSeconds, camera);
+  }
+
+  /** Presents Interaction state resolved from the current hit geometry. */
+  present(): void {
+    for (const record of this.mounts.values()) {
+      if (!record.connected) continue;
+      record.mount.present(
+        this.presentationStateFor,
+        this.presentationThemeChanged
+      );
+    }
+    this.presentationThemeChanged = false;
+  }
+
+  /** Renders connected overlays through the camera used for the world pass. */
+  renderOverlay(camera: THREE.Camera): void {
+    if (this.connectedOverlayCount === 0 || !this.renderer || !this.scene) {
+      return;
+    }
+    for (const record of this.mounts.values()) {
+      if (record.connected && getUIElementKind(record.root) === 'overlay') {
+        syncRootTransform(record.root, record.mount.object, camera);
+      }
+    }
+    this.privateRoot.updateWorldMatrix(true, true);
+
+    const originalLayers = camera.layers.mask;
+    const originalAutoClear = this.renderer.autoClear;
+    try {
+      camera.layers.set(UI_OVERLAY_LAYER);
+      this.renderer.autoClear = false;
+      this.renderer.clearDepth();
+      this.renderer.render(this.scene, camera);
+    } finally {
+      camera.layers.mask = originalLayers;
+      this.renderer.autoClear = originalAutoClear;
+    }
   }
 
   /** Cancels hit mappings and releases one disconnected public root. */
@@ -157,12 +195,13 @@ export class UIRenderer {
     this.failed = false;
     this.failedRoots.clear();
     this.themeRevision = -1;
+    this.presentationThemeChanged = false;
+    this.connectedOverlayCount = 0;
     this.nextMountOrder = 0;
     this.privateRoot.removeFromParent();
     this.initialized = false;
     this.scene = undefined;
     this.renderer = undefined;
-    this.camera = undefined;
   }
 
   private async loadBackend(): Promise<UIBackend> {
@@ -196,12 +235,14 @@ export class UIRenderer {
       connected: true,
       order: this.nextMountOrder++,
     });
+    if (getUIElementKind(root) === 'overlay') this.connectedOverlayCount++;
   }
 
   private disconnect(root: UIElement): void {
     const record = this.mounts.get(root);
     if (!record || !record.connected) return;
     record.connected = false;
+    if (getUIElementKind(root) === 'overlay') this.connectedOverlayCount--;
     record.mount.object.visible = false;
     this.interaction.cancelObject(root, 'removed');
     for (const unregister of record.unregisterHits) unregister();
@@ -211,18 +252,21 @@ export class UIRenderer {
   private unmount(root: UIElement): void {
     const record = this.mounts.get(root);
     if (!record) return;
+    if (record.connected && getUIElementKind(root) === 'overlay') {
+      this.connectedOverlayCount--;
+    }
     for (const unregister of record.unregisterHits) unregister();
     record.mount.object.removeFromParent();
     record.mount.dispose();
     this.mounts.delete(root);
   }
 
-  private flush(deltaSeconds: number): void {
+  private reconcileMounts(deltaSeconds: number, camera: THREE.Camera): void {
     const viewport = {
       width: window.innerWidth,
       height: window.innerHeight,
     };
-    const themeChanged = this.themeRevision !== ui.revision;
+    this.presentationThemeChanged = this.themeRevision !== ui.revision;
     this.themeRevision = ui.revision;
     for (const record of this.mounts.values()) {
       if (!record.connected) continue;
@@ -232,38 +276,37 @@ export class UIRenderer {
       }
       record.visible = visible;
       record.mount.object.visible = visible;
-      syncRootTransform(record.root, record.mount.object, this.camera);
+      syncRootTransform(record.root, record.mount.object, camera);
       const viewportSignature =
         getUIElementKind(record.root) === 'overlay'
           ? `:${viewport.width}x${viewport.height}`
           : '';
       const signature = treeSignature(record.root) + viewportSignature;
-      const stateFor = (element: UIElement) => ({
-        hovered: this.interaction.isPointingAt(element),
-        active: this.interaction.isSelectingAt(element),
-        disabled: getSemanticControl(element)?.isDisabled() ?? false,
-        cursorPoints: this.interaction
-          .getIntersectionsAt(element)
-          .map((intersection) => intersection.point),
-      });
       if (signature !== record.signature) {
         record.signature = signature;
         for (const unregister of record.unregisterHits) unregister();
         const mappings = record.mount.sync(
           ui.theme,
           viewport,
-          stateFor,
+          this.presentationStateFor,
           record.order
         );
         record.unregisterHits = mappings.map((mapping) =>
           this.registerHit(mapping)
         );
-      } else {
-        record.mount.present(stateFor, themeChanged);
       }
       record.mount.update(deltaSeconds);
     }
   }
+
+  private presentationStateFor = (element: UIElement) => ({
+    hovered: this.interaction.isPointingAt(element),
+    active: this.interaction.isSelectingAt(element),
+    disabled: getSemanticControl(element)?.isDisabled() ?? false,
+    cursorPoints: this.interaction
+      .getIntersectionsAt(element)
+      .map((intersection) => intersection.point),
+  });
 
   private registerHit(mapping: UIHitMapping): () => void {
     mapping.physical.traverse(markPrivateUI);

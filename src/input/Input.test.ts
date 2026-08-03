@@ -6,6 +6,12 @@ import {XRSystems} from '../core/components/XRSystems';
 import {Input} from './Input';
 import {Controller} from './Controller';
 
+function updateInput(input: Input) {
+  input.sampleSources();
+  input.scene?.updateMatrixWorld(true);
+  input.raycast();
+}
+
 describe('Input head gestures', () => {
   it('creates head gestures without enabling controllers', () => {
     const input = new Input();
@@ -44,7 +50,7 @@ describe('Input direct touch', () => {
     input.scene = new THREE.Scene();
     input.scene.updateMatrixWorld(true);
 
-    input.update();
+    updateInput(input);
 
     const frame = input.getInteractionFrame();
 
@@ -84,7 +90,7 @@ describe('Input raycast modes', () => {
 
   it('applies continuous, select/release, and gaze raycast policy', () => {
     const continuous = setupRayInput('continuous');
-    continuous.input.update();
+    updateInput(continuous.input);
     const continuousIntersections =
       continuous.input.getInteractionFrame().raySources[0].intersections;
     expect(continuousIntersections.length).toBeGreaterThan(0);
@@ -94,24 +100,24 @@ describe('Input raycast modes', () => {
 
     const {input, controller} = setupRayInput('select');
 
-    input.update();
+    updateInput(input);
     expect(
       input.getInteractionFrame().raySources[0].intersections
     ).toHaveLength(0);
 
     controller.userData.selected = true;
-    input.update();
+    updateInput(input);
     expect(
       input.getInteractionFrame().raySources[0].intersections.length
     ).toBeGreaterThan(0);
 
     controller.userData.selected = false;
-    input.update();
+    updateInput(input);
     expect(
       input.getInteractionFrame().raySources[0].intersections.length
     ).toBeGreaterThan(0);
 
-    input.update();
+    updateInput(input);
     expect(
       input.getInteractionFrame().raySources[0].intersections
     ).toHaveLength(0);
@@ -133,7 +139,7 @@ describe('Input raycast modes', () => {
     gazeInput.gazeController.camera = camera;
     gazeInput.gazeController.userData.connected = true;
     gazeInput.controllers = [gazeInput.gazeController];
-    gazeInput.update();
+    updateInput(gazeInput);
 
     expect(
       gazeInput.getInteractionFrame().raySources[0].intersections.length

@@ -37,9 +37,6 @@ export class SimulatorUserMode extends SimulatorControlMode {
 
   onPointerMove(event: MouseEvent) {
     this.input.mouseController.updateMousePositionFromEvent(event);
-    if (this.input.mouseController.userData.connected) {
-      this.input.updateController(this.input.mouseController);
-    }
     if (event.buttons & 2) {
       this.rotateOnPointerMove(event, this.camera.quaternion);
     }
@@ -61,10 +58,9 @@ export class SimulatorUserMode extends SimulatorControlMode {
     if (!mouseController.userData.connected) {
       return false;
     }
-    this.input.updateController(mouseController);
 
     return (
-      this.interaction?.applyScaleIntent(
+      this.interaction?.queueScaleIntent(
         mouseController,
         Math.exp(-deltaY * WHEEL_SCALE_SPEED)
       ) ?? false

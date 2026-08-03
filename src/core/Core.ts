@@ -7,7 +7,6 @@ import {XRDeviceCamera} from '../camera/XRDeviceCamera';
 import {Context} from '../context/Context';
 import {ContextOptions} from '../context/ContextOptions';
 import {SceneOptions} from '../context/scene/SceneOptions';
-import {UI_OVERLAY_LAYER} from '../constants';
 import {Depth} from '../depth/Depth';
 import {DepthOptions} from '../depth/DepthOptions';
 import {Hands} from '../input/Hands';
@@ -29,7 +28,6 @@ import {CoreSound} from '../sound/CoreSound';
 import {SoundOptions} from '../sound/SoundOptions';
 import {callInitWithDependencyInjection} from '../utils/DependencyInjection';
 import {loadingSpinnerManager} from '../utils/LoadingSpinnerManager';
-import {traverseUtil} from '../utils/SceneGraphUtils';
 import {World} from '../world/World';
 import {WorldOptions} from '../world/WorldOptions';
 import {MeshDetectionOptions} from '../world/mesh/MeshDetectionOptions';
@@ -662,11 +660,12 @@ export class Core {
     }
 
     await Promise.all([
-      this.uiRenderer.initialize(this.scene, this.renderer, this.camera),
+      this.uiRenderer.initialize(this.scene, this.renderer),
       this.scriptsManager.syncScriptsWithScene(this.scene),
     ]);
     this.assertInitializing();
-    this.uiRenderer.update(0);
+    this.uiRenderer.reconcile(0, this.camera);
+    this.uiRenderer.present();
 
     this.renderer.setAnimationLoop(this.update);
 
@@ -696,10 +695,12 @@ export class Core {
    * all per-frame updates for subsystems and scripts.
    *
    * Order:
-   * 1. Depth
-   * 2. World Perception
-   * 3. Input / Reticles / UIs
-   * 4. Scripts
+   * 1. Sample physical input.
+   * 2. Run Script updates.
+   * 3. Reconcile UI layout and world matrices.
+   * 4. Raycast and resolve Interaction.
+   * 5. Present Interaction state.
+   * 6. Render the world and overlays.
    * @param time - The current time in milliseconds.
    * @param frame - The WebXR frame object, if in an XR session.
    */
@@ -714,6 +715,7 @@ export class Core {
       this.simulationTimer.update(time, this.timer.getTimescale());
     }
     this.timer.update(time);
+    const deltaSeconds = this.timer.getDelta();
     if (this.simulatorRunning) {
       this.simulator.simulatorUpdate();
     }
@@ -728,20 +730,15 @@ export class Core {
       this.lighting.update();
     }
 
+    this.input.sampleSources();
+
     // Traverse the scene to find all scripts.
     this.scriptsManager.syncScriptsWithScene(this.scene);
 
     // Run callbacks that use wait frame.
     this.waitFrame.onFrame();
 
-    // Public state changes first, then one UI flush, then fresh hit sampling.
     this.scriptsManager.update(time, frame);
-    this.uiRenderer.update(this.timer.getDelta());
-    this.interaction.syncTouchCandidates(
-      this.scriptsManager.directTouchCandidates
-    );
-    this.scene.updateMatrixWorld(true);
-    this.input.update();
 
     // Update non-selection input callbacks.
     for (const controller of this.input.controllers) {
@@ -750,10 +747,15 @@ export class Core {
       }
     }
 
-    this.interaction.update(
-      this.input.getInteractionFrame(),
-      this.timer.getDelta()
+    const frameCamera = this.getFrameCamera();
+    this.uiRenderer.reconcile(deltaSeconds, frameCamera);
+    this.interaction.syncTouchCandidates(
+      this.scriptsManager.directTouchCandidates
     );
+    this.scene.updateMatrixWorld(true);
+    this.input.raycast();
+    this.interaction.update(this.input.getInteractionFrame(), deltaSeconds);
+    this.uiRenderer.present();
 
     this.renderSimulatorAndScene();
     this.screenshotSynthesizer.onAfterRender(
@@ -874,27 +876,20 @@ export class Core {
     }
   }
 
+  private getFrameCamera(): THREE.Camera {
+    if (!this.simulatorRunning) return this.camera;
+    return this.simulator.getRenderCamera() ?? this.camera;
+  }
+
   private renderScene(cameraOverride?: THREE.Camera) {
+    const camera = cameraOverride ?? this.camera;
     if (this.renderSceneOverride) {
-      this.renderSceneOverride(
-        this.renderer,
-        this.scene,
-        cameraOverride ?? this.camera
-      );
+      this.renderSceneOverride(this.renderer, this.scene, camera);
     } else if (this.effects) {
-      this.effects.render();
+      this.effects.render(camera);
     } else {
-      this.renderer.render(this.scene, cameraOverride ?? this.camera);
-      if (
-        traverseUtil(this.scene, (node: THREE.Object3D) =>
-          node.layers.isEnabled(UI_OVERLAY_LAYER)
-        )
-      ) {
-        const originalLayers = this.camera.layers.mask;
-        this.camera.layers.set(UI_OVERLAY_LAYER);
-        this.renderer.render(this.scene, this.camera);
-        this.camera.layers.mask = originalLayers;
-      }
+      this.renderer.render(this.scene, camera);
     }
+    this.uiRenderer.renderOverlay(camera);
   }
 }

@@ -57,7 +57,9 @@ export class Input {
   gamepadController = new GamepadController();
   controllersEnabled = true;
   listeners = new Map();
-  private pinchFilter = new PinchFilter((event) => this.dispatchEvent(event));
+  private dispatchControllerEvent = (event: ControllerEvent) =>
+    this.dispatchEvent(event);
+  private pinchFilter = new PinchFilter(this.dispatchControllerEvent);
   private intersectionsForController = new Map<
     Controller,
     THREE.Intersection[]
@@ -479,13 +481,27 @@ export class Input {
     return this.intersectObjectByController(this.controllers[1], obj);
   }
 
-  update() {
+  /** Samples current controller, button, and direct-touch state. */
+  sampleSources() {
     if (this.controllersEnabled) {
       for (const controller of this.controllers) {
-        this.updateController(controller);
+        if (controller.userData.connected !== true) continue;
+        controller.updatePose?.();
+        this.pinchFilter.updateController(
+          controller,
+          this.dispatchControllerEvent
+        );
       }
     }
     this.updateDirectTouchInputs();
+  }
+
+  /** Raycasts sampled sources against the current scene geometry. */
+  raycast() {
+    if (!this.controllersEnabled) return;
+    for (const controller of this.controllers) {
+      this.raycastController(controller);
+    }
   }
 
   /** Returns the complete physical input sampled this frame. */
@@ -541,19 +557,13 @@ export class Input {
     this.directTouchInputs = inputs;
   }
 
-  updateController(controller: Controller) {
+  private raycastController(controller: Controller) {
     if (controller.userData.connected !== true) {
       this.clearIntersections(controller);
       this.selectedControllers.delete(controller);
       this.releasedControllers.delete(controller);
       return;
     }
-    controller.updatePose?.();
-    controller.updateMatrixWorld();
-    this.pinchFilter.updateController(
-      controller,
-      this.dispatchEvent.bind(this)
-    );
     const selected = controller.userData.selected === true;
     const wasSelected = this.selectedControllers.has(controller);
     const wasReleased = this.releasedControllers.delete(controller);

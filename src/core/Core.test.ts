@@ -38,7 +38,8 @@ describe('Core frame and simulator lifecycle', () => {
       },
     } as unknown as THREE.WebGLRenderer;
     core.depth.update = vi.fn();
-    core.input.update = vi.fn();
+    core.input.sampleSources = vi.fn();
+    core.input.raycast = vi.fn();
     core.scriptsManager.syncScriptsWithScene = vi.fn();
     core.waitFrame.onFrame = vi.fn();
     core.screenshotSynthesizer.onAfterRender = vi.fn();
@@ -62,6 +63,12 @@ describe('Core frame and simulator lifecycle', () => {
   });
 
   it('shares one in-flight simulator start and ignores later starts once running', async () => {
+    vi.spyOn(
+      core as unknown as {initialize(options: Options): Promise<void>},
+      'initialize'
+    ).mockResolvedValue();
+    await core.init(core.options);
+
     let finishInit: (() => void) | undefined;
     core.scriptsManager.initScript = vi.fn(
       () =>

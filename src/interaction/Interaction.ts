@@ -92,6 +92,7 @@ export class Interaction {
   private readonly exclusiveControls = new Map<THREE.Object3D, Controller>();
   private readonly touches = new Map<Controller, TouchState>();
   private readonly suppressedUntilRelease = new Set<Controller>();
+  private readonly scaleIntents = new Map<Controller, number>();
   private frameSources = new Set<Controller>();
 
   constructor(dependencies: InteractionDependencies) {
@@ -154,6 +155,11 @@ export class Interaction {
       if (contact.phase !== 'end') snapshots.push(contact.snapshot);
     }
 
+    for (const [controller, factor] of this.scaleIntents) {
+      this.applyScaleIntent(controller, factor);
+    }
+    this.scaleIntents.clear();
+
     if (snapshots.length > 0) this.manipulation.update(snapshots);
     for (const [controller, capture] of [...this.captures]) {
       if (
@@ -185,6 +191,7 @@ export class Interaction {
     this.directTouch.clear();
     this.frameSources.clear();
     this.exclusiveControls.clear();
+    this.scaleIntents.clear();
   }
 
   registerHitSurface(
@@ -240,6 +247,7 @@ export class Interaction {
     this.hoverPaths.delete(controller);
     this.gazeDwell.remove(controller);
     this.suppressedUntilRelease.delete(controller);
+    this.scaleIntents.delete(controller);
   }
 
   getSourceSnapshot(
@@ -314,7 +322,16 @@ export class Interaction {
     return this.manipulation.isManipulating(object);
   }
 
-  applyScaleIntent(controller: Controller, factor: number): boolean {
+  queueScaleIntent(controller: Controller, factor: number): boolean {
+    if (!Number.isFinite(factor) || factor <= 0) return false;
+    this.scaleIntents.set(
+      controller,
+      (this.scaleIntents.get(controller) ?? 1) * factor
+    );
+    return true;
+  }
+
+  private applyScaleIntent(controller: Controller, factor: number): boolean {
     const snapshot = this.snapshots.get(controller);
     const resolved = this.resolvedRays.get(controller);
     if (!snapshot || !resolved?.target) return false;

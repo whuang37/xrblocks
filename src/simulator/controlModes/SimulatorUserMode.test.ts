@@ -15,7 +15,7 @@ describe('SimulatorUserMode wheel scaling', () => {
   let interaction: Interaction;
   let mode: SimulatorUserMode;
   let mouseController: MouseController;
-  let applyScaleIntent: ReturnType<typeof vi.fn>;
+  let queueScaleIntent: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     canvas = document.createElement('canvas');
@@ -26,10 +26,9 @@ describe('SimulatorUserMode wheel scaling', () => {
     input = {
       gamepadController: {init: vi.fn()},
       mouseController,
-      updateController: vi.fn(),
     } as unknown as Input;
-    applyScaleIntent = vi.fn().mockReturnValue(true);
-    interaction = {applyScaleIntent} as unknown as Interaction;
+    queueScaleIntent = vi.fn().mockReturnValue(true);
+    interaction = {queueScaleIntent} as unknown as Interaction;
     mode = new SimulatorUserMode(
       {} as SimulatorControllerState,
       new Set(),
@@ -52,15 +51,15 @@ describe('SimulatorUserMode wheel scaling', () => {
 
     expect(mode.onWheel(event)).toBe(true);
 
-    expect(applyScaleIntent).toHaveBeenCalledWith(
+    expect(queueScaleIntent).toHaveBeenCalledWith(
       mouseController,
       expect.any(Number)
     );
-    expect(applyScaleIntent.mock.calls[0][1]).toBeGreaterThan(1);
+    expect(queueScaleIntent.mock.calls[0][1]).toBeGreaterThan(1);
   });
 
   it('returns false when Interaction rejects the intent', () => {
-    applyScaleIntent.mockReturnValue(false);
+    queueScaleIntent.mockReturnValue(false);
 
     expect(mode.onWheel(new WheelEvent('wheel', {deltaY: 100}))).toBe(false);
   });

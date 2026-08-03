@@ -243,6 +243,7 @@ const ENUM_VALUES: Partial<Record<keyof UIStyle, readonly unknown[]>> = {
 };
 
 const states = new WeakMap<UIElement, UIElementState>();
+const rootReferences = new Set<WeakRef<UIElement>>();
 
 export abstract class UIElement extends Script {
   readonly isUI = true;
@@ -252,10 +253,14 @@ export abstract class UIElement extends Script {
   protected constructor(kind: UIElementKind, options: UIElementOptions = {}) {
     super();
     states.set(this, {kind, revision: 0});
+    this.addEventListener('added', this.assertPlacement);
+    this.addEventListener('childadded', this.markUIStructureDirty);
+    this.addEventListener('childremoved', this.markUIStructureDirty);
+    if (isUIRootKind(kind)) rootReferences.add(new WeakRef(this));
     this.styleProxy = createStyleProxy(
       this.styleTarget,
       false,
-      this.markUIDirty
+      this.markUIStyleDirty
     );
     this.style = options.style ?? {};
     this.visible = options.visible ?? true;
@@ -267,6 +272,17 @@ export abstract class UIElement extends Script {
       this.xb.reticleMode = options.reticleMode;
     }
     if (options.children) this.add(...options.children);
+  }
+
+  override add(...objects: THREE.Object3D[]): this {
+    for (const object of objects) validateUIChild(this, object);
+    for (const object of objects) super.add(object);
+    return this;
+  }
+
+  override attach(object: THREE.Object3D): this {
+    validateUIChild(this, object);
+    return super.attach(object);
   }
 
   get style(): UIStyle {
@@ -295,6 +311,33 @@ export abstract class UIElement extends Script {
     const state = states.get(this);
     if (state) state.revision++;
   };
+
+  protected markUIStructureDirty = (): void => {
+    markRootDirty(findUIRoot(this));
+  };
+
+  private markUIStyleDirty = (property: string): void => {
+    this.markUIDirty();
+    if (property === 'backgroundColor' || property === 'zIndex') {
+      this.markUIStructureDirty();
+    }
+  };
+
+  private assertPlacement = (): void => {
+    const parent = this.parent;
+    if (!parent) return;
+    const isRoot = isUIRootKind(getUIElementKind(this));
+    if (isRoot && isUIElement(parent)) {
+      this.removeFromParent();
+      throw new Error('Nested UICard and UIOverlay roots are not allowed.');
+    }
+    if (!isRoot && !isUIElement(parent)) {
+      this.removeFromParent();
+      throw new Error(
+        'Every UI element must be below one UICard or UIOverlay root.'
+      );
+    }
+  };
 }
 
 export function isUIElement(object: THREE.Object3D): object is UIElement {
@@ -309,6 +352,16 @@ export function getUIRevision(element: UIElement): number {
   return states.get(element)!.revision;
 }
 
+/** Collects public UI roots without retaining their application lifetime. */
+export function collectUIRoots(target: UIElement[]): void {
+  target.length = 0;
+  for (const reference of rootReferences) {
+    const root = reference.deref();
+    if (root) target.push(root);
+    else rootReferences.delete(reference);
+  }
+}
+
 /** Invalidates one public wrapper after private asynchronous resource work. */
 export function invalidateUIElement(element: UIElement): void {
   const state = states.get(element);
@@ -318,7 +371,7 @@ export function invalidateUIElement(element: UIElement): void {
 function createStyleProxy<T extends UIStyle | UIStateStyle>(
   target: T,
   stateOnly: boolean,
-  onChange: () => void
+  onChange: (property: string) => void
 ): T {
   return new Proxy(target, {
     set(object, property, value) {
@@ -327,7 +380,7 @@ function createStyleProxy<T extends UIStyle | UIStateStyle>(
       if (value === undefined) {
         if (!Reflect.has(object, property)) return true;
         Reflect.deleteProperty(object, property);
-        onChange();
+        onChange(property);
         return true;
       }
       const next =
@@ -340,16 +393,60 @@ function createStyleProxy<T extends UIStyle | UIStateStyle>(
           : value;
       if (Reflect.get(object, property) === next) return true;
       Reflect.set(object, property, next);
-      onChange();
+      onChange(property);
       return true;
     },
     deleteProperty(object, property) {
       if (!Reflect.has(object, property)) return true;
       Reflect.deleteProperty(object, property);
-      onChange();
+      if (typeof property === 'string') onChange(property);
       return true;
     },
   });
+}
+
+function validateUIChild(parent: UIElement, child: THREE.Object3D): void {
+  if (child === parent) {
+    throw new Error('A UI element cannot be added to itself.');
+  }
+  if (isUIElement(child)) {
+    if (isUIRootKind(getUIElementKind(child))) {
+      throw new Error('Nested UICard and UIOverlay roots are not allowed.');
+    }
+    return;
+  }
+  const isScript =
+    child.userData.isXRScript === true ||
+    (child as THREE.Object3D & {isXRScript?: boolean}).isXRScript === true;
+  const isRenderable =
+    (child as THREE.Mesh).isMesh === true ||
+    (child as THREE.Line).isLine === true ||
+    (child as THREE.Points).isPoints === true;
+  if (isRenderable || !isScript) {
+    throw new Error(
+      'UI trees accept UI elements and non-rendering Scripts only.'
+    );
+  }
+}
+
+function findUIRoot(object: THREE.Object3D): UIElement | undefined {
+  let current: THREE.Object3D | null = object;
+  while (current) {
+    if (isUIElement(current) && isUIRootKind(getUIElementKind(current))) {
+      return current;
+    }
+    current = current.parent;
+  }
+  return undefined;
+}
+
+function markRootDirty(root: UIElement | undefined): void {
+  if (!root) return;
+  states.get(root)!.revision++;
+}
+
+function isUIRootKind(kind: UIElementKind): boolean {
+  return kind === 'card' || kind === 'overlay';
 }
 
 function validateStyle(

@@ -2,26 +2,30 @@ import * as THREE from 'three';
 
 import {UI_OVERLAY_LAYER} from '../../constants';
 import type {Interaction} from '../../interaction/Interaction';
+import {getSemanticControl} from '../../interaction/SemanticControl';
 import {ui} from '../UI';
-import type {UIButton} from '../components/UIButton';
-import type {UICard} from '../components/UICard';
-import {getUIElementKind, isUIElement, type UIElement} from '../UIElement';
+import {
+  collectUIRoots,
+  getUIElementKind,
+  getUIRevision,
+  type UIElement,
+} from '../UIElement';
 import type {
   UIBackend,
   UIBackendModule,
   UIHitMapping,
   UIMount,
 } from './UIBackend';
-import {getSemanticControl} from '../../interaction/SemanticControl';
 
 interface MountRecord {
   readonly root: UIElement;
   readonly mount: UIMount;
-  signature: string;
+  rootRevision: number;
   unregisterHits: (() => void)[];
   visible: boolean;
   connected: boolean;
-  readonly order: number;
+  needsSync: boolean;
+  order: number;
 }
 
 export type UIBackendLoader = () => Promise<UIBackendModule>;
@@ -36,6 +40,9 @@ export class UIRenderer {
   private readonly privateScene = new THREE.Scene();
   private readonly privateRoot = new THREE.Group();
   private readonly mounts = new Map<UIElement, MountRecord>();
+  private readonly roots: UIElement[] = [];
+  private readonly connectedRoots = new Set<UIElement>();
+  private readonly viewport = {width: 0, height: 0};
   private backend?: UIBackend;
   private loadPromise?: Promise<UIBackend>;
   private failed = false;
@@ -44,9 +51,7 @@ export class UIRenderer {
   private renderer?: THREE.WebGLRenderer;
   private publicScene?: THREE.Scene;
   private themeRevision = -1;
-  private presentationThemeChanged = false;
   private connectedOverlayCount = 0;
-  private nextMountOrder = 0;
   private generation = 0;
 
   constructor(
@@ -68,7 +73,7 @@ export class UIRenderer {
     this.publicScene = scene;
     this.renderer = renderer;
     this.initialized = true;
-    const roots = this.findAndValidateRoots(scene);
+    const roots = this.collectConnectedRoots();
     if (roots.length === 0) return;
     let backend: UIBackend;
     try {
@@ -86,28 +91,36 @@ export class UIRenderer {
         {cause}
       );
     }
-    for (const root of roots) this.mount(root, backend);
+    for (let order = 0; order < roots.length; order++) {
+      this.mount(roots[order], backend, order);
+    }
   }
 
   /** Reconciles public UI and updates current hit geometry. */
   reconcile(deltaSeconds: number, camera: THREE.Camera): void {
-    if (!this.initialized || !this.publicScene) return;
-    const roots = this.findAndValidateRoots(this.publicScene);
-    const connected = new Set(roots);
+    if (!this.initialized) return;
+    const roots = this.collectConnectedRoots();
+    this.connectedRoots.clear();
+    for (const root of roots) this.connectedRoots.add(root);
     for (const root of this.failedRoots) {
-      if (!connected.has(root)) this.failedRoots.delete(root);
+      if (!this.connectedRoots.has(root)) this.failedRoots.delete(root);
     }
     for (const root of this.mounts.keys()) {
-      if (!connected.has(root)) this.disconnect(root);
+      if (!this.connectedRoots.has(root)) this.disconnect(root);
     }
-    for (const root of roots) {
+    for (let order = 0; order < roots.length; order++) {
+      const root = roots[order];
       const record = this.mounts.get(root);
       if (record && !record.connected) {
         record.connected = true;
-        record.signature = '';
+        record.needsSync = true;
         if (getUIElementKind(root) === 'overlay') {
           this.connectedOverlayCount++;
         }
+      }
+      if (record && record.order !== order) {
+        record.order = order;
+        record.needsSync = true;
       }
     }
     if (roots.length === 0) return;
@@ -119,12 +132,13 @@ export class UIRenderer {
 
     const backend = this.backend;
     if (!backend && !this.failed) {
+      const loadingRoots = [...roots];
       void this.loadBackend().catch((error) => {
         if (error === STALE_UI_LOAD) return;
         this.failed = true;
-        for (const root of roots) this.failedRoots.add(root);
+        for (const root of loadingRoots) this.failedRoots.add(root);
         if (this.reportError) {
-          for (const root of roots) this.reportError(error, root);
+          for (const root of loadingRoots) this.reportError(error, root);
         } else {
           console.error('XR Blocks UI backend failed to load.', error);
         }
@@ -132,8 +146,9 @@ export class UIRenderer {
       return;
     }
     if (!backend) return;
-    for (const root of roots) {
-      if (!this.mounts.has(root)) this.mount(root, backend);
+    for (let order = 0; order < roots.length; order++) {
+      const root = roots[order];
+      if (!this.mounts.has(root)) this.mount(root, backend, order);
     }
     this.reconcileMounts(deltaSeconds, camera);
   }
@@ -142,12 +157,8 @@ export class UIRenderer {
   present(): void {
     for (const record of this.mounts.values()) {
       if (!record.connected) continue;
-      record.mount.present(
-        this.presentationStateFor,
-        this.presentationThemeChanged
-      );
+      record.mount.present(this.presentationStateFor);
     }
-    this.presentationThemeChanged = false;
   }
 
   /** Renders connected world UI into the current spatial render target. */
@@ -209,10 +220,12 @@ export class UIRenderer {
     this.loadPromise = undefined;
     this.failed = false;
     this.failedRoots.clear();
+    this.roots.length = 0;
+    this.connectedRoots.clear();
     this.themeRevision = -1;
-    this.presentationThemeChanged = false;
+    this.viewport.width = 0;
+    this.viewport.height = 0;
     this.connectedOverlayCount = 0;
-    this.nextMountOrder = 0;
     this.initialized = false;
     this.publicScene = undefined;
     this.renderer = undefined;
@@ -236,18 +249,19 @@ export class UIRenderer {
     return this.loadPromise;
   }
 
-  private mount(root: UIElement, backend: UIBackend): void {
+  private mount(root: UIElement, backend: UIBackend, order: number): void {
     const mount = backend.createMount(root);
     markPrivateUI(mount.object);
     this.privateRoot.add(mount.object);
     this.mounts.set(root, {
       root,
       mount,
-      signature: '',
+      rootRevision: -1,
       unregisterHits: [],
       visible: effectiveVisible(root),
       connected: true,
-      order: this.nextMountOrder++,
+      needsSync: true,
+      order,
     });
     if (getUIElementKind(root) === 'overlay') this.connectedOverlayCount++;
   }
@@ -276,11 +290,12 @@ export class UIRenderer {
   }
 
   private reconcileMounts(deltaSeconds: number, camera: THREE.Camera): void {
-    const viewport = {
-      width: window.innerWidth,
-      height: window.innerHeight,
-    };
-    this.presentationThemeChanged = this.themeRevision !== ui.revision;
+    const viewportChanged =
+      this.viewport.width !== window.innerWidth ||
+      this.viewport.height !== window.innerHeight;
+    this.viewport.width = window.innerWidth;
+    this.viewport.height = window.innerHeight;
+    const themeChanged = this.themeRevision !== ui.revision;
     this.themeRevision = ui.revision;
     for (const record of this.mounts.values()) {
       if (!record.connected) continue;
@@ -291,23 +306,26 @@ export class UIRenderer {
       record.visible = visible;
       record.mount.object.visible = visible;
       syncRootTransform(record.root, record.mount.object, camera);
-      const viewportSignature =
-        getUIElementKind(record.root) === 'overlay'
-          ? `:${viewport.width}x${viewport.height}`
-          : '';
-      const signature = treeSignature(record.root) + viewportSignature;
-      if (signature !== record.signature) {
-        record.signature = signature;
+      const rootRevision = getUIRevision(record.root);
+      if (
+        record.needsSync ||
+        record.rootRevision !== rootRevision ||
+        themeChanged ||
+        (viewportChanged && getUIElementKind(record.root) === 'overlay')
+      ) {
+        record.needsSync = false;
+        record.rootRevision = rootRevision;
         for (const unregister of record.unregisterHits) unregister();
         const mappings = record.mount.sync(
           ui.theme,
-          viewport,
+          this.viewport,
           this.presentationStateFor,
           record.order
         );
-        record.unregisterHits = mappings.map((mapping) =>
-          this.registerHit(mapping)
-        );
+        record.unregisterHits.length = 0;
+        for (const mapping of mappings) {
+          record.unregisterHits.push(this.registerHit(mapping));
+        }
       }
       record.mount.update(deltaSeconds);
     }
@@ -331,111 +349,26 @@ export class UIRenderer {
     );
   }
 
-  private findAndValidateRoots(scene: THREE.Scene): UIElement[] {
-    const roots: UIElement[] = [];
-    scene.traverse((object) => {
-      if (!isUIElement(object)) return;
-      const kind = getUIElementKind(object);
-      if (kind === 'card' || kind === 'overlay') {
-        roots.push(object);
-        validateTree(object);
-        return;
+  private collectConnectedRoots(): readonly UIElement[] {
+    collectUIRoots(this.roots);
+    const scene = this.publicScene;
+    if (!scene) {
+      this.roots.length = 0;
+      return this.roots;
+    }
+    let connectedCount = 0;
+    for (const root of this.roots) {
+      if (isDescendantOf(root, scene)) {
+        this.roots[connectedCount++] = root;
       }
-      if (!findUIRoot(object)) {
-        throw new Error(
-          'Every UI element must be below one UICard or UIOverlay root.'
-        );
-      }
-    });
-    return roots;
+    }
+    this.roots.length = connectedCount;
+    return this.roots;
   }
 }
 
 export function markPrivateUI(object: THREE.Object3D): void {
   object.userData.xrblocksPrivate = true;
-}
-
-function validateTree(root: UIElement): void {
-  const visit = (object: THREE.Object3D, underNonUI: boolean): void => {
-    for (const child of object.children) {
-      if (isUIElement(child)) {
-        const kind = getUIElementKind(child);
-        if (kind === 'card' || kind === 'overlay') {
-          throw new Error('Nested UICard and UIOverlay roots are not allowed.');
-        }
-        if (underNonUI) {
-          throw new Error(
-            'A UI element cannot be placed below a non-rendering Script.'
-          );
-        }
-        visit(child, false);
-        continue;
-      }
-      const isScript =
-        child.userData.isXRScript === true ||
-        (child as THREE.Object3D & {isXRScript?: boolean}).isXRScript === true;
-      const isRenderable =
-        (child as THREE.Mesh).isMesh === true ||
-        (child as THREE.Line).isLine === true ||
-        (child as THREE.Points).isPoints === true;
-      if (isRenderable || !isScript) {
-        throw new Error(
-          'UI trees accept UI elements and non-rendering Scripts only.'
-        );
-      }
-      visit(child, true);
-    }
-  };
-  visit(root, false);
-}
-
-function findUIRoot(object: THREE.Object3D): UIElement | undefined {
-  let current = object.parent;
-  while (current) {
-    if (isUIElement(current)) {
-      const kind = getUIElementKind(current);
-      if (kind === 'card' || kind === 'overlay') return current;
-    }
-    current = current.parent;
-  }
-  return undefined;
-}
-
-function treeSignature(root: UIElement): string {
-  const values: string[] = [];
-  root.traverse((object) => {
-    if (!isUIElement(object)) return;
-    const kind = getUIElementKind(object);
-    const backgroundColor =
-      object.style.backgroundColor ?? ui.theme.styles?.[kind]?.backgroundColor;
-    const shape =
-      kind === 'card'
-        ? `edge:${Boolean((object as UICard).edge)}:hit:${backgroundColor === undefined || !isTransparentColor(backgroundColor)}`
-        : kind === 'button'
-          ? buttonContentShape(object as UIButton)
-          : kind === 'panel' || kind === 'overlay'
-            ? `hit:${!isTransparentColor(backgroundColor)}`
-            : '';
-    values.push(
-      `${object.parent?.uuid ?? ''}:${object.uuid}:${kind}:${shape}:${object.style.zIndex ?? 0}`
-    );
-  });
-  return values.join('|');
-}
-
-function buttonContentShape(button: UIButton): string {
-  return `icon:${button.icon !== undefined}:label:${button.label !== undefined}`;
-}
-
-function isTransparentColor(color: unknown): boolean {
-  if (color === undefined || color === 'transparent') return true;
-  if (typeof color !== 'string') return false;
-  const compact = color.replace(/\s/g, '').toLowerCase();
-  return (
-    /^#[0-9a-f]{3}0$/u.test(compact) ||
-    /^#[0-9a-f]{6}00$/u.test(compact) ||
-    /^(?:rgba|hsla)\([^)]*,0(?:\.0+)?\)$/u.test(compact)
-  );
 }
 
 function effectiveVisible(object: THREE.Object3D): boolean {
@@ -445,6 +378,15 @@ function effectiveVisible(object: THREE.Object3D): boolean {
     current = current.parent;
   }
   return true;
+}
+
+function isDescendantOf(object: THREE.Object3D, ancestor: THREE.Object3D) {
+  let current: THREE.Object3D | null = object;
+  while (current) {
+    if (current === ancestor) return true;
+    current = current.parent;
+  }
+  return false;
 }
 
 function syncRootTransform(

@@ -36,8 +36,7 @@ const ICON_BASE =
   'https://cdn.jsdelivr.net/gh/marella/material-symbols@v0.33.0/svg/400/outlined/';
 
 type PresentationUpdate = (
-  stateFor: (element: UIElement) => UIPresentationState,
-  themeChanged: boolean
+  stateFor: (element: UIElement) => UIPresentationState
 ) => void;
 
 class UIKitMount implements UIMount {
@@ -80,12 +79,9 @@ class UIKitMount implements UIMount {
     return mappings;
   }
 
-  present(
-    stateFor: (element: UIElement) => UIPresentationState,
-    themeChanged: boolean
-  ): void {
+  present(stateFor: (element: UIElement) => UIPresentationState): void {
     for (const update of this.presentationUpdates) {
-      update(stateFor, themeChanged);
+      update(stateFor);
     }
   }
 
@@ -281,13 +277,12 @@ function createNode(
   let revision = getUIRevision(element);
   let presentationKey = stateKey(presentation);
   let pointerEvents = element.xb?.pointerEvents;
-  presentationUpdates.push((stateFor, themeChanged) => {
+  presentationUpdates.push((stateFor) => {
     const state = stateFor(element);
     const nextRevision = getUIRevision(element);
     const nextKey = stateKey(state);
     const nextPointerEvents = element.xb?.pointerEvents;
     if (
-      themeChanged ||
       nextRevision !== revision ||
       nextKey !== presentationKey ||
       nextPointerEvents !== pointerEvents

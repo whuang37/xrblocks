@@ -103,6 +103,7 @@ export class UICard extends UIElement {
   }
 
   set edge(value: boolean | UICardEdgeOptions) {
+    const wasEnabled = this.edgeEnabled;
     const enabled = value !== false;
     const options = value && value !== true ? value : {};
     const next = {
@@ -114,6 +115,7 @@ export class UICard extends UIElement {
     this.edgeTarget.scale = next.scale;
     this.edgeTarget.translateFromSurface = next.translateFromSurface;
     this.markUIDirty();
+    if (enabled !== wasEnabled) this.markUIStructureDirty();
   }
 
   private validateEdge(

@@ -70,6 +70,9 @@ export class UIButton extends UIElement {
       throw error;
     }
     this.markUIDirty();
+    if ((previous === undefined) !== (value === undefined)) {
+      this.markUIStructureDirty();
+    }
   }
 
   get icon(): string | undefined {
@@ -78,9 +81,13 @@ export class UIButton extends UIElement {
 
   set icon(value: string | undefined) {
     this.assertConvenienceContent(value);
+    const previous = this._icon;
     this._icon = value;
     this.assertAccessibleName();
     this.markUIDirty();
+    if ((previous === undefined) !== (value === undefined)) {
+      this.markUIStructureDirty();
+    }
   }
 
   get ariaLabel(): string {

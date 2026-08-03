@@ -89,11 +89,7 @@ export class ManipulationManager {
     this.translateDriver = new TranslateDriver(camera, timer);
   }
 
-  resolve(
-    surface: THREE.Object3D,
-    eligiblePath?: readonly THREE.Object3D[]
-  ): ManipulationResolution | undefined {
-    const path = eligiblePath ?? getObjectPath(surface);
+  resolve(path: readonly THREE.Object3D[]): ManipulationResolution | undefined {
     let childHandle:
       | ResolvedManipulationAction
       | typeof ManipulationAction.None
@@ -170,7 +166,7 @@ export class ManipulationManager {
       return false;
     }
 
-    const resolution = capture.manipulation ?? this.resolve(capture.surface);
+    const resolution = capture.manipulation;
     if (!resolution || this.sessions.has(resolution.owner)) return false;
     const config = normalizeManipulationConfig(
       resolution.owner.xb?.manipulation
@@ -288,7 +284,7 @@ export class ManipulationManager {
     ) {
       return false;
     }
-    const resolution = this.resolve(capture.surface);
+    const resolution = capture.manipulation;
     if (!resolution || this.sessions.has(resolution.owner)) return false;
     const config = normalizeManipulationConfig(
       resolution.owner.xb?.manipulation
@@ -632,16 +628,6 @@ function getCardCorner(uv: THREE.Vector2 | undefined): CardCorner | undefined {
   const horizontal = uv.x <= 0.2 ? 'left' : uv.x >= 0.8 ? 'right' : undefined;
   const vertical = uv.y <= 0.2 ? 'bottom' : uv.y >= 0.8 ? 'top' : undefined;
   return horizontal && vertical ? `${vertical}-${horizontal}` : undefined;
-}
-
-function getObjectPath(surface: THREE.Object3D): THREE.Object3D[] {
-  const path: THREE.Object3D[] = [];
-  let current: THREE.Object3D | null = surface;
-  while (current) {
-    path.push(current);
-    current = current.parent;
-  }
-  return path;
 }
 
 function cloneSnapshot(

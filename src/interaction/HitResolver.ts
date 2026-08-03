@@ -8,7 +8,10 @@ import type {
 } from './InteractionTypes.js';
 import {HitRegistry} from './HitRegistry.js';
 import type {ManipulationManager} from './manipulation/ManipulationManager.js';
-import {isSemanticControl} from './SemanticControl.js';
+import {
+  isSemanticControl,
+  isSemanticControlDisabled,
+} from './SemanticControl.js';
 
 function cloneIntersection(
   intersection: THREE.Intersection
@@ -47,26 +50,32 @@ export class HitResolver {
       if (this.isExcluded(objectPath)) continue;
 
       const eligiblePath = this.getEligiblePath(objectPath);
-      const manipulationPath =
-        registered.physical === eligiblePath[0]
-          ? eligiblePath
-          : [registered.physical, ...eligiblePath];
-      const manipulation = this.manipulation.resolve(surface, manipulationPath);
-      const validManipulation =
-        manipulation && eligiblePath.includes(manipulation.owner)
-          ? manipulation
+      const semanticCandidate = eligiblePath.find(isSemanticControl);
+      const disabledSemantic =
+        semanticCandidate !== undefined &&
+        isSemanticControlDisabled(semanticCandidate);
+      const semanticControl = disabledSemantic ? undefined : semanticCandidate;
+      const physicalHandle =
+        registered.physical !== eligiblePath[0] &&
+        registered.physical.xb?.manipulationHandle !== undefined
+          ? registered.physical
           : undefined;
-      const semanticControl = eligiblePath.find(isSemanticControl);
+      const manipulation = semanticCandidate
+        ? undefined
+        : this.manipulation.resolve(
+            physicalHandle ? [physicalHandle, ...eligiblePath] : eligiblePath
+          );
       const callbackTarget = eligiblePath.find((object) =>
         this.callbacks.hasTargetHandler(object, sourceType)
       );
-      const target =
-        semanticControl ??
-        this.nearestTarget(
-          eligiblePath,
-          callbackTarget,
-          validManipulation?.owner
-        );
+      const target = disabledSemantic
+        ? undefined
+        : (semanticControl ??
+          this.nearestTarget(
+            eligiblePath,
+            callbackTarget,
+            manipulation?.owner
+          ));
       const scriptPath = target
         ? (eligiblePath.filter((object) =>
             this.callbacks.isScript(object)
@@ -85,7 +94,7 @@ export class HitResolver {
         objectPath: Object.freeze(objectPath),
         reticleMode: this.getReticleMode(objectPath),
         semanticControl,
-        manipulation: validManipulation,
+        manipulation,
       };
     }
     return undefined;

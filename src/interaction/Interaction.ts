@@ -390,15 +390,14 @@ export class Interaction {
         ? getSemanticControl(resolved.semanticControl)
         : undefined;
       const gazeTarget =
-        semantic?.kind === 'button' &&
-        resolved?.semanticControl &&
-        !semantic.isDisabled()
+        semantic?.kind === 'button' && resolved?.semanticControl
           ? resolved
           : undefined;
       const dwell = this.gazeDwell.update(
         input.controller,
-        deliberate ? undefined : gazeTarget,
-        deltaSeconds
+        gazeTarget,
+        deltaSeconds,
+        deliberate
       );
       snapshot = Object.freeze({
         ...snapshot,
@@ -481,9 +480,8 @@ export class Interaction {
     let action: AutomaticAction = 'select';
     const wantsManipulation = !semantic && resolved.manipulation !== undefined;
     if (semantic) {
-      action = semantic.isDisabled() ? 'none' : 'semantic';
+      action = 'semantic';
       if (
-        action === 'semantic' &&
         semantic.kind === 'slider' &&
         resolved.semanticControl &&
         this.exclusiveControls.has(resolved.semanticControl)
@@ -702,21 +700,12 @@ export class Interaction {
       this.dispatchTouch(touch, contact, 'onObjectTouchEnd');
     } finally {
       if (!touch.prevented) {
-        if (contact.endReason === 'released') {
-          this.endSelection(
-            contact.controller,
-            'released',
-            touch.selection.target,
-            contact.snapshot
-          );
-        } else {
-          this.cancelCapture(
-            contact.controller,
-            contact.endReason === 'source-lost'
-              ? 'source-lost'
-              : 'released-outside'
-          );
-        }
+        this.cancelCapture(
+          contact.controller,
+          contact.endReason === 'source-lost'
+            ? 'source-lost'
+            : 'released-outside'
+        );
       }
     }
   }
@@ -1062,7 +1051,7 @@ export class Interaction {
       frame.raySources.some(
         (input) => input.sourceType !== 'gaze' && input.selected
       ) ||
-      frame.directTouches.length > 0 ||
+      this.touches.size > 0 ||
       [...this.captures.values()].some(
         (capture) =>
           capture.kind === 'auxiliary' ||

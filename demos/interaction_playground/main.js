@@ -495,7 +495,7 @@ class InteractionPlayground extends xb.Script {
       createText(
         [
           'INTERACTION  Move, rotate, scale, hold, touch, and block',
-          'PLACEMENT    Follow object, face camera, follow head, fade',
+          'PLACEMENT    Follow object, face camera, orbit, fade',
           'RETICLES     Surface, hidden, disabled, and pass-through',
           'UI           Click, hold, move, scale, flex, media, emoji',
         ].join('\n'),
@@ -799,6 +799,37 @@ class InteractionPlayground extends xb.Script {
     this.objectTransition = new xb.VisibilityTransition({duration: 0.32});
     this.visibilityObject.add(this.objectTransition);
 
+    const orbitTarget = new THREE.Mesh(
+      new THREE.SphereGeometry(0.055, 20, 14),
+      new THREE.MeshStandardMaterial({
+        color: 0xfbbf24,
+        emissive: 0xf59e0b,
+        emissiveIntensity: 0.55,
+      })
+    );
+    orbitTarget.name = 'Orbit focus';
+    orbitTarget.xb = {pointerEvents: 'none'};
+    orbitTarget.position.set(0.75, 0.56, -2.5);
+
+    const orbiter = new InteractiveObject({
+      name: 'Precessing elliptical orbiter',
+      geometry: new THREE.SphereGeometry(0.045, 18, 12),
+      color: 0xf472b6,
+      position: new THREE.Vector3(0.974, 0.56, -2.5),
+      manipulation: true,
+    });
+    orbiter.add(
+      new xb.Orbit({
+        target: orbitTarget,
+        radius: 0.32,
+        period: 6,
+        path: 'elliptical',
+        eccentricity: 0.3,
+        inclination: Math.PI / 5,
+        precessionPeriod: 12,
+      })
+    );
+
     const labels = [
       makeSampleLabel(
         'ANIMATED TARGET',
@@ -816,6 +847,11 @@ class InteractionPlayground extends xb.Script {
         '#86efac'
       ),
       makeSampleLabel(
+        'ORBIT + PRECESS',
+        new THREE.Vector3(0.75, 0.3, -2.62),
+        '#f9a8d4'
+      ),
+      makeSampleLabel(
         'VISIBILITY',
         new THREE.Vector3(1.35, 0.3, -2.62),
         '#c4b5fd'
@@ -827,10 +863,17 @@ class InteractionPlayground extends xb.Script {
       this.followAnchor,
       follower,
       faceCamera,
+      orbitTarget,
+      orbiter,
       this.visibilityObject,
       ...labels
     );
-    this.resettableObjects.push(follower, faceCamera, this.visibilityObject);
+    this.resettableObjects.push(
+      follower,
+      faceCamera,
+      orbiter,
+      this.visibilityObject
+    );
   }
 
   addReticleTargets() {

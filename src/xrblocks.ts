@@ -122,6 +122,7 @@ export * from './stereo/utils';
 export * from './placement/FaceCamera';
 export * from './placement/FollowHead';
 export * from './placement/FollowObject';
+export * from './placement/Orbit';
 export * from './placement/TransformScript';
 export * from './placement/VisibilityTransition';
 export * from './ui/index';

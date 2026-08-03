@@ -25,7 +25,8 @@ export class GazeDwell {
   update(
     controller: Controller,
     resolved: ResolvedRay | undefined,
-    deltaSeconds: number
+    deltaSeconds: number,
+    paused = false
   ): GazeDwellUpdate {
     const target = resolved?.target;
     const point = target ? resolved?.intersection.point : undefined;
@@ -41,6 +42,13 @@ export class GazeDwell {
       return {progress: 0, completed: false};
     }
     if (!target || !point) return {progress: 0, completed: false};
+    if (paused) {
+      state.lastPoint?.copy(point);
+      return {
+        progress: state.elapsed / DWELL_SECONDS,
+        completed: false,
+      };
+    }
     if (!state.armed) {
       state.lastPoint?.copy(point);
       return {progress: 1, completed: false};

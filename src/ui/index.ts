@@ -18,12 +18,13 @@ export {UIText} from './components/UIText';
 export type {UITextOptions} from './components/UIText';
 export {UISlider} from './components/UISlider';
 export type {UISliderOptions} from './components/UISlider';
-export {ModelViewer} from './interaction/ModelViewer';
+export {ModelViewer} from './model/ModelViewer';
 export type {
-  GLTFData,
+  ModelSource,
   ModelViewerOptions,
-  SplatData,
-} from './interaction/ModelViewer';
+  ModelViewerOrigin,
+  PlayModelAnimationOptions,
+} from './model/ModelViewer';
 export type {
   UIColor,
   UIElementOptions,

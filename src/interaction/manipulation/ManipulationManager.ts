@@ -8,13 +8,13 @@ import {
 } from '../../placement/TransformScript';
 import {objectIsDescendantOf} from '../../utils/SceneGraphUtils';
 import {getUIElementKind, isUIElement} from '../../ui/UIElement';
-import type {
-  InteractionSourceSnapshot,
-  InteractionSource,
-  ManipulationResolution,
-  ResolvedManipulationAction,
-  ResolvedRay,
-  SelectionCapture,
+import {
+  InteractionSourceState,
+  type InteractionSource,
+  type ManipulationResolution,
+  type ResolvedManipulationAction,
+  type ResolvedRay,
+  type SelectionCapture,
 } from '../InteractionTypes';
 import {
   isHandleAction,
@@ -44,7 +44,7 @@ export type DispatchManipulationEvent = (
 
 interface PrimaryRole {
   capture: SelectionCapture;
-  snapshot: InteractionSourceSnapshot;
+  snapshot: InteractionSourceState;
 }
 
 interface Session {
@@ -53,7 +53,7 @@ interface Session {
   config: NormalizedManipulationConfig;
   primary: PrimaryRole;
   primaryAction?: ResolvedManipulationAction;
-  auxiliary?: InteractionSourceSnapshot;
+  auxiliary?: InteractionSourceState;
   phase?: ActivePhase;
   cardEdge?: {
     primaryCorner?: CardCorner;
@@ -155,7 +155,7 @@ export class ManipulationManager {
   /** Starts a primary session after Interaction has dispatched Select start. */
   tryStart(
     capture: SelectionCapture,
-    snapshot: InteractionSourceSnapshot
+    snapshot: InteractionSourceState
   ): boolean {
     if (
       snapshot.sourceType === 'gaze' ||
@@ -177,7 +177,12 @@ export class ManipulationManager {
       owner: resolution.owner,
       ownerParent: resolution.owner.parent,
       config,
-      primary: {capture, snapshot: cloneSnapshot(snapshot)},
+      primary: {
+        capture,
+        snapshot: new InteractionSourceState(snapshot.controller).copyFrom(
+          snapshot
+        ),
+      },
       primaryAction:
         resolution.action === ManipulationAction.Scale
           ? undefined
@@ -215,7 +220,7 @@ export class ManipulationManager {
 
   /** Claims a free spatial Select for Scale before normal target resolution. */
   tryClaimScale(
-    snapshot: InteractionSourceSnapshot,
+    snapshot: InteractionSourceState,
     resolved?: ResolvedRay
   ): boolean {
     if (
@@ -246,7 +251,9 @@ export class ManipulationManager {
     if (eligible.length !== 1) return false;
 
     const session = eligible[0];
-    const auxiliary = cloneSnapshot(snapshot);
+    const auxiliary = new InteractionSourceState(snapshot.controller).copyFrom(
+      snapshot
+    );
     const baseline = this.captureBaseline(
       session,
       ManipulationAction.Scale,
@@ -272,7 +279,7 @@ export class ManipulationManager {
   /** Runs a one-shot Scale phase for simulator and equivalent private intents. */
   applyScaleIntent(
     capture: SelectionCapture,
-    snapshot: InteractionSourceSnapshot,
+    snapshot: InteractionSourceState,
     requestedFactor: number
   ): boolean {
     if (
@@ -305,7 +312,12 @@ export class ManipulationManager {
       owner: resolution.owner,
       ownerParent: resolution.owner.parent,
       config,
-      primary: {capture, snapshot: cloneSnapshot(snapshot)},
+      primary: {
+        capture,
+        snapshot: new InteractionSourceState(snapshot.controller).copyFrom(
+          snapshot
+        ),
+      },
       primaryAction: resolution.action,
       phase: {
         action: ManipulationAction.Scale,
@@ -335,14 +347,14 @@ export class ManipulationManager {
   }
 
   /** Updates active sessions from Interaction's current frame snapshots. */
-  update(snapshots: Iterable<InteractionSourceSnapshot>): void {
+  update(snapshots: Iterable<InteractionSourceState>): void {
     for (const snapshot of snapshots) {
       const session = this.roles.get(snapshot.controller);
       if (!session) continue;
       if (session.primary.snapshot.controller === snapshot.controller) {
-        session.primary.snapshot = cloneSnapshot(snapshot);
+        session.primary.snapshot.copyFrom(snapshot);
       } else if (session.auxiliary?.controller === snapshot.controller) {
-        session.auxiliary = cloneSnapshot(snapshot);
+        session.auxiliary.copyFrom(snapshot);
       }
     }
 
@@ -353,15 +365,15 @@ export class ManipulationManager {
   }
 
   /** Ends the role held by a source. Returns true when the source was claimed. */
-  end(source: Controller, finalSnapshot?: InteractionSourceSnapshot): boolean {
+  end(source: Controller, finalSnapshot?: InteractionSourceState): boolean {
     if (this.suppressedUntilRelease.delete(source)) return false;
     const session = this.roles.get(source);
     if (!session) return false;
     if (finalSnapshot) {
       if (session.primary.snapshot.controller === source) {
-        session.primary.snapshot = cloneSnapshot(finalSnapshot);
+        session.primary.snapshot.copyFrom(finalSnapshot);
       } else if (session.auxiliary?.controller === source) {
-        session.auxiliary = cloneSnapshot(finalSnapshot);
+        session.auxiliary.copyFrom(finalSnapshot);
       }
       this.updateSession(session);
     }
@@ -628,17 +640,6 @@ function getCardCorner(uv: THREE.Vector2 | undefined): CardCorner | undefined {
   const horizontal = uv.x <= 0.2 ? 'left' : uv.x >= 0.8 ? 'right' : undefined;
   const vertical = uv.y <= 0.2 ? 'bottom' : uv.y >= 0.8 ? 'top' : undefined;
   return horizontal && vertical ? `${vertical}-${horizontal}` : undefined;
-}
-
-function cloneSnapshot(
-  snapshot: InteractionSourceSnapshot
-): InteractionSourceSnapshot {
-  return {
-    ...snapshot,
-    position: snapshot.position.clone(),
-    orientation: snapshot.orientation.clone(),
-    ray: snapshot.ray?.clone(),
-  };
 }
 
 function createEvent(

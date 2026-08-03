@@ -1,4 +1,4 @@
-import type {InteractionSourceSnapshot} from '../../InteractionTypes';
+import type {InteractionSourceState} from '../../InteractionTypes';
 import {cloneScaleOptions} from '../ManipulationConfig';
 import {
   clampScaleFactor,
@@ -19,7 +19,7 @@ export class ScaleDriver implements ManipulationDriver<ScaleBaseline> {
 
   capture(
     session: ManipulationDriverSession,
-    auxiliary?: InteractionSourceSnapshot
+    auxiliary?: InteractionSourceState
   ): ScaleBaseline | undefined {
     if (!auxiliary) return undefined;
     const distance = session.primary.snapshot.position.distanceTo(

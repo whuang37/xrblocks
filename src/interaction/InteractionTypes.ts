@@ -75,16 +75,62 @@ export interface InteractionFrameInput {
   readonly directTouches: readonly DirectTouchInput[];
 }
 
-/** Frame-local physical input. */
-export interface InteractionSourceSnapshot {
-  readonly source: InteractionSource;
-  readonly controller: Controller;
-  readonly sourceType: InteractionSourceType;
-  readonly position: THREE.Vector3;
-  readonly orientation: THREE.Quaternion;
-  readonly ray?: THREE.Ray;
-  readonly selected: boolean;
-  readonly selectionProgress?: number;
+/** Mutable internal storage for one controller's current logical source. */
+export class InteractionSourceState {
+  source: InteractionSource;
+  sourceType: InteractionSourceType = 'controller-ray';
+  readonly position = new THREE.Vector3();
+  readonly orientation = new THREE.Quaternion();
+  private readonly rayValue = new THREE.Ray();
+  ray?: THREE.Ray;
+  selected = false;
+  selectionProgress?: number;
+
+  constructor(readonly controller: Controller) {
+    this.source = getInteractionSource(controller, this.sourceType);
+  }
+
+  updateRay(input: RaySourceInput): this {
+    this.source = getInteractionSource(this.controller, input.sourceType);
+    this.sourceType = input.sourceType;
+    if (input.position) this.position.copy(input.position);
+    else this.controller.getWorldPosition(this.position);
+    if (input.orientation) this.orientation.copy(input.orientation);
+    else this.controller.getWorldQuaternion(this.orientation);
+    this.rayValue.copy(input.ray);
+    this.ray = this.rayValue;
+    this.selected = input.sourceType === 'gaze' ? false : input.selected;
+    this.selectionProgress = undefined;
+    return this;
+  }
+
+  updateTouch(point: THREE.Vector3, orientation?: THREE.Quaternion): this {
+    this.source = getInteractionSource(this.controller, 'direct-touch');
+    this.sourceType = 'direct-touch';
+    this.position.copy(point);
+    if (orientation) this.orientation.copy(orientation);
+    else this.controller.getWorldQuaternion(this.orientation);
+    this.ray = undefined;
+    this.selected = true;
+    this.selectionProgress = undefined;
+    return this;
+  }
+
+  copyFrom(source: InteractionSourceState): this {
+    this.source = source.source;
+    this.sourceType = source.sourceType;
+    this.position.copy(source.position);
+    this.orientation.copy(source.orientation);
+    if (source.ray) {
+      this.rayValue.copy(source.ray);
+      this.ray = this.rayValue;
+    } else {
+      this.ray = undefined;
+    }
+    this.selected = source.selected;
+    this.selectionProgress = source.selectionProgress;
+    return this;
+  }
 }
 
 export interface ResolvedRay {
@@ -175,7 +221,7 @@ export interface InteractionCallbackDispatch {
 
 export interface ReticlePresentationObserver {
   present(
-    snapshot: InteractionSourceSnapshot,
+    snapshot: InteractionSourceState,
     resolved: ResolvedRay | undefined
   ): void;
   clear(controller: Controller): void;

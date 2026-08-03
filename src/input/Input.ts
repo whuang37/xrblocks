@@ -65,7 +65,14 @@ export class Input {
   private ownedReticles = new Set<Reticle>(
     this.gazeController.reticle ? [this.gazeController.reticle] : []
   );
-  private directTouchInputs: DirectTouchInput[] = [];
+  private readonly raySourceInputs: RaySourceInput[] = [];
+  private readonly raySourceSlots = new Map<Controller, RaySourceInput>();
+  private readonly directTouchInputs: DirectTouchInput[] = [];
+  private readonly directTouchSlots: Array<DirectTouchInput | undefined> = [];
+  private readonly interactionFrame: InteractionFrameInput = {
+    raySources: this.raySourceInputs,
+    directTouches: this.directTouchInputs,
+  };
   /**
    * Initializes physical input sources. Only called by Core.
    */
@@ -78,7 +85,7 @@ export class Input {
     options: Options;
     renderer: THREE.WebGLRenderer;
   }) {
-    systemsGroup.add(this.activeControllers, this.reticles);
+    systemsGroup.add(this.activeControllers);
 
     this.controllersEnabled = options.controllers.enabled;
 
@@ -427,29 +434,38 @@ export class Input {
 
   /** Returns the complete physical source state sampled this frame. */
   getFrame(): InteractionFrameInput {
-    const raySources: RaySourceInput[] = [];
+    this.raySourceInputs.length = 0;
     if (this.controllersEnabled) {
       for (const controller of this.controllers) {
         if (controller.userData.connected !== true) continue;
-        const position = controller.getWorldPosition(new THREE.Vector3());
-        const orientation = controller.getWorldQuaternion(
-          new THREE.Quaternion()
-        );
-        raySources.push({
-          controller,
-          sourceType: this.getRaySourceType(controller),
-          ray: new THREE.Ray(
-            position,
-            new THREE.Vector3(0, 0, -1).applyQuaternion(orientation).normalize()
-          ),
-          selected: controller.userData.selected === true,
-          released: this.releasedControllers.delete(controller),
-          position,
-          orientation,
-        });
+        let input = this.raySourceSlots.get(controller);
+        if (!input) {
+          input = {
+            controller,
+            sourceType: this.getRaySourceType(controller),
+            ray: new THREE.Ray(),
+            selected: false,
+            position: new THREE.Vector3(),
+            orientation: new THREE.Quaternion(),
+          };
+          this.raySourceSlots.set(controller, input);
+        }
+        const position = input.position!;
+        const orientation = input.orientation!;
+        controller.getWorldPosition(position);
+        controller.getWorldQuaternion(orientation);
+        input.sourceType = this.getRaySourceType(controller);
+        input.ray.origin.copy(position);
+        input.ray.direction
+          .set(0, 0, -1)
+          .applyQuaternion(orientation)
+          .normalize();
+        input.selected = controller.userData.selected === true;
+        input.released = this.releasedControllers.delete(controller);
+        this.raySourceInputs.push(input);
       }
     }
-    return {raySources, directTouches: this.directTouchInputs};
+    return this.interactionFrame;
   }
 
   private getRaySourceType(
@@ -462,20 +478,29 @@ export class Input {
   }
 
   private updateDirectTouchInputs() {
-    const inputs: DirectTouchInput[] = [];
+    this.directTouchInputs.length = 0;
     for (let handIndex = 0; handIndex < NUM_HANDS; handIndex++) {
       const controller = this.controllers[handIndex];
       const indexTip = this.hands[handIndex]?.joints?.['index-finger-tip'];
       if (!controller || !indexTip) continue;
-      inputs.push({
-        controller,
-        handIndex,
-        hand: this.hands[handIndex]?.joints?.wrist,
-        point: indexTip.getWorldPosition(new THREE.Vector3()),
-        selected: controller.userData.selected === true,
-      });
+      let input = this.directTouchSlots[handIndex];
+      if (!input) {
+        input = {
+          controller,
+          handIndex,
+          point: new THREE.Vector3(),
+          orientation: new THREE.Quaternion(),
+          selected: false,
+        };
+        this.directTouchSlots[handIndex] = input;
+      }
+      input.controller = controller;
+      input.hand = this.hands[handIndex]?.joints?.wrist;
+      indexTip.getWorldPosition(input.point);
+      controller.getWorldQuaternion(input.orientation!);
+      input.selected = controller.userData.selected === true;
+      this.directTouchInputs.push(input);
     }
-    this.directTouchInputs = inputs;
   }
 
   enableGazeController() {
@@ -549,5 +574,9 @@ export class Input {
     for (const reticle of this.ownedReticles) reticle.dispose();
     this.ownedReticles.clear();
     this.reticles.clear();
+    this.raySourceInputs.length = 0;
+    this.raySourceSlots.clear();
+    this.directTouchInputs.length = 0;
+    this.directTouchSlots.length = 0;
   }
 }

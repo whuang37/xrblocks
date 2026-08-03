@@ -1,7 +1,7 @@
 import type * as THREE from 'three';
 
 import type {
-  InteractionSourceSnapshot,
+  InteractionSourceState,
   ResolvedManipulationAction,
   SelectionCapture,
 } from '../../InteractionTypes';
@@ -18,9 +18,9 @@ export interface ManipulationDriverSession {
   readonly config: NormalizedManipulationConfig;
   readonly primary: {
     readonly capture: SelectionCapture;
-    snapshot: InteractionSourceSnapshot;
+    snapshot: InteractionSourceState;
   };
-  auxiliary?: InteractionSourceSnapshot;
+  auxiliary?: InteractionSourceState;
 }
 
 export interface TranslateBaseline {
@@ -83,7 +83,7 @@ export interface ManipulationDriver<
   readonly action: ResolvedManipulationAction;
   capture(
     session: ManipulationDriverSession,
-    auxiliary?: InteractionSourceSnapshot
+    auxiliary?: InteractionSourceState
   ): Baseline | undefined;
   propose(
     session: ManipulationDriverSession,

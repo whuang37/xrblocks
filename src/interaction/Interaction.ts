@@ -22,7 +22,7 @@ import {
   getInteractionSource,
   type InteractionDependencies,
   type InteractionFrameInput,
-  type InteractionSourceSnapshot,
+  InteractionSourceState,
   type RaySourceInput,
   type ResolvedRay,
   type SelectionCapture,
@@ -85,7 +85,8 @@ export class Interaction {
   private readonly directTouch;
   private longSelectDuration;
   private readonly gazeDwell = new GazeDwell();
-  private readonly snapshots = new Map<Controller, InteractionSourceSnapshot>();
+  private readonly sourceStates = new Map<Controller, InteractionSourceState>();
+  private readonly frameSnapshots: InteractionSourceState[] = [];
   private readonly rawIntersections = new Map<
     Controller,
     THREE.Intersection[]
@@ -102,6 +103,7 @@ export class Interaction {
   private readonly scaleIntents = new Map<Controller, number>();
   private raycastMode: RaycastMode;
   private frameSources = new Set<Controller>();
+  private nextFrameSources = new Set<Controller>();
 
   constructor(dependencies: InteractionDependencies) {
     this.callbacks = dependencies.callbacks;
@@ -140,7 +142,8 @@ export class Interaction {
 
   /** Replaces all sampled physical interaction state for one engine frame. */
   update(frame: InteractionFrameInput, deltaSeconds = 0): void {
-    const nextSources = new Set<Controller>();
+    const nextSources = this.nextFrameSources;
+    nextSources.clear();
     for (const input of frame.raySources) nextSources.add(input.controller);
     for (const input of frame.directTouches) nextSources.add(input.controller);
     for (const controller of this.frameSources) {
@@ -148,6 +151,7 @@ export class Interaction {
         this.removeSource(controller, 'source-lost');
       }
     }
+    this.nextFrameSources = this.frameSources;
     this.frameSources = nextSources;
 
     for (const [controller, capture] of this.captures) {
@@ -162,19 +166,19 @@ export class Interaction {
       }
     }
 
+    const snapshots = this.frameSnapshots;
+    snapshots.length = 0;
     const touchContacts = this.directTouch.update(frame.directTouches);
-    for (const contact of touchContacts) this.updateTouch(contact);
+    for (const contact of touchContacts) {
+      const snapshot = this.processTouchContact(contact);
+      if (contact.phase !== 'end') snapshots.push(snapshot);
+    }
 
-    const snapshots: InteractionSourceSnapshot[] = [];
     const deliberate = this.hasDeliberateInput(frame);
     for (const input of frame.raySources) {
       const snapshot = this.updateRay(input, deltaSeconds, deliberate);
       if (snapshot) snapshots.push(snapshot);
     }
-    for (const contact of touchContacts) {
-      if (contact.phase !== 'end') snapshots.push(contact.snapshot);
-    }
-
     for (const [controller, factor] of this.scaleIntents) {
       this.applyScaleIntent(controller, factor);
     }
@@ -219,8 +223,10 @@ export class Interaction {
       this.removeSource(controller, 'source-lost');
     }
     this.directTouch.clear();
+    this.frameSnapshots.length = 0;
     this.rawIntersections.clear();
     this.frameSources.clear();
+    this.nextFrameSources.clear();
     this.exclusiveControls.clear();
     this.scaleIntents.clear();
   }
@@ -253,7 +259,7 @@ export class Interaction {
     for (const [controller, touch] of this.touches) {
       if (!selectionBelongsTo(touch.selection, object)) continue;
       const contact = this.directTouch.remove(controller);
-      if (contact) this.updateTouch(contact);
+      if (contact) this.processTouchContact(contact);
     }
     for (const [controller, resolved] of this.resolvedRays) {
       if (objectIsDescendantOf(resolved.surface, object)) {
@@ -269,11 +275,11 @@ export class Interaction {
   ): void {
     this.cancelCapture(controller, reason);
     const contact = this.directTouch.remove(controller);
-    if (contact) this.updateTouch(contact);
+    if (contact) this.processTouchContact(contact);
     this.finishTouch(controller);
     this.clearResolvedRay(controller);
     this.reticle.clear(controller);
-    this.snapshots.delete(controller);
+    this.sourceStates.delete(controller);
     this.rawIntersections.delete(controller);
     this.hoverPaths.delete(controller);
     this.gazeDwell.remove(controller);
@@ -283,10 +289,8 @@ export class Interaction {
 
   getSourceSnapshot(
     controller: Controller
-  ): InteractionSourceSnapshot | undefined {
-    return (
-      this.directTouch.getSnapshot(controller) ?? this.snapshots.get(controller)
-    );
+  ): InteractionSourceState | undefined {
+    return this.sourceStates.get(controller);
   }
 
   getResolvedRay(controller: Controller): ResolvedRay | undefined {
@@ -363,15 +367,15 @@ export class Interaction {
   }
 
   private applyScaleIntent(controller: Controller, factor: number): boolean {
-    const snapshot = this.snapshots.get(controller);
+    const snapshot = this.sourceStates.get(controller);
     const resolved = this.resolvedRays.get(controller);
     if (!snapshot || !resolved?.target) return false;
     const source = getInteractionSource(controller, 'simulator');
-    const intentSnapshot = {
-      ...snapshot,
-      source,
-      sourceType: 'simulator' as const,
-    };
+    const intentSnapshot = new InteractionSourceState(controller).copyFrom(
+      snapshot
+    );
+    intentSnapshot.source = source;
+    intentSnapshot.sourceType = 'simulator';
     return this.manipulation.applyScaleIntent(
       this.createSelection(controller, resolved),
       intentSnapshot,
@@ -383,7 +387,7 @@ export class Interaction {
     input: RaySourceInput,
     deltaSeconds: number,
     deliberate: boolean
-  ): InteractionSourceSnapshot | undefined {
+  ): InteractionSourceState | undefined {
     if (this.directTouch.has(input.controller)) {
       this.clearResolvedRay(input.controller);
       this.reticle.clear(input.controller);
@@ -391,9 +395,8 @@ export class Interaction {
     }
 
     const previousSelected =
-      this.snapshots.get(input.controller)?.selected ?? false;
-    let snapshot = this.createSnapshot(input);
-    this.snapshots.set(input.controller, snapshot);
+      this.sourceStates.get(input.controller)?.selected ?? false;
+    const snapshot = this.updateRaySnapshot(input);
     if (!snapshot.selected)
       this.suppressedUntilRelease.delete(input.controller);
 
@@ -421,13 +424,10 @@ export class Interaction {
         deltaSeconds,
         deliberate
       );
-      snapshot = Object.freeze({
-        ...snapshot,
-        selectionProgress: dwell.progress,
-      });
-      this.snapshots.set(input.controller, snapshot);
+      snapshot.selectionProgress = dwell.progress;
       gazeCompleted = dwell.completed;
     } else {
+      snapshot.selectionProgress = undefined;
       this.gazeDwell.remove(input.controller);
     }
 
@@ -467,14 +467,13 @@ export class Interaction {
   private beginSelection(controller: Controller, gaze = false): void {
     if (this.directTouch.has(controller) || this.captures.has(controller))
       return;
-    const snapshot = this.snapshots.get(controller);
+    const snapshot = this.sourceStates.get(controller);
     if (!snapshot) return;
-    const selectedSnapshot = Object.freeze({...snapshot, selected: true});
-    this.snapshots.set(controller, selectedSnapshot);
+    snapshot.selected = true;
     const resolved = this.resolvedRays.get(controller);
 
     const claimedScale = this.runManipulationTransition(() =>
-      this.manipulation.tryClaimScale(selectedSnapshot, resolved)
+      this.manipulation.tryClaimScale(snapshot, resolved)
     );
     if (claimedScale) {
       const capture = {kind: 'auxiliary'} as const;
@@ -501,18 +500,12 @@ export class Interaction {
       });
       return;
     }
-    this.startTargetCapture(
-      controller,
-      selectedSnapshot,
-      resolved,
-      false,
-      gaze
-    );
+    this.startTargetCapture(controller, snapshot, resolved, false, gaze);
   }
 
   private startTargetCapture(
     controller: Controller,
-    snapshot: InteractionSourceSnapshot,
+    snapshot: InteractionSourceState,
     resolved: ResolvedRay,
     touch: boolean,
     gaze = false
@@ -589,17 +582,12 @@ export class Interaction {
     controller: Controller,
     reason: SelectionEndReason,
     releasedTarget?: THREE.Object3D,
-    finalSnapshot?: InteractionSourceSnapshot
+    finalSnapshot?: InteractionSourceState
   ): void {
     const capture = this.detachCapture(controller);
     if (!capture) return;
-    const snapshot = this.snapshots.get(controller);
-    if (snapshot) {
-      this.snapshots.set(
-        controller,
-        Object.freeze({...snapshot, selected: false})
-      );
-    }
+    const snapshot = this.sourceStates.get(controller);
+    if (snapshot) snapshot.selected = false;
 
     let completed = false;
     let endReason = reason;
@@ -687,7 +675,19 @@ export class Interaction {
     this.callbacks.invokeGlobal('onSelectEnd', event);
   }
 
-  private updateTouch(contact: DirectTouchContact): void {
+  private processTouchContact(
+    contact: DirectTouchContact
+  ): InteractionSourceState {
+    const snapshot = this.updateTouchSnapshot(contact);
+    this.updateTouch(contact, snapshot);
+    if (contact.phase === 'end') snapshot.selected = false;
+    return snapshot;
+  }
+
+  private updateTouch(
+    contact: DirectTouchContact,
+    snapshot: InteractionSourceState
+  ): void {
     if (contact.phase === 'start' && contact.resolved?.target) {
       const selection = this.createSelection(
         contact.controller,
@@ -705,12 +705,12 @@ export class Interaction {
       try {
         this.clearResolvedRay(contact.controller);
         this.reticle.clear(contact.controller);
-        const prevented = this.dispatchTouchStart(touchState, contact);
+        const prevented = this.dispatchTouchStart(touchState);
         touchState.prevented = prevented;
         if (!prevented) {
           const capture = this.startTargetCapture(
             contact.controller,
-            contact.snapshot,
+            snapshot,
             contact.resolved,
             true
           );
@@ -723,7 +723,7 @@ export class Interaction {
               contact.controller,
               'released',
               capture.selection.target,
-              contact.snapshot
+              snapshot
             );
           }
         }
@@ -740,7 +740,7 @@ export class Interaction {
     touch.point.copy(contact.point);
     if (contact.phase === 'move') {
       try {
-        this.dispatchTouch(touch, contact, 'onObjectTouching');
+        this.dispatchTouch(touch, 'onObjectTouching');
         this.updateGrab(touch, contact);
       } catch (error) {
         this.touches.delete(contact.controller);
@@ -752,8 +752,8 @@ export class Interaction {
     this.touches.delete(contact.controller);
     this.suppressedUntilRelease.add(contact.controller);
     try {
-      this.finishGrab(touch, contact);
-      this.dispatchTouch(touch, contact, 'onObjectTouchEnd');
+      this.finishGrab(touch);
+      this.dispatchTouch(touch, 'onObjectTouchEnd');
     } finally {
       if (!touch.prevented) {
         const capture = this.captures.get(contact.controller);
@@ -767,7 +767,7 @@ export class Interaction {
             contact.controller,
             'released',
             touch.selection.target,
-            contact.snapshot
+            snapshot
           );
         } else {
           this.cancelCapture(
@@ -784,34 +784,16 @@ export class Interaction {
   private finishTouch(controller: Controller): void {
     const touch = this.touches.get(controller);
     if (!touch) return;
-    const snapshot = this.getSourceSnapshot(controller);
-    if (!snapshot) {
-      this.touches.delete(controller);
-      return;
-    }
-    const contact: DirectTouchContact = {
-      phase: 'end',
-      controller,
-      snapshot,
-      previous: undefined,
-      handIndex: touch.handIndex,
-      hand: touch.hand,
-      point: touch.point,
-      selected: false,
-    };
     this.touches.delete(controller);
-    this.finishGrab(touch, contact);
-    this.dispatchTouch(touch, contact, 'onObjectTouchEnd');
+    this.finishGrab(touch);
+    this.dispatchTouch(touch, 'onObjectTouchEnd');
   }
 
-  private dispatchTouchStart(
-    touch: TouchState,
-    contact: DirectTouchContact
-  ): boolean {
+  private dispatchTouchStart(touch: TouchState): boolean {
     const state = {prevented: false};
     for (const script of touch.selection.scriptPath) {
       const event: ObjectTouchStartEvent = {
-        ...this.createTouchEvent(touch, contact),
+        ...this.createTouchEvent(touch),
         currentTarget: script,
         get defaultPrevented() {
           return state.prevented;
@@ -832,23 +814,19 @@ export class Interaction {
 
   private dispatchTouch(
     touch: TouchState,
-    contact: DirectTouchContact,
     hook: 'onObjectTouching' | 'onObjectTouchEnd'
   ): void {
     dispatchInteractionPath(
       this.callbacks,
       touch.selection.scriptPath,
       hook,
-      this.createTouchEvent(touch, contact)
+      this.createTouchEvent(touch)
     );
   }
 
-  private createTouchEvent(
-    touch: TouchState,
-    contact: DirectTouchContact
-  ): ObjectTouchEvent {
+  private createTouchEvent(touch: TouchState): ObjectTouchEvent {
     return {
-      source: contact.snapshot.source,
+      source: touch.selection.publicSource,
       target: touch.selection.target,
       surface: touch.selection.surface,
       handIndex: touch.handIndex,
@@ -859,10 +837,10 @@ export class Interaction {
 
   private updateGrab(touch: TouchState, contact: DirectTouchContact): void {
     if (!contact.selected || !touch.hand) {
-      this.finishGrab(touch, contact);
+      this.finishGrab(touch);
       return;
     }
-    const event = this.createGrabEvent(touch, contact);
+    const event = this.createGrabEvent(touch);
     if (!touch.grabbing) {
       touch.grabbing = true;
       dispatchInteractionPath(
@@ -881,30 +859,27 @@ export class Interaction {
     }
   }
 
-  private finishGrab(touch: TouchState, contact: DirectTouchContact): void {
+  private finishGrab(touch: TouchState): void {
     if (!touch.grabbing || !touch.hand) return;
     touch.grabbing = false;
     dispatchInteractionPath(
       this.callbacks,
       touch.selection.scriptPath,
       'onObjectGrabEnd',
-      this.createGrabEvent(touch, contact)
+      this.createGrabEvent(touch)
     );
   }
 
-  private createGrabEvent(
-    touch: TouchState,
-    contact: DirectTouchContact
-  ): ObjectGrabEvent {
+  private createGrabEvent(touch: TouchState): ObjectGrabEvent {
     return {
-      ...this.createTouchEvent(touch, contact),
+      ...this.createTouchEvent(touch),
       hand: touch.hand!,
     };
   }
 
   private updateSemantic(
     capture: TargetCapture,
-    snapshot: InteractionSourceSnapshot
+    snapshot: InteractionSourceState
   ): void {
     if (capture.action !== 'semantic' || capture.semantic?.kind !== 'slider') {
       return;
@@ -935,7 +910,7 @@ export class Interaction {
 
   private updateLongSelect(
     capture: TargetCapture,
-    snapshot: InteractionSourceSnapshot,
+    snapshot: InteractionSourceState,
     deltaSeconds: number
   ): void {
     if (
@@ -986,7 +961,7 @@ export class Interaction {
 
   private setResolvedRay(
     controller: Controller,
-    snapshot: InteractionSourceSnapshot,
+    snapshot: InteractionSourceState,
     resolved: ResolvedRay | undefined
   ): void {
     const previous = this.resolvedRays.get(controller);
@@ -1047,20 +1022,25 @@ export class Interaction {
     dispatchInteractionPath(this.callbacks, nextPath, 'onHovering', event);
   }
 
-  private createSnapshot(input: RaySourceInput): InteractionSourceSnapshot {
-    const position = input.position?.clone() ?? new THREE.Vector3();
-    const orientation = input.orientation?.clone() ?? new THREE.Quaternion();
-    if (!input.position) input.controller.getWorldPosition(position);
-    if (!input.orientation) input.controller.getWorldQuaternion(orientation);
-    return Object.freeze({
-      source: getInteractionSource(input.controller, input.sourceType),
-      controller: input.controller,
-      sourceType: input.sourceType,
-      position,
-      orientation,
-      ray: input.ray.clone(),
-      selected: input.sourceType === 'gaze' ? false : input.selected,
-    });
+  private updateRaySnapshot(input: RaySourceInput): InteractionSourceState {
+    return this.getSourceState(input.controller).updateRay(input);
+  }
+
+  private updateTouchSnapshot(
+    contact: DirectTouchContact
+  ): InteractionSourceState {
+    return this.getSourceState(contact.controller).updateTouch(
+      contact.point,
+      contact.orientation
+    );
+  }
+
+  private getSourceState(controller: Controller): InteractionSourceState {
+    let snapshot = this.sourceStates.get(controller);
+    if (snapshot) return snapshot;
+    snapshot = new InteractionSourceState(controller);
+    this.sourceStates.set(controller, snapshot);
+    return snapshot;
   }
 
   private createSelection(
@@ -1192,7 +1172,7 @@ export class Interaction {
 }
 
 function semanticInput(
-  snapshot: InteractionSourceSnapshot,
+  snapshot: InteractionSourceState,
   resolved: ResolvedRay,
   projector?: PlanarSurfaceProjector
 ) {

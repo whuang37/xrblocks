@@ -31,7 +31,7 @@ export class GazeController
   /**
    * The visual indicator for where the user is looking.
    */
-  reticle = new Reticle();
+  reticle: Reticle | undefined = new Reticle();
 
   camera!: THREE.Camera;
 

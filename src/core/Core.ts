@@ -116,6 +116,7 @@ export class Core {
   private reticlePresenter = new ReticlePresenter(this.reticleOptions);
   private uiRenderer!: UIRenderer;
   private physicsInterval?: ReturnType<typeof setInterval>;
+  private rendererContainer?: HTMLDivElement;
   private lifecycleState: CoreLifecycleState = 'new';
   private initializationPromise?: Promise<void>;
   private disposalPromise?: Promise<void>;
@@ -130,10 +131,19 @@ export class Core {
   textureLoader = new THREE.TextureLoader();
 
   private webXRSettings: XRSessionInit = {};
+  private shouldAutostartSimulator = false;
 
   /** Whether the XR simulator is currently active. */
   simulatorRunning = false;
   private startingSimulator?: Promise<void>;
+  private onWebXRSessionStarted = (event: {session: XRSession}) => {
+    void this.onXRSessionStarted(event.session);
+  };
+  private onWebXRUnsupported = () => {
+    if (!this.options.enableSimulator) return;
+    this.xrButton?.domElement.remove();
+    this.shouldAutostartSimulator = true;
+  };
 
   private _isPaused = false;
   private isSteppingFrame = false;
@@ -276,36 +286,68 @@ export class Core {
     if (this.lifecycleState === 'disposed') return Promise.resolve();
 
     this.lifecycleState = 'disposing';
-
-    if (this.physicsInterval !== undefined) {
-      clearInterval(this.physicsInterval);
-      this.physicsInterval = undefined;
-    }
-    if (typeof this._renderer?.setAnimationLoop === 'function') {
-      this._renderer.setAnimationLoop(null);
-    }
-    window.removeEventListener('resize', this.onWindowResize);
-
-    const scriptsDisposal = this.scriptsManager.dispose();
-    this.disposalPromise = this.finishDisposal(scriptsDisposal);
+    this.disposalPromise = this.finishDisposal();
     return this.disposalPromise;
   }
 
-  private async finishDisposal(scriptsDisposal: Promise<void>): Promise<void> {
+  private async finishDisposal(): Promise<void> {
     let firstError: unknown;
-    try {
-      await scriptsDisposal;
-    } catch (error: unknown) {
-      firstError = error;
-    }
-
-    for (const dispose of [
+    const cleanups: Array<() => void | Promise<void>> = [
+      () => {
+        if (this.physicsInterval === undefined) return;
+        clearInterval(this.physicsInterval);
+        this.physicsInterval = undefined;
+      },
+      () => {
+        if (typeof this._renderer?.setAnimationLoop === 'function') {
+          this._renderer.setAnimationLoop(null);
+        }
+      },
+      () => window.removeEventListener('resize', this.onWindowResize),
+      () => {
+        const button = this.xrButton;
+        this.xrButton = undefined;
+        button?.dispose();
+      },
+      () => this.disposeWebXRSessionManager(),
+      () => this.scriptsManager.dispose(),
+      () => {
+        this.simulatorRunning = false;
+      },
       () => this.interaction.clear(),
       () => this.uiRenderer.dispose(),
       () => this.input.dispose(),
-    ]) {
+      () => {
+        const camera = this.deviceCamera;
+        this.deviceCamera = undefined;
+        camera?.dispose();
+      },
+      () => {
+        const effects = this.effects;
+        this.effects = undefined;
+        effects?.dispose();
+      },
+      () => {
+        const physics = this.physics;
+        this.physics = undefined;
+        physics?.dispose();
+      },
+      () => {
+        const renderer = this._renderer;
+        this._renderer = undefined;
+        if (typeof renderer?.dispose === 'function') {
+          renderer.dispose();
+        }
+      },
+      () => {
+        this.rendererContainer?.remove();
+        this.rendererContainer = undefined;
+      },
+    ];
+
+    for (const cleanup of cleanups) {
       try {
-        dispose();
+        await cleanup();
       } catch (error: unknown) {
         firstError ??= error;
       }
@@ -313,6 +355,25 @@ export class Core {
 
     this.lifecycleState = 'disposed';
     if (firstError !== undefined) throw firstError;
+  }
+
+  private async disposeWebXRSessionManager(): Promise<void> {
+    const manager = this.webXRSessionManager;
+    if (!manager) return;
+    this.webXRSessionManager = undefined;
+    manager.removeEventListener(
+      WebXRSessionEventType.SESSION_START,
+      this.onWebXRSessionStarted
+    );
+    manager.removeEventListener(
+      WebXRSessionEventType.SESSION_END,
+      this.onXRSessionEnded
+    );
+    manager.removeEventListener(
+      WebXRSessionEventType.UNSUPPORTED,
+      this.onWebXRUnsupported
+    );
+    await manager.dispose();
   }
 
   /**
@@ -425,9 +486,9 @@ export class Core {
     window.addEventListener('resize', this.onWindowResize);
 
     if (!options.canvas) {
-      const xrContainer = document.createElement('div');
-      document.body.appendChild(xrContainer);
-      xrContainer.appendChild(this.renderer.domElement);
+      this.rendererContainer = document.createElement('div');
+      document.body.appendChild(this.rendererContainer);
+      this.rendererContainer.appendChild(this.renderer.domElement);
     }
 
     this.options = options;
@@ -550,7 +611,7 @@ export class Core {
     );
     this.webXRSessionManager.addEventListener(
       WebXRSessionEventType.SESSION_START,
-      (event) => this.onXRSessionStarted(event.session)
+      this.onWebXRSessionStarted
     );
     this.webXRSessionManager.addEventListener(
       WebXRSessionEventType.SESSION_END,
@@ -558,9 +619,9 @@ export class Core {
     );
 
     // Sets up xrButton.
-    let shouldAutostartSimulator =
+    this.shouldAutostartSimulator =
       this.options.xrButton.alwaysAutostartSimulator;
-    if (!shouldAutostartSimulator && options.xrButton.enabled) {
+    if (!this.shouldAutostartSimulator && options.xrButton.enabled) {
       this.xrButton = new XRButton(
         this.webXRSessionManager,
         this.permissionsManager,
@@ -579,12 +640,7 @@ export class Core {
 
     this.webXRSessionManager.addEventListener(
       WebXRSessionEventType.UNSUPPORTED,
-      () => {
-        if (this.options.enableSimulator) {
-          this.xrButton?.domElement.remove();
-          shouldAutostartSimulator = true;
-        }
-      }
+      this.onWebXRUnsupported
     );
 
     await this.webXRSessionManager.initialize();
@@ -625,7 +681,7 @@ export class Core {
       this.input.addReticles();
     }
 
-    if (shouldAutostartSimulator) {
+    if (this.shouldAutostartSimulator) {
       await this.startSimulator();
       this.assertInitializing();
     }
@@ -743,7 +799,8 @@ export class Core {
     if (this.startingSimulator) return this.startingSimulator;
 
     this.startingSimulator = (async () => {
-      this.xrButton?.domElement.remove();
+      this.xrButton?.dispose();
+      this.xrButton = undefined;
       this.xrSystemsGroup.add(this.simulator);
       await this.scriptsManager.initScript(this.simulator);
       this.assertLifecycleActive('finish simulator startup');

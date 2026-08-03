@@ -64,10 +64,15 @@ export class Input {
   >();
   private selectedControllers = new Set<Controller>();
   private releasedControllers = new Set<Controller>();
+  private keyDownListeners = new Set<(event: KeyEvent) => void>();
+  private keyUpListeners = new Set<(event: KeyEvent) => void>();
   activeControllers = new ActiveControllers();
   leftController?: Controller;
   rightController?: Controller;
   reticles = new Reticles();
+  private ownedReticles = new Set<Reticle>(
+    this.gazeController.reticle ? [this.gazeController.reticle] : []
+  );
   private directTouchInputs: DirectTouchInput[] = [];
   scene?: THREE.Scene;
 
@@ -227,6 +232,7 @@ export class Input {
     for (const controller of this.controllers) {
       if (controller.reticle == null) {
         controller.reticle = new Reticle();
+        this.ownedReticles.add(controller.reticle);
         controller.reticle.name = 'Reticle ' + id;
         ++id;
       }
@@ -404,18 +410,24 @@ export class Input {
   }
 
   bindKeyDown(event: (event: KeyEvent) => void) {
+    if (this.keyDownListeners.has(event)) return;
+    this.keyDownListeners.add(event);
     window.addEventListener('keydown', event);
   }
 
   bindKeyUp(event: (event: KeyEvent) => void) {
+    if (this.keyUpListeners.has(event)) return;
+    this.keyUpListeners.add(event);
     window.addEventListener('keyup', event);
   }
 
   unbindKeyDown(event: (event: KeyEvent) => void) {
+    this.keyDownListeners.delete(event);
     window.removeEventListener('keydown', event);
   }
 
   unbindKeyUp(event: (event: KeyEvent) => void) {
+    this.keyUpListeners.delete(event);
     window.removeEventListener('keyup', event);
   }
 
@@ -632,8 +644,27 @@ export class Input {
   }
 
   dispose() {
+    for (const listener of this.keyDownListeners) {
+      window.removeEventListener('keydown', listener);
+    }
+    for (const listener of this.keyUpListeners) {
+      window.removeEventListener('keyup', listener);
+    }
+    this.keyDownListeners.clear();
+    this.keyUpListeners.clear();
     this.pinchFilter.dispose(this.controllers);
     this.listeners.clear();
+    for (const controller of new Set([
+      ...this.controllers,
+      this.gazeController,
+    ])) {
+      if (controller.reticle && this.ownedReticles.has(controller.reticle)) {
+        controller.reticle = undefined;
+      }
+    }
+    for (const reticle of this.ownedReticles) reticle.dispose();
+    this.ownedReticles.clear();
+    this.reticles.clear();
   }
 
   // Performs the raycast assuming the raycaster is already set up.

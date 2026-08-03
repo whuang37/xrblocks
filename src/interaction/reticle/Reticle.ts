@@ -178,6 +178,17 @@ export class Reticle extends THREE.Mesh<
     this.hoverRing.visible = hovering;
   }
 
+  /** Releases the GPU resources owned by this Reticle. */
+  dispose() {
+    this.removeFromParent();
+    this.geometry.dispose();
+    this.material.dispose();
+    this.hoverRing.geometry.dispose();
+    this.hoverRing.material.dispose();
+    this.intersection = undefined;
+    this.targetObject = undefined;
+  }
+
   /**
    * Overrides the default raycast method to make the reticle ignored by
    * raycasters.

@@ -95,22 +95,9 @@ export interface ResolvedRay {
   readonly scriptPath: readonly Script[];
   readonly objectPath: readonly THREE.Object3D[];
   readonly reticleMode: ReticleMode;
-  readonly hitPart?: InteractionHitPart;
   readonly semanticControl?: THREE.Object3D;
   readonly manipulation?: ManipulationResolution;
 }
-
-export type InteractionHitPart =
-  | {readonly kind: 'content'}
-  | {readonly kind: 'card-surface'}
-  | {
-      readonly kind: 'card-edge';
-      readonly corner?:
-        | 'top-left'
-        | 'top-right'
-        | 'bottom-left'
-        | 'bottom-right';
-    };
 
 export interface SelectionCapture {
   readonly source: Controller;
@@ -119,8 +106,8 @@ export interface SelectionCapture {
   readonly surface: THREE.Object3D;
   readonly owner: THREE.Object3D;
   readonly point: THREE.Vector3;
+  readonly uv?: THREE.Vector2;
   readonly scriptPath: readonly Script[];
-  readonly hitPart?: InteractionHitPart;
   readonly manipulation?: ManipulationResolution;
 }
 
@@ -129,6 +116,7 @@ export type ResolvedManipulationAction = Exclude<ManipulationAction, 'none'>;
 export interface ManipulationResolution {
   readonly owner: THREE.Object3D;
   readonly action?: ResolvedManipulationAction;
+  readonly handle?: THREE.Object3D;
 }
 
 export type TargetedInteractionHook =

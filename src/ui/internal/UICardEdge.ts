@@ -6,6 +6,7 @@ import {
 } from '@pmndrs/uikit';
 import * as THREE from 'three';
 
+import {ManipulationAction} from '../../interaction/manipulation/ManipulationTypes';
 import {UICardEdgeFragmentShader} from '../shaders/UICardEdge.frag';
 import {parseColorWithAlpha} from '../utils/ColorUtils';
 import {
@@ -160,6 +161,9 @@ export class UICardEdge extends UICardEdgeLayer {
       u_show_glow_2: 0,
       u_debug: resolved.debug ? 1 : 0,
     });
+    this.xb = {
+      manipulationHandle: {action: ManipulationAction.Translate},
+    };
     this.margin = margin;
     this.cornerRadius = cornerRadius;
 

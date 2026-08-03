@@ -313,8 +313,7 @@ export class UIRenderer {
     mapping.physical.userData.xrblocksHitOrder = mapping.physical.renderOrder;
     return this.interaction.registerHitSurface(
       mapping.physical,
-      mapping.logical,
-      mapping.part
+      mapping.logical
     );
   }
 

@@ -22,7 +22,6 @@ import {
   getInteractionSource,
   type InteractionDependencies,
   type InteractionFrameInput,
-  type InteractionHitPart,
   type InteractionSourceSnapshot,
   type RaySourceInput,
   type ResolvedRay,
@@ -196,10 +195,9 @@ export class Interaction {
 
   registerHitSurface(
     physical: THREE.Object3D,
-    logical: THREE.Object3D,
-    part?: InteractionHitPart
+    logical: THREE.Object3D
   ): () => void {
-    return this.registry.register(physical, logical, part);
+    return this.registry.register(physical, logical);
   }
 
   /** Refreshes bounded direct-touch candidates found by the lifecycle pass. */
@@ -989,8 +987,8 @@ export class Interaction {
       surface: resolved.surface,
       owner: resolved.manipulation?.owner ?? target,
       point: resolved.intersection.point.clone(),
+      uv: resolved.intersection.uv?.clone(),
       scriptPath: Object.freeze([...resolved.scriptPath]),
-      hitPart: resolved.hitPart,
       manipulation: resolved.manipulation,
     };
   }

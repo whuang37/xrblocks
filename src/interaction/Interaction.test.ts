@@ -124,9 +124,7 @@ describe('Interaction public behavior', () => {
       return true;
     };
     const physical = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
-    const unregister = interaction.registerHitSurface(physical, button, {
-      kind: 'content',
-    });
+    const unregister = interaction.registerHitSurface(physical, button);
     activateScripts(callbacks, button);
     const hand = controller(0);
     const touch = {
@@ -162,9 +160,7 @@ describe('Interaction public behavior', () => {
       onClick: acceptedClick,
     });
     const acceptedPhysical = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
-    interaction.registerHitSurface(acceptedPhysical, accepted, {
-      kind: 'content',
-    });
+    interaction.registerHitSurface(acceptedPhysical, accepted);
     activateScripts(callbacks, button, accepted);
     interaction.update({
       raySources: [ray(hand, false)],
@@ -245,13 +241,14 @@ describe('Interaction public behavior', () => {
     const card = new UICard({
       size: {width: 0.5, height: 0.3},
       manipulation: true,
-      edge: true,
+      edge: {scale: true},
     });
     scene.add(card);
     const edge = new THREE.Object3D();
     const surface = new THREE.Object3D();
-    interaction.registerHitSurface(edge, card, {kind: 'card-edge'});
-    interaction.registerHitSurface(surface, card, {kind: 'card-surface'});
+    edge.xb = {manipulationHandle: {action: 'translate'}};
+    interaction.registerHitSurface(edge, card);
+    interaction.registerHitSurface(surface, card);
     activateScripts(callbacks, card);
     const first = controller(0);
     const second = controller(1);
@@ -261,19 +258,28 @@ describe('Interaction public behavior', () => {
     expect(interaction.isManipulating(card)).toBe(false);
     updateRays(interaction, [ray(first, false, hit(surface))]);
 
-    updateRays(interaction, [ray(first, true, hit(edge))]);
+    updateRays(interaction, [ray(first, true, hit(edge, 1, 0.1, 0.1))]);
     updateRays(interaction, [
-      ray(first, true, hit(edge), 'controller-ray', new THREE.Vector3(1, 0, 0)),
+      ray(
+        first,
+        true,
+        hit(edge, 1, 0.1, 0.1),
+        'controller-ray',
+        new THREE.Vector3(1, 0, 0)
+      ),
     ]);
     expect(card.position.x).not.toBe(0);
 
-    updateRays(interaction, [ray(first, true, hit(edge)), ray(second, true)]);
     updateRays(interaction, [
-      ray(first, true, hit(edge)),
+      ray(first, true, hit(edge, 1, 0.1, 0.1)),
+      ray(second, true, hit(edge, 1, 0.9, 0.9)),
+    ]);
+    updateRays(interaction, [
+      ray(first, true, hit(edge, 1, 0.1, 0.1)),
       ray(
         second,
         true,
-        undefined,
+        hit(edge, 1, 0.9, 0.9),
         'controller-ray',
         new THREE.Vector3(2, 0, 0)
       ),

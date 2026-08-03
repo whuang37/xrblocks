@@ -256,7 +256,6 @@ function createNode(
       mappings.push({
         physical: edge,
         logical: element,
-        part: {kind: 'card-edge'},
       });
     }
     applyPresentation = (state) => {
@@ -312,7 +311,6 @@ function createNode(
     mappings.push({
       physical: node,
       logical: element,
-      part: kind === 'card' ? {kind: 'card-surface'} : {kind: 'content'},
     });
   }
   allowChildRaycasts(node);

@@ -11,7 +11,6 @@ import {getUIElementKind, isUIElement} from '../../ui/UIElement';
 import type {
   InteractionSourceSnapshot,
   InteractionSource,
-  InteractionHitPart,
   ManipulationResolution,
   ResolvedManipulationAction,
   ResolvedRay,
@@ -56,8 +55,8 @@ interface Session {
   primaryAction?: ResolvedManipulationAction;
   auxiliary?: InteractionSourceSnapshot;
   phase?: ActivePhase;
-  cornerScale?: {
-    primaryCorner: CardCorner;
+  cardEdge?: {
+    primaryCorner?: CardCorner;
   };
 }
 
@@ -92,23 +91,24 @@ export class ManipulationManager {
 
   resolve(
     surface: THREE.Object3D,
-    _eligiblePath?: readonly THREE.Object3D[],
-    hitPart?: InteractionHitPart
+    eligiblePath?: readonly THREE.Object3D[]
   ): ManipulationResolution | undefined {
-    let current: THREE.Object3D | null = surface;
+    const path = eligiblePath ?? getObjectPath(surface);
     let childHandle:
       | ResolvedManipulationAction
       | typeof ManipulationAction.None
       | undefined;
     let hasChildHandle = false;
+    let handle: THREE.Object3D | undefined;
 
-    while (current) {
+    for (const current of path) {
       if (isUIElement(current) && getUIElementKind(current) === 'overlay') {
         return undefined;
       }
       const options = current.xb;
       if (!hasChildHandle && options?.manipulationHandle !== undefined) {
         hasChildHandle = true;
+        handle = current;
         const action =
           options.manipulationHandle === 'none'
             ? ManipulationAction.None
@@ -128,20 +128,15 @@ export class ManipulationManager {
         if (!config) return undefined;
 
         const edge = getCardEdge(current);
-        if (edge) {
-          if (hitPart?.kind === 'card-edge') {
-            return config.translate
-              ? {owner: current, action: ManipulationAction.Translate}
-              : undefined;
-          }
-          if (!edge.translateFromSurface) return undefined;
+        if (edge && !hasChildHandle && !edge.translateFromSurface) {
+          return undefined;
         }
 
         const requested = hasChildHandle ? childHandle : config.handle;
         if (requested === ManipulationAction.None) return undefined;
         if (requested !== undefined) {
           return isManipulationActionEnabled(config, requested)
-            ? {owner: current, action: requested}
+            ? {owner: current, action: requested, handle}
             : undefined;
         }
 
@@ -150,14 +145,13 @@ export class ManipulationManager {
           config.rotate && ManipulationAction.Rotate,
         ].filter(Boolean) as ResolvedManipulationAction[];
         if (primaryActions.length === 1) {
-          return {owner: current, action: primaryActions[0]};
+          return {owner: current, action: primaryActions[0], handle};
         }
         if (primaryActions.length === 0 && config.scale) {
-          return {owner: current};
+          return {owner: current, handle};
         }
         return undefined;
       }
-      current = current.parent;
     }
     return undefined;
   }
@@ -176,9 +170,7 @@ export class ManipulationManager {
       return false;
     }
 
-    const resolution =
-      capture.manipulation ??
-      this.resolve(capture.surface, undefined, capture.hitPart);
+    const resolution = capture.manipulation ?? this.resolve(capture.surface);
     if (!resolution || this.sessions.has(resolution.owner)) return false;
     const config = normalizeManipulationConfig(
       resolution.owner.xb?.manipulation
@@ -196,12 +188,10 @@ export class ManipulationManager {
           : resolution.action,
     };
     const edge = getCardEdge(session.owner);
-    const corner =
-      capture.hitPart?.kind === 'card-edge'
-        ? capture.hitPart.corner
-        : undefined;
-    if (edge?.scale && corner) {
-      session.cornerScale = {primaryCorner: corner};
+    if (edge && resolution.handle) {
+      session.cardEdge = {
+        primaryCorner: edge.scale ? getCardCorner(capture.uv) : undefined,
+      };
     }
     const baseline = session.primaryAction
       ? this.captureBaseline(session, session.primaryAction)
@@ -236,18 +226,21 @@ export class ManipulationManager {
     }
     const eligible = [...this.sessions.values()].filter((session) => {
       if (!session.config.scale || session.auxiliary) return false;
-      if (session.cornerScale) {
+      const edge = getCardEdge(session.owner);
+      if (edge?.scale) {
+        const primaryCorner = session.cardEdge?.primaryCorner;
         const corner =
-          resolved?.hitPart?.kind === 'card-edge'
-            ? resolved.hitPart.corner
+          resolved?.manipulation?.owner === session.owner &&
+          resolved.manipulation.handle
+            ? getCardCorner(resolved.intersection.uv)
             : undefined;
         return (
-          resolved?.manipulation?.owner === session.owner &&
+          primaryCorner !== undefined &&
           corner !== undefined &&
-          oppositeCorner(session.cornerScale.primaryCorner) === corner
+          oppositeCorner(primaryCorner) === corner
         );
       }
-      return !getCardEdge(session.owner)?.scale;
+      return true;
     });
     if (eligible.length !== 1) return false;
 
@@ -423,8 +416,8 @@ export class ManipulationManager {
       !session.owner.visible ||
       session.owner.parent !== session.ownerParent ||
       !objectIsDescendantOf(session.primary.capture.surface, session.owner) ||
-      (session.primary.capture.hitPart?.kind === 'card-edge' && !edge) ||
-      (session.cornerScale &&
+      (session.cardEdge && !edge) ||
+      (session.cardEdge?.primaryCorner &&
         (!edge?.scale || !current.scale || !current.translate))
     ) {
       this.cancelOwner(session.owner);
@@ -567,6 +560,23 @@ function oppositeCorner(corner: CardCorner): CardCorner {
   if (corner === 'top-right') return 'bottom-left';
   if (corner === 'bottom-left') return 'top-right';
   return 'top-left';
+}
+
+function getCardCorner(uv: THREE.Vector2 | undefined): CardCorner | undefined {
+  if (!uv) return undefined;
+  const horizontal = uv.x <= 0.2 ? 'left' : uv.x >= 0.8 ? 'right' : undefined;
+  const vertical = uv.y <= 0.2 ? 'bottom' : uv.y >= 0.8 ? 'top' : undefined;
+  return horizontal && vertical ? `${vertical}-${horizontal}` : undefined;
+}
+
+function getObjectPath(surface: THREE.Object3D): THREE.Object3D[] {
+  const path: THREE.Object3D[] = [];
+  let current: THREE.Object3D | null = surface;
+  while (current) {
+    path.push(current);
+    current = current.parent;
+  }
+  return path;
 }
 
 function cloneSnapshot(

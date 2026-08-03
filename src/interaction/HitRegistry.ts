@@ -1,12 +1,10 @@
 import * as THREE from 'three';
 
 import {UI_OVERLAY_LAYER} from '../constants';
-import type {InteractionHitPart} from './InteractionTypes';
 
 export interface RegisteredHitSurface {
   readonly physical: THREE.Object3D;
   readonly logical: THREE.Object3D;
-  readonly part?: InteractionHitPart;
 }
 
 /** Maps private physical hit nodes to public logical objects. */
@@ -21,12 +19,8 @@ export class HitRegistry {
     RegisteredHitSurface
   >();
 
-  register(
-    physical: THREE.Object3D,
-    logical: THREE.Object3D,
-    part?: InteractionHitPart
-  ): () => void {
-    const entry = {physical, logical, part};
+  register(physical: THREE.Object3D, logical: THREE.Object3D): () => void {
+    const entry = {physical, logical};
     this.mappings.set(physical, entry);
     this.registered.add(entry);
     this.touchCandidates.set(physical, entry);

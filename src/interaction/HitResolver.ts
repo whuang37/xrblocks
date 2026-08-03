@@ -47,12 +47,11 @@ export class HitResolver {
       if (this.isExcluded(objectPath)) continue;
 
       const eligiblePath = this.getEligiblePath(objectPath);
-      const hitPart = withCorner(registered.part, rawIntersection.uv);
-      const manipulation = this.manipulation.resolve(
-        surface,
-        eligiblePath,
-        hitPart
-      );
+      const manipulationPath =
+        registered.physical === eligiblePath[0]
+          ? eligiblePath
+          : [registered.physical, ...eligiblePath];
+      const manipulation = this.manipulation.resolve(surface, manipulationPath);
       const validManipulation =
         manipulation && eligiblePath.includes(manipulation.owner)
           ? manipulation
@@ -62,14 +61,12 @@ export class HitResolver {
         this.callbacks.hasTargetHandler(object, sourceType)
       );
       const target =
-        hitPart?.kind === 'card-edge'
-          ? validManipulation?.owner
-          : (semanticControl ??
-            this.nearestTarget(
-              eligiblePath,
-              callbackTarget,
-              validManipulation?.owner
-            ));
+        semanticControl ??
+        this.nearestTarget(
+          eligiblePath,
+          callbackTarget,
+          validManipulation?.owner
+        );
       const scriptPath = target
         ? (eligiblePath.filter((object) =>
             this.callbacks.isScript(object)
@@ -87,7 +84,6 @@ export class HitResolver {
         scriptPath: Object.freeze(scriptPath),
         objectPath: Object.freeze(objectPath),
         reticleMode: this.getReticleMode(objectPath),
-        hitPart,
         semanticControl,
         manipulation: validManipulation,
       };
@@ -155,16 +151,4 @@ function hasPrivateAncestor(object: THREE.Object3D): boolean {
     current = current.parent;
   }
   return false;
-}
-
-function withCorner(
-  part: ResolvedRay['hitPart'],
-  uv: THREE.Vector2 | undefined
-): ResolvedRay['hitPart'] {
-  if (part?.kind !== 'card-edge' || !uv) return part;
-  const horizontal = uv.x <= 0.2 ? 'left' : uv.x >= 0.8 ? 'right' : undefined;
-  const vertical = uv.y <= 0.2 ? 'bottom' : uv.y >= 0.8 ? 'top' : undefined;
-  return horizontal && vertical
-    ? {...part, corner: `${vertical}-${horizontal}` as const}
-    : part;
 }

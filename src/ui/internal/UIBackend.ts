@@ -1,13 +1,11 @@
 import type * as THREE from 'three';
 
-import type {InteractionHitPart} from '../../interaction/InteractionTypes';
 import type {UIElement} from '../UIElement';
 import type {UITheme} from '../UITheme';
 
 export interface UIHitMapping {
   readonly physical: THREE.Object3D;
   readonly logical: UIElement;
-  readonly part: InteractionHitPart;
 }
 
 export interface UIPresentationState {

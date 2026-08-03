@@ -42,15 +42,12 @@ class UIKitMount implements UIMount {
   object: THREE.Object3D = new THREE.Group();
   private rendered?: Container;
   private presentationUpdates: PresentationUpdate[] = [];
-  private readonly invalidate: () => void;
 
   constructor(
     private readonly root: UIElement,
-    private readonly icons: IconCache,
-    private readonly images: ImageCache
+    private readonly icons: IconCache
   ) {
     this.object.name = `Private ${root.name}`;
-    this.invalidate = () => invalidateUIElement(this.root);
   }
 
   sync(
@@ -75,8 +72,6 @@ class UIKitMount implements UIMount {
         : undefined,
       {value: 0},
       this.icons,
-      this.images,
-      this.invalidate,
       this.presentationUpdates
     ) as Container;
     this.object.add(this.rendered);
@@ -103,7 +98,6 @@ class UIKitMount implements UIMount {
 
 class UIKitBackend implements UIBackend {
   private readonly icons = new IconCache();
-  private readonly images = new ImageCache();
   private renderer?: THREE.WebGLRenderer;
   private previousLocalClippingEnabled = false;
 
@@ -117,13 +111,12 @@ class UIKitBackend implements UIBackend {
   }
 
   createMount(root: UIElement): UIMount {
-    return new UIKitMount(root, this.icons, this.images);
+    return new UIKitMount(root, this.icons);
   }
 
   dispose(): void {
     this.restoreRenderer();
     this.icons.dispose();
-    this.images.dispose();
   }
 
   private restoreRenderer(): void {
@@ -146,8 +139,6 @@ function createNode(
   rootStack: number | undefined,
   sequence: {value: number},
   icons: IconCache,
-  images: ImageCache,
-  onResourceChanged: () => void,
   presentationUpdates: PresentationUpdate[]
 ): THREE.Object3D {
   const kind = getUIElementKind(element);
@@ -185,10 +176,7 @@ function createNode(
   } else if (kind === 'image') {
     const image = element as UIImage;
     const propertiesFor = (state: UIPresentationState) => ({
-      src:
-        typeof image.src === 'string'
-          ? images.get(image.src, onResourceChanged)
-          : image.src,
+      src: image.src,
       ...styleFor(state),
       pointerEvents: element.xb?.pointerEvents ?? 'auto',
     });
@@ -199,7 +187,7 @@ function createNode(
   } else if (kind === 'icon') {
     const icon = (element as UIIcon).icon || 'question_mark';
     const propertiesFor = (state: UIPresentationState) => ({
-      content: icons.get(icon, onResourceChanged),
+      content: icons.get(icon, element),
       ...styleFor(state),
       pointerEvents: element.xb?.pointerEvents ?? 'auto',
     });
@@ -227,7 +215,6 @@ function createNode(
         element as UIButton,
         theme,
         icons,
-        onResourceChanged,
         style.color as THREE.ColorRepresentation | undefined
       );
     } else if (kind === 'slider') {
@@ -246,8 +233,6 @@ function createNode(
           rootStack,
           sequence,
           icons,
-          images,
-          onResourceChanged,
           presentationUpdates
         )
       );
@@ -277,7 +262,6 @@ function createNode(
           element as UIButton,
           theme,
           icons,
-          onResourceChanged,
           styleFor(state).color as THREE.ColorRepresentation | undefined
         );
       } else if (kind === 'slider') {
@@ -429,7 +413,6 @@ function addButtonContent(
   button: UIButton,
   theme: UITheme,
   icons: IconCache,
-  onResourceChanged: () => void,
   color?: THREE.ColorRepresentation
 ): Array<Text | Svg> {
   const content: Array<Text | Svg> = [];
@@ -439,7 +422,7 @@ function addButtonContent(
   if (button.icon) {
     content.push(
       new Svg({
-        content: icons.get(button.icon, onResourceChanged),
+        content: icons.get(button.icon, button),
         width: 24,
         height: 24,
         color: contentColor,
@@ -465,7 +448,6 @@ function updateButtonContent(
   button: UIButton,
   theme: UITheme,
   icons: IconCache,
-  onResourceChanged: () => void,
   color?: THREE.ColorRepresentation
 ): void {
   const contentColor =
@@ -475,7 +457,7 @@ function updateButtonContent(
   if (button.icon) {
     const icon = content[index++] as Svg;
     icon.resetProperties({
-      content: icons.get(button.icon, onResourceChanged),
+      content: icons.get(button.icon, button),
       width: 24,
       height: 24,
       color: contentColor,
@@ -502,17 +484,17 @@ class IconCache {
   private readonly content = new Map<string, string>();
   private readonly pending = new Map<
     string,
-    {controller: AbortController; subscribers: Set<() => void>}
+    {controller: AbortController; subscribers: Set<UIElement>}
   >();
   private disposed = false;
 
-  get(name: string, onChanged: () => void): string {
+  get(name: string, subscriber: UIElement): string {
     const cached = this.content.get(name);
     if (cached) return cached;
     let request = this.pending.get(name);
     if (!request) {
       const controller = new AbortController();
-      const newRequest = {controller, subscribers: new Set<() => void>()};
+      const newRequest = {controller, subscribers: new Set<UIElement>()};
       request = newRequest;
       this.pending.set(name, newRequest);
       void fetch(`${ICON_BASE}${encodeURIComponent(name)}.svg`, {
@@ -527,14 +509,16 @@ class IconCache {
           if (this.disposed) return;
           if (!content.includes('<svg')) throw new Error('Invalid icon SVG.');
           this.content.set(name, content);
-          for (const subscriber of newRequest.subscribers) subscriber();
+          for (const subscriber of newRequest.subscribers) {
+            invalidateUIElement(subscriber);
+          }
         })
         .catch(() => {
           if (!this.disposed) this.content.set(name, FALLBACK_ICON);
         })
         .finally(() => this.pending.delete(name));
     }
-    request.subscribers.add(onChanged);
+    request.subscribers.add(subscriber);
     return FALLBACK_ICON;
   }
 
@@ -543,69 +527,6 @@ class IconCache {
     for (const {controller} of this.pending.values()) controller.abort();
     this.pending.clear();
     this.content.clear();
-  }
-}
-
-/** Backend-owned URL texture cache with a deterministic checker fallback. */
-class ImageCache {
-  private readonly fallback: THREE.DataTexture;
-  private readonly loader = new THREE.TextureLoader();
-  private readonly textures = new Map<string, THREE.Texture>();
-  private readonly pending = new Map<string, Set<() => void>>();
-  private disposed = false;
-
-  constructor() {
-    this.fallback = new THREE.DataTexture(
-      new Uint8Array([
-        90, 90, 90, 255, 180, 180, 180, 255, 180, 180, 180, 255, 90, 90, 90,
-        255,
-      ]),
-      2,
-      2
-    );
-    this.fallback.colorSpace = THREE.SRGBColorSpace;
-    this.fallback.needsUpdate = true;
-  }
-
-  get(url: string, onChanged: () => void): THREE.Texture {
-    const cached = this.textures.get(url);
-    if (cached) return cached;
-    let subscribers = this.pending.get(url);
-    if (!subscribers) {
-      const newSubscribers = new Set<() => void>();
-      subscribers = newSubscribers;
-      this.pending.set(url, newSubscribers);
-      this.loader.load(
-        url,
-        (texture) => {
-          this.pending.delete(url);
-          if (this.disposed) {
-            texture.dispose();
-            return;
-          }
-          texture.colorSpace = THREE.SRGBColorSpace;
-          this.textures.set(url, texture);
-          for (const subscriber of newSubscribers) subscriber();
-        },
-        undefined,
-        () => {
-          this.pending.delete(url);
-          if (!this.disposed) this.textures.set(url, this.fallback);
-        }
-      );
-    }
-    subscribers.add(onChanged);
-    return this.fallback;
-  }
-
-  dispose(): void {
-    this.disposed = true;
-    for (const texture of new Set(this.textures.values())) {
-      if (texture !== this.fallback) texture.dispose();
-    }
-    this.textures.clear();
-    this.pending.clear();
-    this.fallback.dispose();
   }
 }
 

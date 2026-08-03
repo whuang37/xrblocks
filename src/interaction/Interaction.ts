@@ -110,6 +110,7 @@ export class Interaction {
     this.scene = dependencies.scene;
     this.manipulation = new ManipulationManager(
       (script, event) => this.callbacks.invokeManipulation(script, event),
+      (controller) => this.suppressedUntilRelease.add(controller),
       dependencies.camera,
       dependencies.timer
     );
@@ -191,7 +192,7 @@ export class Interaction {
         this.cancelFailedManipulations(error);
       }
     }
-    for (const [controller, capture] of [...this.captures]) {
+    for (const [controller, capture] of this.captures) {
       if (
         (capture.kind === 'auxiliary' ||
           (capture.kind === 'target' && capture.action === 'manipulate')) &&
@@ -329,15 +330,20 @@ export class Interaction {
     object: THREE.Object3D,
     controller?: Controller
   ): THREE.Intersection | null {
-    const values = controller
-      ? [this.resolvedRays.get(controller)]
-      : this.sortedResolvedRays();
-    for (const resolved of values) {
-      if (resolved && objectIsDescendantOf(resolved.surface, object)) {
-        return clonePublicIntersection(resolved.intersection, resolved.surface);
+    let match: ResolvedRay | undefined;
+    let matchIndex = Number.POSITIVE_INFINITY;
+    for (const [source, resolved] of this.resolvedRays) {
+      if (controller && source !== controller) continue;
+      if (!objectIsDescendantOf(resolved.surface, object)) continue;
+      const index = controllerIndex(source);
+      if (index < matchIndex) {
+        match = resolved;
+        matchIndex = index;
       }
     }
-    return null;
+    return match
+      ? clonePublicIntersection(match.intersection, match.surface)
+      : null;
   }
 
   /** Writes up to two internal cursor points in controller order. */
@@ -492,6 +498,7 @@ export class Interaction {
     const claimedScale = this.runManipulationTransition(() =>
       this.manipulation.tryClaimScale(snapshot, resolved)
     );
+    if (this.suppressedUntilRelease.has(controller)) return;
     if (claimedScale) {
       const capture = {kind: 'auxiliary'} as const;
       this.installCapture(controller, capture);
@@ -1096,23 +1103,23 @@ export class Interaction {
   }
 
   private hasDeliberateInput(frame: InteractionFrameInput): boolean {
-    return (
+    if (
       frame.raySources.some(
         (input) => input.sourceType !== 'gaze' && input.selected
       ) ||
-      this.touches.size > 0 ||
-      [...this.captures.values()].some(
-        (capture) =>
-          capture.kind === 'auxiliary' ||
-          (capture.kind === 'target' && capture.action === 'manipulate')
-      )
-    );
-  }
-
-  private sortedResolvedRays(): ResolvedRay[] {
-    return [...this.resolvedRays.entries()]
-      .sort(([a], [b]) => controllerIndex(a) - controllerIndex(b))
-      .map(([, resolved]) => resolved);
+      this.touches.size > 0
+    ) {
+      return true;
+    }
+    for (const capture of this.captures.values()) {
+      if (
+        capture.kind === 'auxiliary' ||
+        (capture.kind === 'target' && capture.action === 'manipulate')
+      ) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private installCapture(controller: Controller, capture: ActiveCapture): void {

@@ -15,7 +15,6 @@ import {UICard} from '../ui/components/UICard';
 import {UISlider} from '../ui/components/UISlider';
 import {Interaction} from './Interaction';
 import type {InteractionFrameInput, RaySourceInput} from './InteractionTypes';
-import {ManipulationManager} from './manipulation/ManipulationManager';
 
 async function activateScripts(
   manager: ScriptsManager,
@@ -62,8 +61,7 @@ describe('Interaction public behavior', () => {
 
   beforeEach(() => {
     callbacks = new ScriptsManager(async () => {});
-    const manager = new ManipulationManager(callbacks.invokeManipulation);
-    interaction = new Interaction({callbacks, manipulation: manager});
+    interaction = new Interaction({callbacks});
   });
 
   it('keeps one semantic capture inside a manipulable card and cancels invalid releases', async () => {

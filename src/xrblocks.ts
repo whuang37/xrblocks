@@ -65,6 +65,7 @@ export type {
   ReticleMode,
   XBObjectOptions,
 } from './interaction/InteractionTypes';
+export {Interaction} from './interaction/Interaction';
 export * from './interaction/manipulation/ManipulationTypes';
 export * from './lighting/Lighting';
 export * from './lighting/LightingOptions';
@@ -122,7 +123,7 @@ export * from './placement/FaceCamera';
 export * from './placement/FollowHead';
 export * from './placement/FollowObject';
 export * from './placement/Orbit';
-export * from './placement/TransformScript';
+export {TransformScript} from './placement/TransformScript';
 export * from './placement/VisibilityTransition';
 export * from './ui/index';
 export * from './utils/BVHRaycast';

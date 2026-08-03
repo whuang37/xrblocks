@@ -18,15 +18,7 @@ import {
 } from '../../shared/SemanticTypes';
 
 type SemanticObject = THREE.Object3D & {
-  isView?: boolean;
-  isPanel?: boolean;
-  isXRScript?: boolean;
-  isUI?: boolean;
-  selectable?: boolean;
   disabled?: boolean;
-  baseSizeX?: number;
-  baseSizeY?: number;
-  behaviors?: unknown[];
   text?: string;
   icon?: string;
   label?: string;
@@ -150,7 +142,6 @@ function describeSemanticObject(
 } | null {
   const semanticObject = object as SemanticObject;
   const override = semanticObject.userData.semantic;
-  const className = object.constructor.name;
 
   if (override?.role || override?.name) {
     return {
@@ -184,7 +175,7 @@ function describeSemanticObject(
   return {
     role,
     name: inferName(object),
-    source: inferSource(object, className),
+    source: inferSource(object),
     text: inferText(object),
     traits: inferTraits(object),
     disabled: inferDisabled(object),
@@ -208,7 +199,6 @@ function hasSemanticAncestor(object: THREE.Object3D): boolean {
 
 function inferRole(object: THREE.Object3D): string {
   const semanticObject = object as SemanticObject;
-  const className = object.constructor.name;
   if (semanticObject.userData.semantic?.role) {
     return semanticObject.userData.semantic.role;
   }
@@ -220,24 +210,6 @@ function inferRole(object: THREE.Object3D): string {
     if (kind === 'image' || kind === 'icon') return 'image';
     return 'group';
   }
-  if (className === 'SpatialPanel' || className === 'Panel') return 'group';
-  if (className === 'TextButton' || className === 'IconButton') {
-    return 'button';
-  }
-  if (
-    className === 'TextView' ||
-    className === 'LabelView' ||
-    className === 'ScrollingTroikaTextView' ||
-    (semanticObject.isUI && typeof semanticObject.text === 'string')
-  ) {
-    return 'text';
-  }
-  if (className === 'ImageView') return 'image';
-  if (className === 'IconView' || className === 'MaterialSymbolsView') {
-    return 'image';
-  }
-  if (semanticObject.isPanel || semanticObject.isUI) return 'group';
-  if (semanticObject.isView) return 'group';
   if (object instanceof THREE.Mesh) return 'object';
   if (object instanceof THREE.Group && hasRenderableDescendant(object)) {
     return object.name ? 'group' : '';
@@ -264,24 +236,11 @@ function inferText(object: THREE.Object3D): string | undefined {
   return semanticObject.userData.semantic?.text ?? semanticObject.text;
 }
 
-function inferSource(
-  object: THREE.Object3D,
-  className = object.constructor.name
-): SemanticSource {
+function inferSource(object: THREE.Object3D): SemanticSource {
   if ((object as SemanticObject).userData.semantic?.source) {
     return (object as SemanticObject).userData.semantic!.source!;
   }
-  if (
-    (object as SemanticObject).isUI ||
-    className.startsWith('UI') ||
-    className === 'UICard' ||
-    className === 'AdditiveUICard'
-  ) {
-    return 'xrblocks';
-  }
-  if ((object as SemanticObject).isView || (object as SemanticObject).isPanel) {
-    return 'xrblocks';
-  }
+  if (isUIElement(object)) return 'xrblocks';
   return 'three';
 }
 
@@ -290,7 +249,6 @@ function inferTraits(object: THREE.Object3D): string[] | undefined {
   const traits = new Set<string>(
     semanticObject.userData.semantic?.traits ?? []
   );
-  if (semanticObject.selectable) traits.add('selectable');
   if (semanticObject.xb?.manipulation) traits.add('manipulable');
   if (
     isUIElement(object) &&
@@ -322,14 +280,7 @@ function isLayoutOnlyContainer(object: THREE.Object3D, role: string): boolean {
   if (role !== 'group') {
     return false;
   }
-  return (
-    !object.name &&
-    (className === 'Row' ||
-      className === 'Col' ||
-      className === 'Grid' ||
-      className === 'Object3D' ||
-      className === 'Group')
-  );
+  return !object.name && (className === 'Object3D' || className === 'Group');
 }
 
 function createSemanticNode(

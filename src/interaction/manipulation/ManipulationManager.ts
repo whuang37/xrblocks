@@ -76,13 +76,13 @@ interface ActivePhase {
 export class ManipulationManager {
   private readonly sessions = new Map<THREE.Object3D, Session>();
   private readonly roles = new Map<Controller, Session>();
-  private readonly suppressedUntilRelease = new Set<Controller>();
   private readonly translateDriver: TranslateDriver;
   private readonly rotateDriver = new RotateDriver();
   private readonly scaleDriver = new ScaleDriver();
 
   constructor(
     private readonly dispatch: DispatchManipulationEvent,
+    private readonly suppressSource: (source: Controller) => void,
     camera?: THREE.Camera,
     timer?: THREE.Timer
   ) {
@@ -160,8 +160,7 @@ export class ManipulationManager {
     if (
       snapshot.sourceType === 'gaze' ||
       capture.source !== snapshot.controller ||
-      this.roles.has(snapshot.controller) ||
-      this.suppressedUntilRelease.has(snapshot.controller)
+      this.roles.has(snapshot.controller)
     ) {
       return false;
     }
@@ -223,16 +222,14 @@ export class ManipulationManager {
     snapshot: InteractionSourceState,
     resolved?: ResolvedRay
   ): boolean {
-    if (
-      snapshot.sourceType === 'gaze' ||
-      this.roles.has(snapshot.controller) ||
-      this.suppressedUntilRelease.has(snapshot.controller)
-    ) {
+    if (snapshot.sourceType === 'gaze' || this.roles.has(snapshot.controller)) {
       return false;
     }
-    const eligible = [...this.sessions.values()].filter((session) => {
-      if (!session.config.scale || session.auxiliary) return false;
+    let eligible: Session | undefined;
+    for (const session of this.sessions.values()) {
+      if (!session.config.scale || session.auxiliary) continue;
       const edge = getCardEdge(session.owner);
+      let matches = true;
       if (edge?.scale) {
         const primaryCorner = session.cardEdge?.primaryCorner;
         const corner =
@@ -240,17 +237,18 @@ export class ManipulationManager {
           resolved.manipulation.handle
             ? getCardCorner(resolved.intersection.uv)
             : undefined;
-        return (
+        matches =
           primaryCorner !== undefined &&
           corner !== undefined &&
-          oppositeCorner(primaryCorner) === corner
-        );
+          oppositeCorner(primaryCorner) === corner;
       }
-      return true;
-    });
-    if (eligible.length !== 1) return false;
+      if (!matches) continue;
+      if (eligible) return false;
+      eligible = session;
+    }
+    if (!eligible) return false;
 
-    const session = eligible[0];
+    const session = eligible;
     const auxiliary = new InteractionSourceState(snapshot.controller).copyFrom(
       snapshot
     );
@@ -286,7 +284,6 @@ export class ManipulationManager {
       snapshot.sourceType === 'gaze' ||
       capture.source !== snapshot.controller ||
       this.roles.has(snapshot.controller) ||
-      this.suppressedUntilRelease.has(snapshot.controller) ||
       !isPositiveFinite(requestedFactor)
     ) {
       return false;
@@ -358,7 +355,7 @@ export class ManipulationManager {
       }
     }
 
-    for (const session of [...this.sessions.values()]) {
+    for (const session of this.sessions.values()) {
       if (!this.validate(session)) continue;
       this.updateSession(session);
     }
@@ -366,7 +363,6 @@ export class ManipulationManager {
 
   /** Ends the role held by a source. Returns true when the source was claimed. */
   end(source: Controller, finalSnapshot?: InteractionSourceState): boolean {
-    if (this.suppressedUntilRelease.delete(source)) return false;
     const session = this.roles.get(source);
     if (!session) return false;
     if (finalSnapshot) {
@@ -391,7 +387,6 @@ export class ManipulationManager {
   }
 
   cancelSource(source: Controller): boolean {
-    if (this.suppressedUntilRelease.delete(source)) return true;
     const session = this.roles.get(source);
     if (!session) return false;
     if (session.primary.snapshot.controller === source) {
@@ -471,7 +466,7 @@ export class ManipulationManager {
         this.roles.delete(session.auxiliary.controller);
       }
       if (suppressAuxiliary && session.auxiliary.selected) {
-        this.suppressedUntilRelease.add(session.auxiliary.controller);
+        this.suppressSource(session.auxiliary.controller);
       }
     }
   }
@@ -614,18 +609,22 @@ export class ManipulationManager {
 
 function getCardEdge(
   owner: THREE.Object3D
-): {scale: boolean; translateFromSurface: boolean} | undefined {
+):
+  | {readonly scale?: boolean; readonly translateFromSurface?: boolean}
+  | undefined {
   const candidate = owner as THREE.Object3D & {
-    readonly isUI?: boolean;
     readonly edge?:
       | false
       | {readonly scale?: boolean; readonly translateFromSurface?: boolean};
   };
-  if (!candidate.isUI || !candidate.edge) return undefined;
-  return {
-    scale: candidate.edge.scale ?? false,
-    translateFromSurface: candidate.edge.translateFromSurface ?? false,
-  };
+  if (
+    !isUIElement(owner) ||
+    getUIElementKind(owner) !== 'card' ||
+    !candidate.edge
+  ) {
+    return undefined;
+  }
+  return candidate.edge;
 }
 
 function oppositeCorner(corner: CardCorner): CardCorner {

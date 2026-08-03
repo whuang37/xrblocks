@@ -78,12 +78,7 @@ export interface KeyEvent {
  *
  * It manages user, objects, and interaction between user and objects.
  * See `/templates/0_basic/` for an example to start with.
- *
- *
- * If the class does not extends View, it can still bind the above three
- * function, where the engine ignores whether reticle exists.
- *
- * # Supported (native WebXR) functions to extend:
+ * # Supported interaction functions to extend:
  *
  * onSelectStart(event)
  * onSelectEnd(event)
@@ -179,16 +174,14 @@ export function ScriptMixin<TBase extends Constructor<THREE.Object3D>>(
 
     // Object-specific controller callbacks.
     /**
-     * Called when the controller starts selecting this object the script
-     * represents, e.g. View, ModelView.
+     * Called when a source starts selecting the object this Script represents.
      * @param _event - `event.target` is the logical object and
      * `event.source.controller` identifies the controller.
      * @returns Whether the event was handled. If true, the event will not bubble up.
      */
     onObjectSelectStart(_event: SelectEvent): boolean | void {}
     /**
-     * Called when the controller stops selecting this object the script
-     * represents, e.g. View, ModelView.
+     * Called when a source stops selecting the object this Script represents.
      * @param _event - The completed state and end reason.
      * @returns Whether the event was handled. If true, the event will not bubble up.
      */
@@ -207,20 +200,20 @@ export function ScriptMixin<TBase extends Constructor<THREE.Object3D>>(
      */
     onObjectManipulate(_event: ManipulationEvent): boolean | void {}
     /**
-     * Called when the controller starts hovering over this object with reticle.
-     * @param _controller - An XR controller.
+     * Called when a source starts hovering over this object.
+     * @param _event - The hover source, target, surface, and intersection.
      * @returns Whether the event was handled. If true, the event will not bubble up.
      */
     onHoverEnter(_event: HoverEvent): boolean | void {}
     /**
-     * Called when the controller hovers over this object with reticle.
-     * @param _controller - An XR controller.
+     * Called when a source stops hovering over this object.
+     * @param _event - The hover source, target, surface, and intersection.
      * @returns Whether the event was handled. If true, the event will not bubble up.
      */
     onHoverExit(_event: HoverEvent): boolean | void {}
     /**
-     * Called when the controller hovers over this object with reticle.
-     * @param _controller - An XR controller.
+     * Called while a source hovers over this object.
+     * @param _event - The hover source, target, surface, and intersection.
      * @returns Whether the event was handled. If true, the event will not bubble up.
      */
     onHovering(_event: HoverEvent): boolean | void {}

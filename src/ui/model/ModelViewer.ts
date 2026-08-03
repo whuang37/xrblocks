@@ -78,7 +78,7 @@ class RotationHitSurface extends THREE.Mesh<
 
 /** Loads and presents one interactive glTF or Gaussian Splat model. */
 export class ModelViewer extends Script {
-  static dependencies = {
+  private static readonly dependencies = {
     depth: Depth,
     interaction: Interaction,
     scene: THREE.Scene,

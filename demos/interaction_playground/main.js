@@ -356,7 +356,7 @@ class InstrumentedCard extends xb.UICard {
 }
 
 const imageSource = `data:image/svg+xml,${encodeURIComponent(`
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">
     <defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="#5eead4"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs>
     <rect width="100" height="100" rx="24" fill="url(#g)"/>
     <path d="M25 64 42 47l12 12 11-11 16 16" fill="none" stroke="white" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>

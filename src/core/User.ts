@@ -16,7 +16,7 @@ import {Script} from './Script';
  * To support multi-user social XR planned for future iterations.
  */
 export class User extends Script {
-  static dependencies = {
+  private static readonly dependencies = {
     input: Input,
     interaction: Interaction,
   };

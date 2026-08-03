@@ -38,7 +38,7 @@ export type SceneContextDetectionResult = {
 };
 
 export class SceneDetector extends Script {
-  static dependencies = {
+  private static readonly dependencies = {
     options: ContextOptions,
     scene: THREE.Scene,
     camera: THREE.Camera,

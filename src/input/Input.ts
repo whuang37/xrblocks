@@ -45,7 +45,6 @@ export class Input {
   hands: THREE.XRHandSpace[] = [];
   /** Completed head gestures, when enabled before initialization. */
   headGestures?: HeadGestureRecognition;
-  initialized = false;
   pivotsEnabled = false;
   gazeController = new GazeController();
   mouseController = new MouseController();
@@ -423,10 +422,7 @@ export class Input {
       for (const controller of this.controllers) {
         if (controller.userData.connected !== true) continue;
         controller.updatePose?.();
-        this.pinchFilter.updateController(
-          controller,
-          this.dispatchControllerEvent
-        );
+        this.pinchFilter.updateController(controller);
       }
     }
     this.updateDirectTouchInputs();

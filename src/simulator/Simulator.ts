@@ -36,7 +36,7 @@ import {SparkRendererHolder} from '../utils/SparkRendererHolder';
 import {World} from '../world/World';
 
 export class Simulator extends Script {
-  static dependencies = {
+  private static readonly dependencies = {
     simulatorOptions: SimulatorOptions,
     input: Input,
     interaction: Interaction,

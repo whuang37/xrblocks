@@ -1192,7 +1192,6 @@ options.enableDepth();
 options.depth.depthMesh.updateVertexNormals = true;
 options.depth.depthMesh.updateFullResolutionGeometry = true;
 options.reticles.enabled = true;
-options.reticles.projectOnDepthMesh = true;
 options.reticles.maxDistance = 4;
 options.reticles.defaultRenderDistance = 1.5;
 options.interaction.raycastMode = raycastMode;

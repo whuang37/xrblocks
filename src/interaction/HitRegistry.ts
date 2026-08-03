@@ -7,8 +7,9 @@ export interface RegisteredHitSurface {
   readonly logical: THREE.Object3D;
 }
 
-/** Maps private physical hit nodes to public logical objects. */
+/** Owns physical hit registration, collection, and logical mapping. */
 export class HitRegistry {
+  private readonly raycaster = new THREE.Raycaster();
   private readonly mappings = new WeakMap<
     THREE.Object3D,
     RegisteredHitSurface
@@ -18,6 +19,11 @@ export class HitRegistry {
     THREE.Object3D,
     RegisteredHitSurface
   >();
+  private readonly detachedRaycastSurfaces = new Set<THREE.Object3D>();
+
+  constructor() {
+    this.raycaster.layers.enable(UI_OVERLAY_LAYER);
+  }
 
   register(physical: THREE.Object3D, logical: THREE.Object3D): () => void {
     const entry = {physical, logical};
@@ -63,6 +69,29 @@ export class HitRegistry {
     return {physical: object, logical: object};
   }
 
+  /** Collects ordered raw hits from the public scene and detached surfaces. */
+  raycast(
+    scene: THREE.Scene,
+    ray: THREE.Ray,
+    intersections: THREE.Intersection[]
+  ): readonly THREE.Intersection[] {
+    intersections.length = 0;
+    this.raycaster.ray.copy(ray);
+    this.raycaster.intersectObject(scene, true, intersections);
+
+    this.detachedRaycastSurfaces.clear();
+    for (const entry of this.registered) {
+      if (this.hasAncestor(entry.physical, scene)) continue;
+      this.detachedRaycastSurfaces.add(entry.physical);
+    }
+    for (const physical of this.detachedRaycastSurfaces) {
+      physical.updateWorldMatrix(true, true);
+      this.raycaster.intersectObject(physical, true, intersections);
+    }
+    intersections.sort(compareRayIntersections);
+    return intersections;
+  }
+
   intersectionsAt(
     point: THREE.Vector3,
     padding = 0,
@@ -89,6 +118,38 @@ export class HitRegistry {
     intersections.sort((a, b) => compareTouchIntersections(a, b, preferred));
     return intersections;
   }
+
+  private hasAncestor(object: THREE.Object3D, scene: THREE.Scene): boolean {
+    let current = object.parent;
+    while (current) {
+      if (current === scene) return true;
+      const mapping = this.mappings.get(current);
+      if (mapping && this.registered.has(mapping)) return true;
+      current = current.parent;
+    }
+    return false;
+  }
+}
+
+function compareRayIntersections(
+  a: THREE.Intersection,
+  b: THREE.Intersection
+): number {
+  const aOverlay = a.object.layers.isEnabled(UI_OVERLAY_LAYER);
+  const bOverlay = b.object.layers.isEnabled(UI_OVERLAY_LAYER);
+  if (aOverlay !== bOverlay) return aOverlay ? -1 : 1;
+  if (aOverlay) {
+    const order =
+      (getInteractionHitOrder(b.object) ?? b.object.renderOrder) -
+      (getInteractionHitOrder(a.object) ?? a.object.renderOrder);
+    if (order !== 0) return order;
+  }
+  const distance = a.distance - b.distance;
+  if (Math.abs(distance) > 0.00001) return distance;
+  if (a.object.renderOrder !== b.object.renderOrder) {
+    return b.object.renderOrder - a.object.renderOrder;
+  }
+  return b.object.id - a.object.id;
 }
 
 function compareTouchIntersections(

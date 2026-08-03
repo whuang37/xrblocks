@@ -17,8 +17,11 @@ import {Interaction} from './Interaction';
 import type {InteractionFrameInput, RaySourceInput} from './InteractionTypes';
 import {ManipulationManager} from './manipulation/ManipulationManager';
 
-function activateScripts(manager: ScriptsManager, ...scripts: Script[]): void {
-  manager.scripts = new Set(scripts);
+async function activateScripts(
+  manager: ScriptsManager,
+  ...scripts: Script[]
+): Promise<void> {
+  await Promise.all(scripts.map((script) => manager.initScript(script)));
 }
 
 class RecordingButton extends UIButton {
@@ -63,7 +66,7 @@ describe('Interaction public behavior', () => {
     interaction = new Interaction({callbacks, manipulation: manager});
   });
 
-  it('keeps one semantic capture inside a manipulable card and cancels invalid releases', () => {
+  it('keeps one semantic capture inside a manipulable card and cancels invalid releases', async () => {
     const clicked = vi.fn();
     const card = new UICard({
       size: {width: 0.5, height: 0.3},
@@ -72,7 +75,7 @@ describe('Interaction public behavior', () => {
     const button = new RecordingButton({label: 'Save', onClick: clicked});
     card.add(button);
     new THREE.Scene().add(card);
-    activateScripts(callbacks, card, button);
+    await activateScripts(callbacks, card, button);
     const primary = controller(0);
     const unrelated = controller(1);
 
@@ -115,7 +118,41 @@ describe('Interaction public behavior', () => {
     expect(button.ends.at(-1)?.completed).toBe(true);
   });
 
-  it('dispatches touch first, honors prevention, suspends the ray, and activates once on contact', () => {
+  it('owns raycast policy and includes registered detached surfaces', () => {
+    const scene = new THREE.Scene();
+    const publicSurface = new THREE.Mesh(new THREE.PlaneGeometry(1, 1));
+    publicSurface.position.z = -2;
+    scene.add(publicSurface);
+    scene.updateMatrixWorld(true);
+
+    interaction = new Interaction({
+      callbacks,
+      scene,
+      raycastMode: 'select',
+    });
+    const logical = new RecordingButton({label: 'Detached'});
+    const physical = new THREE.Mesh(new THREE.PlaneGeometry(1, 1));
+    physical.position.z = -1;
+    interaction.registerHitSurface(physical, logical);
+    const source = controller(0);
+
+    updateRays(interaction, [ray(source, false)]);
+    expect(interaction.getResolvedRay(source)).toBeUndefined();
+
+    updateRays(interaction, [ray(source, true)]);
+    expect(interaction.getResolvedRay(source)?.surface).toBe(logical);
+
+    updateRays(interaction, [ray(source, false)]);
+    expect(interaction.getResolvedRay(source)?.surface).toBe(logical);
+
+    updateRays(interaction, [ray(source, false)]);
+    expect(interaction.getResolvedRay(source)).toBeUndefined();
+
+    updateRays(interaction, [ray(source, false, undefined, 'gaze')]);
+    expect(interaction.getResolvedRay(source)?.surface).toBe(logical);
+  });
+
+  it('dispatches touch first, honors prevention, suspends the ray, and activates once on contact', async () => {
     const clicked = vi.fn();
     const button = new RecordingButton({label: 'Touch', onClick: clicked});
     button.onObjectTouchStart = (event) => {
@@ -125,7 +162,7 @@ describe('Interaction public behavior', () => {
     };
     const physical = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
     const unregister = interaction.registerHitSurface(physical, button);
-    activateScripts(callbacks, button);
+    await activateScripts(callbacks, button);
     const hand = controller(0);
     const touch = {
       controller: hand,
@@ -161,7 +198,7 @@ describe('Interaction public behavior', () => {
     });
     const acceptedPhysical = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
     interaction.registerHitSurface(acceptedPhysical, accepted);
-    activateScripts(callbacks, button, accepted);
+    await activateScripts(callbacks, button, accepted);
     interaction.update({
       raySources: [ray(hand, false)],
       directTouches: [touch],
@@ -179,11 +216,11 @@ describe('Interaction public behavior', () => {
     expect(accepted.ends.at(-1)?.source.type).toBe('direct-touch');
   });
 
-  it('jumps and streams a slider, commits once, and restores on cancellation', () => {
+  it('jumps and streams a slider, commits once, and restores on cancellation', async () => {
     const onInput = vi.fn();
     const onChange = vi.fn();
     const slider = new UISlider({ariaLabel: 'Volume', onInput, onChange});
-    activateScripts(callbacks, slider);
+    await activateScripts(callbacks, slider);
     const source = controller(0);
     const second = controller(1);
 
@@ -211,7 +248,7 @@ describe('Interaction public behavior', () => {
     expect(onChange).toHaveBeenCalledTimes(1);
   });
 
-  it('limits gaze to buttons and makes long-select suppress normal click', () => {
+  it('limits gaze to buttons and makes long-select suppress normal click', async () => {
     const gazeClick = vi.fn();
     const gazeButton = new RecordingButton({
       label: 'Gaze',
@@ -229,7 +266,7 @@ describe('Interaction public behavior', () => {
       label: 'Hold',
       onClick: longClick,
     });
-    activateScripts(callbacks, gazeButton, longButton);
+    await activateScripts(callbacks, gazeButton, longButton);
     const pointer = controller(0);
     updateRays(interaction, [ray(pointer, false, hit(longButton))]);
     updateRays(interaction, [ray(pointer, true, hit(longButton))], 0);
@@ -240,7 +277,7 @@ describe('Interaction public behavior', () => {
     expect(longClick).not.toHaveBeenCalled();
   });
 
-  it('translates from an edge and scales with two selected sources', () => {
+  it('translates from an edge and scales with two selected sources', async () => {
     const scene = new THREE.Scene();
     const card = new UICard({
       size: {width: 0.5, height: 0.3},
@@ -253,7 +290,7 @@ describe('Interaction public behavior', () => {
     edge.xb = {manipulationHandle: {action: 'translate'}};
     interaction.registerHitSurface(edge, card);
     interaction.registerHitSurface(surface, card);
-    activateScripts(callbacks, card);
+    await activateScripts(callbacks, card);
     const first = controller(0);
     const second = controller(1);
 
@@ -325,7 +362,7 @@ function ray(
     sourceType,
     selected,
     ray: new THREE.Ray(position, new THREE.Vector3(0, 0, -1)),
-    intersections: intersection ? [intersection] : [],
+    ...(intersection ? {intersections: [intersection]} : {}),
     position,
     orientation: new THREE.Quaternion(),
   };

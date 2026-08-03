@@ -317,7 +317,10 @@ function createNode(
   return node;
 }
 
-/** Prevents UIKit's false return from stopping XR Blocks scene traversal. */
+/**
+ * UIKit returns false after raycasting a panel, which tells Three.js not to
+ * visit its children. Discard that return so nested logical UI remains hittable.
+ */
 function allowChildRaycasts(node: THREE.Object3D): void {
   const raycast = node.raycast.bind(node);
   node.raycast = (raycaster, intersections) => {

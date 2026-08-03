@@ -11,7 +11,7 @@ import {
   type SelectionEndReason,
   type Script,
 } from '../core/Script.js';
-import {ReticleOptions} from '../core/Options.js';
+import {ReticleOptions, type RaycastMode} from '../core/Options.js';
 import type {Controller} from '../input/Controller.js';
 import {objectIsDescendantOf} from '../utils/SceneGraphUtils.js';
 import {DirectTouch, type DirectTouchContact} from './DirectTouch.js';
@@ -79,12 +79,17 @@ export class Interaction {
   private readonly manipulation;
   private readonly reticle;
   private readonly reticleOptions;
+  private readonly scene?: THREE.Scene;
   private readonly registry = new HitRegistry();
   private readonly resolver;
   private readonly directTouch;
   private longSelectDuration;
   private readonly gazeDwell = new GazeDwell();
   private readonly snapshots = new Map<Controller, InteractionSourceSnapshot>();
+  private readonly rawIntersections = new Map<
+    Controller,
+    THREE.Intersection[]
+  >();
   private readonly resolvedRays = new Map<Controller, ResolvedRay>();
   private readonly hoverPaths = new Map<
     Controller,
@@ -95,10 +100,12 @@ export class Interaction {
   private readonly touches = new Map<Controller, TouchState>();
   private readonly suppressedUntilRelease = new Set<Controller>();
   private readonly scaleIntents = new Map<Controller, number>();
+  private raycastMode: RaycastMode;
   private frameSources = new Set<Controller>();
 
   constructor(dependencies: InteractionDependencies) {
     this.callbacks = dependencies.callbacks;
+    this.scene = dependencies.scene;
     this.manipulation = new ManipulationManager(
       (script, event) => this.callbacks.invokeManipulation(script, event),
       dependencies.camera,
@@ -109,6 +116,7 @@ export class Interaction {
       dependencies.reticle ?? new ReticlePresenter(this.reticleOptions);
     this.longSelectDuration =
       dependencies.longSelectDuration ?? DEFAULT_LONG_SELECT_DURATION;
+    this.raycastMode = dependencies.raycastMode ?? 'continuous';
     this.resolver = new HitResolver(
       this.callbacks,
       this.manipulation,
@@ -124,6 +132,10 @@ export class Interaction {
       );
     }
     this.longSelectDuration = seconds;
+  }
+
+  setRaycastMode(mode: RaycastMode): void {
+    this.raycastMode = mode;
   }
 
   /** Replaces all sampled physical interaction state for one engine frame. */
@@ -207,6 +219,7 @@ export class Interaction {
       this.removeSource(controller, 'source-lost');
     }
     this.directTouch.clear();
+    this.rawIntersections.clear();
     this.frameSources.clear();
     this.exclusiveControls.clear();
     this.scaleIntents.clear();
@@ -261,6 +274,7 @@ export class Interaction {
     this.clearResolvedRay(controller);
     this.reticle.clear(controller);
     this.snapshots.delete(controller);
+    this.rawIntersections.delete(controller);
     this.hoverPaths.delete(controller);
     this.gazeDwell.remove(controller);
     this.suppressedUntilRelease.delete(controller);
@@ -389,10 +403,9 @@ export class Interaction {
       return snapshot;
     }
 
-    const resolved = this.resolver.resolve(
-      input.intersections,
-      input.sourceType
-    );
+    const intersections =
+      input.intersections ?? this.collectIntersections(input, previousSelected);
+    const resolved = this.resolver.resolve(intersections, input.sourceType);
     let gazeCompleted = false;
     if (input.sourceType === 'gaze') {
       const semantic = resolved?.semanticControl
@@ -427,6 +440,28 @@ export class Interaction {
       else this.endSelection(input.controller, 'released');
     }
     return snapshot;
+  }
+
+  private collectIntersections(
+    input: RaySourceInput,
+    previousSelected: boolean
+  ): readonly THREE.Intersection[] {
+    let intersections = this.rawIntersections.get(input.controller);
+    if (!intersections) {
+      intersections = [];
+      this.rawIntersections.set(input.controller, intersections);
+    }
+    const shouldRaycast =
+      this.raycastMode === 'continuous' ||
+      input.sourceType === 'gaze' ||
+      input.selected ||
+      previousSelected ||
+      input.released === true;
+    if (!shouldRaycast || !this.scene) {
+      intersections.length = 0;
+      return intersections;
+    }
+    return this.registry.raycast(this.scene, input.ray, intersections);
   }
 
   private beginSelection(controller: Controller, gaze = false): void {

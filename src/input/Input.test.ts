@@ -8,8 +8,6 @@ import {Controller} from './Controller';
 
 function updateInput(input: Input) {
   input.sampleSources();
-  input.scene?.updateMatrixWorld(true);
-  input.raycast();
 }
 
 describe('Input head gestures', () => {
@@ -20,7 +18,6 @@ describe('Input head gestures', () => {
     const systemsGroup = new XRSystems();
 
     input.init({
-      scene: new THREE.Scene(),
       systemsGroup,
       options,
       renderer: {} as THREE.WebGLRenderer,
@@ -47,12 +44,9 @@ describe('Input direct touch', () => {
     ];
     input.controllersEnabled = false;
 
-    input.scene = new THREE.Scene();
-    input.scene.updateMatrixWorld(true);
-
     updateInput(input);
 
-    const frame = input.getInteractionFrame();
+    const frame = input.getFrame();
 
     expect(frame.directTouches).toHaveLength(1);
     expect(frame.directTouches[0]).toMatchObject({
@@ -63,87 +57,6 @@ describe('Input direct touch', () => {
     });
     expect(frame.directTouches[0].point.toArray()).toEqual([0, 0, 0]);
     expect(frame.directTouches[0]).not.toHaveProperty('intersections');
-  });
-});
-
-describe('Input raycast modes', () => {
-  function setupRayInput(mode: 'continuous' | 'select') {
-    const input = new Input();
-    const controller = new THREE.Object3D() as Controller;
-    controller.userData.connected = true;
-    const target = new THREE.Mesh(
-      new THREE.PlaneGeometry(1, 1),
-      new THREE.MeshBasicMaterial()
-    );
-    target.position.z = -2;
-    const scene = new THREE.Scene();
-    scene.add(target);
-    scene.updateMatrixWorld(true);
-
-    input.options = new Options();
-    input.options.interaction.raycastMode = mode;
-    input.scene = scene;
-    input.controllers = [controller];
-
-    return {input, controller, target};
-  }
-
-  it('applies continuous, select/release, and gaze raycast policy', () => {
-    const continuous = setupRayInput('continuous');
-    updateInput(continuous.input);
-    const continuousIntersections =
-      continuous.input.getInteractionFrame().raySources[0].intersections;
-    expect(continuousIntersections.length).toBeGreaterThan(0);
-    expect(
-      continuousIntersections.every(({object}) => object === continuous.target)
-    ).toBe(true);
-
-    const {input, controller} = setupRayInput('select');
-
-    updateInput(input);
-    expect(
-      input.getInteractionFrame().raySources[0].intersections
-    ).toHaveLength(0);
-
-    controller.userData.selected = true;
-    updateInput(input);
-    expect(
-      input.getInteractionFrame().raySources[0].intersections.length
-    ).toBeGreaterThan(0);
-
-    controller.userData.selected = false;
-    updateInput(input);
-    expect(
-      input.getInteractionFrame().raySources[0].intersections.length
-    ).toBeGreaterThan(0);
-
-    updateInput(input);
-    expect(
-      input.getInteractionFrame().raySources[0].intersections
-    ).toHaveLength(0);
-
-    const gazeInput = new Input();
-    const camera = new THREE.PerspectiveCamera();
-    const target = new THREE.Mesh(
-      new THREE.PlaneGeometry(1, 1),
-      new THREE.MeshBasicMaterial()
-    );
-    target.position.z = -2;
-    const scene = new THREE.Scene();
-    scene.add(target);
-    scene.updateMatrixWorld(true);
-
-    gazeInput.options = new Options();
-    gazeInput.options.interaction.raycastMode = 'select';
-    gazeInput.scene = scene;
-    gazeInput.gazeController.camera = camera;
-    gazeInput.gazeController.userData.connected = true;
-    gazeInput.controllers = [gazeInput.gazeController];
-    updateInput(gazeInput);
-
-    expect(
-      gazeInput.getInteractionFrame().raySources[0].intersections.length
-    ).toBeGreaterThan(0);
   });
 });
 

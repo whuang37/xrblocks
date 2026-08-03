@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-import type {ReticleOptions} from '../core/Options.js';
+import type {RaycastMode, ReticleOptions} from '../core/Options.js';
 import type {
   LongSelectEvent,
   Script,
@@ -52,8 +52,10 @@ export interface RaySourceInput {
   controller: Controller;
   sourceType: RaySourceType;
   ray: THREE.Ray;
-  intersections: readonly THREE.Intersection[];
+  /** Optional raw hits supplied by an isolated Interaction adapter. */
+  intersections?: readonly THREE.Intersection[];
   selected: boolean;
+  released?: boolean;
   position?: THREE.Vector3;
   orientation?: THREE.Quaternion;
 }
@@ -181,6 +183,8 @@ export interface ReticlePresentationObserver {
 
 export interface InteractionDependencies {
   callbacks: InteractionCallbackDispatch;
+  scene?: THREE.Scene;
+  raycastMode?: RaycastMode;
   camera?: THREE.Camera;
   timer?: THREE.Timer;
   reticle?: ReticlePresentationObserver;

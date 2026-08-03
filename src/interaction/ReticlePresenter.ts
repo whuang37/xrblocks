@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import {ReticleOptions} from '../core/Options.js';
 import type {Controller} from '../input/Controller.js';
 import type {
-  InteractionSourceSnapshot,
+  InteractionSourceState,
   ResolvedRay,
   ReticlePresentationObserver,
 } from './InteractionTypes.js';
@@ -13,10 +13,29 @@ const WORLD_NORMAL = new THREE.Vector3();
 
 /** Presents resolved state. It never performs a raycast or changes targeting. */
 export class ReticlePresenter implements ReticlePresentationObserver {
-  constructor(private readonly options = new ReticleOptions()) {}
+  private readonly scene = new THREE.Scene();
+
+  constructor(
+    private readonly options = new ReticleOptions(),
+    private readonly reticles?: THREE.Object3D
+  ) {
+    if (reticles) this.scene.add(reticles);
+  }
+
+  /** Draws reticles after every world and UI pass. */
+  render(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
+    if (!this.reticles || this.reticles.children.length === 0) return;
+    const autoClear = renderer.autoClear;
+    try {
+      renderer.autoClear = false;
+      renderer.render(this.scene, camera);
+    } finally {
+      renderer.autoClear = autoClear;
+    }
+  }
 
   present(
-    snapshot: InteractionSourceSnapshot,
+    snapshot: InteractionSourceState,
     resolved: ResolvedRay | undefined
   ): void {
     const reticle = snapshot.controller.reticle;

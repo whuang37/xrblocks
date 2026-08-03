@@ -12,18 +12,23 @@ export interface UIPresentationState {
   readonly hovered: boolean;
   readonly active: boolean;
   readonly disabled: boolean;
-  readonly cursorPoints: readonly THREE.Vector3[];
+  readonly cursorPointCount: 0 | 1 | 2;
 }
+
+export type UIPresentationStateFor = (
+  element: UIElement,
+  cursorPoints?: readonly [THREE.Vector3, THREE.Vector3]
+) => UIPresentationState;
 
 export interface UIMount {
   readonly object: THREE.Object3D;
   sync(
     theme: UITheme,
     viewport: {width: number; height: number},
-    stateFor: (element: UIElement) => UIPresentationState,
+    stateFor: UIPresentationStateFor,
     rootOrder: number
   ): UIHitMapping[];
-  present(stateFor: (element: UIElement) => UIPresentationState): void;
+  present(stateFor: UIPresentationStateFor): void;
   update(deltaSeconds: number): void;
   dispose(): void;
 }

@@ -30,14 +30,13 @@ import type {
   UIHitMapping,
   UIMount,
   UIPresentationState,
+  UIPresentationStateFor,
 } from './UIBackend';
 
 const ICON_BASE =
   'https://cdn.jsdelivr.net/gh/marella/material-symbols@v0.33.0/svg/400/outlined/';
 
-type PresentationUpdate = (
-  stateFor: (element: UIElement) => UIPresentationState
-) => void;
+type PresentationUpdate = (stateFor: UIPresentationStateFor) => void;
 
 class UIKitMount implements UIMount {
   object: THREE.Object3D = new THREE.Group();
@@ -55,7 +54,7 @@ class UIKitMount implements UIMount {
   sync(
     theme: UITheme,
     viewport: {width: number; height: number},
-    stateFor: (element: UIElement) => UIPresentationState,
+    stateFor: UIPresentationStateFor,
     rootOrder: number
   ): UIHitMapping[] {
     this.rendered?.removeFromParent();
@@ -81,7 +80,7 @@ class UIKitMount implements UIMount {
     return mappings;
   }
 
-  present(stateFor: (element: UIElement) => UIPresentationState): void {
+  present(stateFor: UIPresentationStateFor): void {
     for (const update of this.presentationUpdates) {
       update(stateFor);
     }
@@ -141,7 +140,7 @@ function createNode(
   theme: UITheme,
   mappings: UIHitMapping[],
   viewport: {width: number; height: number},
-  stateFor: (element: UIElement) => UIPresentationState,
+  stateFor: UIPresentationStateFor,
   rootStack: number | undefined,
   sequence: {value: number},
   icons: IconCache,
@@ -149,7 +148,12 @@ function createNode(
   presentationUpdates: PresentationUpdate[]
 ): THREE.Object3D {
   const kind = getUIElementKind(element);
-  const presentation = stateFor(element);
+  const cardEdgeOptions =
+    kind === 'card' ? getUICardEdgeOptions(element as UICard) : undefined;
+  const cursorPoints = cardEdgeOptions
+    ? ([new THREE.Vector3(), new THREE.Vector3()] as const)
+    : undefined;
+  const presentation = stateFor(element, cursorPoints);
   const styleFor = (state: UIPresentationState) =>
     toUIKitStyle(resolveStyle(element, state, theme));
   const style = styleFor(presentation);
@@ -244,12 +248,12 @@ function createNode(
       );
     }
 
-    if (kind === 'card' && getUICardEdgeOptions(element as UICard)) {
+    if (cardEdgeOptions) {
       edge = new UICardEdge();
       panel.add(edge);
       edge.setCursorPoints(
-        presentation.cursorPoints[0],
-        presentation.cursorPoints[1]
+        presentation.cursorPointCount > 0 ? cursorPoints?.[0] : undefined,
+        presentation.cursorPointCount > 1 ? cursorPoints?.[1] : undefined
       );
       mappings.push({
         physical: edge,
@@ -280,7 +284,7 @@ function createNode(
   let presentationKey = stateKey(presentation);
   let pointerEvents = element.xb?.pointerEvents;
   presentationUpdates.push((stateFor) => {
-    const state = stateFor(element);
+    const state = stateFor(element, cursorPoints);
     const nextRevision = getUIRevision(element);
     const nextKey = stateKey(state);
     const nextPointerEvents = element.xb?.pointerEvents;
@@ -295,7 +299,10 @@ function createNode(
       applyPresentation(state);
     }
     node.visible = element.visible;
-    edge?.setCursorPoints(state.cursorPoints[0], state.cursorPoints[1]);
+    edge?.setCursorPoints(
+      state.cursorPointCount > 0 ? cursorPoints?.[0] : undefined,
+      state.cursorPointCount > 1 ? cursorPoints?.[1] : undefined
+    );
   });
 
   node.visible = element.visible;

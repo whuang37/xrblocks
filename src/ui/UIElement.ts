@@ -291,15 +291,7 @@ export abstract class UIElement extends Script {
   }
 
   set style(style: UIStyle) {
-    if (!style || typeof style !== 'object' || Array.isArray(style)) {
-      throw new Error('UI style must be an object.');
-    }
-    for (const [key, value] of Object.entries(style)) {
-      validateStyle(key, value, false);
-    }
-    const entries = Object.entries(style).map(
-      ([key, value]) => [key, cloneStyleValue(value)] as const
-    );
+    const entries = Object.entries(cloneUIStyle(style));
     for (const key of Object.keys(this.styleTarget) as (keyof UIStyle)[]) {
       Reflect.deleteProperty(this.styleProxy, key);
     }
@@ -367,6 +359,19 @@ export function collectUIRoots(target: UIElement[]): void {
 export function invalidateUIElement(element: UIElement): void {
   const state = states.get(element);
   if (state) state.revision++;
+}
+
+/** Validates and detaches a style from caller-owned mutable values. */
+export function cloneUIStyle(style: UIStyle): UIStyle {
+  if (!style || typeof style !== 'object' || Array.isArray(style)) {
+    throw new Error('UI style must be an object.');
+  }
+  for (const [key, value] of Object.entries(style)) {
+    validateStyle(key, value, false);
+  }
+  return Object.fromEntries(
+    Object.entries(style).map(([key, value]) => [key, cloneStyleValue(value)])
+  ) as UIStyle;
 }
 
 function createStyleProxy<T extends UIStyle | UIStateStyle>(

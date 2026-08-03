@@ -124,7 +124,15 @@ class UICardEdgeLayer extends PanelLayer<HandleLayerProperties> {
     ).signal;
     const cursor = index === 0 ? signals.u_cursor_uv : signals.u_cursor_uv_2;
     const visible = index === 0 ? signals.u_show_glow : signals.u_show_glow_2;
-    if (cursor) cursor.value = uv;
+    if (cursor && uv) {
+      if (cursor.value) cursor.value.copy(uv);
+      else cursor.value = uv;
+      setVector2(
+        this.material,
+        index === 0 ? 'u_cursor_uv' : 'u_cursor_uv_2',
+        uv
+      );
+    }
     if (visible) visible.value = uv ? 1 : 0;
   }
 }
@@ -134,6 +142,8 @@ export class UICardEdge extends UICardEdgeLayer {
   name = 'UICardEdge';
   readonly margin: number;
   readonly cornerRadius: number;
+  private readonly cursorLocal = [new THREE.Vector3(), new THREE.Vector3()];
+  private readonly cursorUV = [new THREE.Vector2(), new THREE.Vector2()];
 
   constructor(properties: UICardEdgeProperties = {}) {
     const resolved = {...DEFAULT_EDGE_PROPERTIES, ...properties};
@@ -199,8 +209,12 @@ export class UICardEdge extends UICardEdgeLayer {
       this.setCursor(undefined, index);
       return;
     }
-    const local = this.worldToLocal(point.clone());
-    this.setCursor(new THREE.Vector2(local.x + 0.5, local.y + 0.5), index);
+    const local = this.cursorLocal[index].copy(point);
+    this.worldToLocal(local);
+    this.setCursor(
+      this.cursorUV[index].set(local.x + 0.5, local.y + 0.5),
+      index
+    );
   }
 }
 

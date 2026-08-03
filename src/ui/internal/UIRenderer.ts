@@ -316,21 +316,25 @@ export class UIRenderer {
     }
   }
 
-  private presentationStateFor = (element: UIElement) => ({
+  private presentationStateFor = (
+    element: UIElement,
+    cursorPoints?: readonly [THREE.Vector3, THREE.Vector3]
+  ) => ({
     hovered: this.interaction.isPointingAt(element),
     active: this.interaction.isSelectingAt(element),
     disabled: getSemanticControl(element)?.isDisabled() ?? false,
-    cursorPoints: this.interaction
-      .getIntersectionsAt(element)
-      .map((intersection) => intersection.point),
+    cursorPointCount: cursorPoints
+      ? this.interaction.writeCursorPointsAt(
+          element,
+          cursorPoints[0],
+          cursorPoints[1]
+        )
+      : (0 as const),
   });
 
   private registerHit(mapping: UIHitMapping): () => void {
     mapping.physical.userData.xrblocksHitOrder = mapping.physical.renderOrder;
-    return this.interaction.registerHitSurface(
-      mapping.physical,
-      mapping.logical
-    );
+    return this.interaction.registerHitSurface(mapping.physical, mapping.logical);
   }
 
   private collectConnectedRoots(): readonly UIElement[] {

@@ -340,17 +340,34 @@ export class Interaction {
     return null;
   }
 
-  /** Internal presentation data for multi-source UI feedback. */
-  getIntersectionsAt(object: THREE.Object3D, limit = 2): THREE.Intersection[] {
-    const intersections: THREE.Intersection[] = [];
-    for (const resolved of this.sortedResolvedRays()) {
+  /** Writes up to two internal cursor points in controller order. */
+  writeCursorPointsAt(
+    object: THREE.Object3D,
+    first: THREE.Vector3,
+    second: THREE.Vector3
+  ): 0 | 1 | 2 {
+    let firstIndex = Number.POSITIVE_INFINITY;
+    let secondIndex = Number.POSITIVE_INFINITY;
+    let firstPoint: THREE.Vector3 | undefined;
+    let secondPoint: THREE.Vector3 | undefined;
+    for (const [controller, resolved] of this.resolvedRays) {
       if (!objectIsDescendantOf(resolved.surface, object)) continue;
-      intersections.push(
-        clonePublicIntersection(resolved.intersection, resolved.surface)
-      );
-      if (intersections.length >= limit) break;
+      const index = controllerIndex(controller);
+      if (index < firstIndex) {
+        secondIndex = firstIndex;
+        secondPoint = firstPoint;
+        firstIndex = index;
+        firstPoint = resolved.intersection.point;
+      } else if (index < secondIndex) {
+        secondIndex = index;
+        secondPoint = resolved.intersection.point;
+      }
     }
-    return intersections;
+    if (!firstPoint) return 0;
+    first.copy(firstPoint);
+    if (!secondPoint) return 1;
+    second.copy(secondPoint);
+    return 2;
   }
 
   isManipulating(object: THREE.Object3D): boolean {

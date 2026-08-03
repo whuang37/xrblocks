@@ -1,27 +1,38 @@
 import type {UITheme, UIThemePresetName, UIThemeUpdate} from './UITheme';
-import {createTheme, defaultTheme, uiThemePresets} from './UITheme';
+import {
+  createThemeSnapshot,
+  defaultTheme,
+  uiThemePresets,
+  updateThemeSnapshot,
+} from './UITheme';
 
 /** Lightweight global UI settings. It does not load the rendering backend. */
 export class UI {
-  private readonly themeState = createTheme(defaultTheme);
+  private themeSnapshot = defaultTheme;
+  private themeRevision = 0;
 
   get theme(): UITheme {
-    return this.themeState.proxy;
+    return this.themeSnapshot;
   }
 
-  set theme(value: UIThemePresetName | UIThemeUpdate) {
-    if (typeof value === 'string') {
-      const preset = uiThemePresets[value];
-      if (!preset) throw new Error(`Unknown UI theme preset "${value}".`);
-      this.themeState.replace(preset);
-    } else {
-      this.themeState.assign(value);
-    }
+  set theme(value: UIThemePresetName | UITheme) {
+    const snapshot =
+      typeof value === 'string'
+        ? uiThemePresets[value]
+        : createThemeSnapshot(value);
+    if (!snapshot) throw new Error(`Unknown UI theme preset "${value}".`);
+    this.themeSnapshot = snapshot;
+    this.themeRevision++;
+  }
+
+  setTheme(update: UIThemeUpdate): void {
+    this.themeSnapshot = updateThemeSnapshot(this.themeSnapshot, update);
+    this.themeRevision++;
   }
 
   /** Internal revision used by the private renderer. */
   get revision(): number {
-    return this.themeState.revision();
+    return this.themeRevision;
   }
 }
 

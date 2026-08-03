@@ -38,6 +38,7 @@ interface ActiveContact {
 export class DirectTouch {
   private static readonly EXIT_PADDING = 0.01;
   private readonly active = new Map<Controller, ActiveContact>();
+  private readonly awaitingExit = new Set<Controller>();
   private readonly snapshots = new Map<Controller, InteractionSourceSnapshot>();
 
   constructor(
@@ -50,7 +51,6 @@ export class DirectTouch {
     const present = new Set<Controller>();
     for (const input of inputs) {
       present.add(input.controller);
-      const snapshot = createSnapshot(input);
       const previous = this.active.get(input.controller);
       const resolved = this.resolver.resolve(
         this.registry.intersectionsAt(
@@ -60,6 +60,14 @@ export class DirectTouch {
         ),
         'direct-touch'
       );
+
+      if (this.awaitingExit.has(input.controller)) {
+        if (!resolved) this.awaitingExit.delete(input.controller);
+        continue;
+      }
+      if (!previous && !resolved?.target) continue;
+
+      const snapshot = createSnapshot(input);
 
       if (!previous && resolved?.target) {
         const active = {
@@ -102,6 +110,7 @@ export class DirectTouch {
           selected: input.selected,
         });
       } else if (previous) {
+        if (resolved) this.awaitingExit.add(input.controller);
         contacts.push(
           this.endContact(
             input.controller,
@@ -120,10 +129,14 @@ export class DirectTouch {
         contacts.push(this.endContact(controller, false, 'source-lost'));
       }
     }
+    for (const controller of this.awaitingExit) {
+      if (!present.has(controller)) this.awaitingExit.delete(controller);
+    }
     return contacts;
   }
 
   remove(controller: Controller): DirectTouchContact | undefined {
+    this.awaitingExit.delete(controller);
     return this.active.has(controller)
       ? this.endContact(controller, false, 'source-lost')
       : undefined;
@@ -139,6 +152,7 @@ export class DirectTouch {
 
   clear(): void {
     this.active.clear();
+    this.awaitingExit.clear();
     this.snapshots.clear();
   }
 

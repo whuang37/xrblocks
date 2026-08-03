@@ -25,7 +25,7 @@ export class XREffects {
 
   constructor(
     private renderer: THREE.WebGLRenderer,
-    private scene: THREE.Scene,
+    private renderScene: (camera: THREE.Camera) => void,
     private timer: THREE.Timer
   ) {}
 
@@ -102,7 +102,7 @@ export class XREffects {
         renderer.setRenderTarget(renderTargets[camIndex]);
         renderer.clear();
         renderer.xr.isPresenting = true;
-        renderer.render(this.scene, cam);
+        this.renderScene(cam);
       }
       renderer.setRenderTarget(defaultTarget);
       renderer.clear();
@@ -160,14 +160,14 @@ export class XREffects {
     const deltaTime = this.timer.getDelta();
     if (this.passes.length === 0) {
       renderer.setRenderTarget(defaultTarget);
-      renderer.render(this.scene, camera);
+      this.renderScene(camera);
       renderer.xr.enabled = xrEnabled;
       renderer.xr.isPresenting = xrIsPresenting;
       return;
     }
     renderer.setRenderTarget(this.renderTargets[0]);
     renderer.clear();
-    renderer.render(this.scene, camera);
+    this.renderScene(camera);
     renderer.setRenderTarget(defaultTarget);
     renderer.clear();
     renderer.xr.isPresenting = false;

@@ -115,7 +115,7 @@ describe('Interaction public behavior', () => {
     expect(button.ends.at(-1)?.completed).toBe(true);
   });
 
-  it('dispatches touch first, honors prevention, suspends the ray, and cancels on exit', () => {
+  it('dispatches touch first, honors prevention, suspends the ray, and activates once on contact', () => {
     const clicked = vi.fn();
     const button = new RecordingButton({label: 'Touch', onClick: clicked});
     button.onObjectTouchStart = (event) => {
@@ -166,15 +166,16 @@ describe('Interaction public behavior', () => {
       raySources: [ray(hand, false)],
       directTouches: [touch],
     });
+    expect(acceptedClick).toHaveBeenCalledOnce();
+    expect(accepted.ends.at(-1)).toMatchObject({
+      completed: true,
+      reason: 'released',
+    });
     interaction.update({
       raySources: [ray(hand, false)],
       directTouches: [{...touch, point: new THREE.Vector3(2, 0, 0)}],
     });
-    expect(acceptedClick).not.toHaveBeenCalled();
-    expect(accepted.ends.at(-1)).toMatchObject({
-      completed: false,
-      reason: 'released-outside',
-    });
+    expect(acceptedClick).toHaveBeenCalledOnce();
     expect(accepted.ends.at(-1)?.source.type).toBe('direct-touch');
   });
 

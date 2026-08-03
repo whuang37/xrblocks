@@ -26,7 +26,6 @@ interface MountRecord {
 
 export type UIBackendLoader = () => Promise<UIBackendModule>;
 
-const PRIVATE_NODES = new WeakSet<THREE.Object3D>();
 const WARNED_OVERLAY_TRANSFORMS = new WeakSet<UIElement>();
 const IDENTITY_MATRIX = new THREE.Matrix4();
 const OVERLAY_FORWARD = new THREE.Vector3();
@@ -34,6 +33,7 @@ const STALE_UI_LOAD = new Error('Stale UI backend load.');
 
 /** Owns all private UI rendering state for one Core lifecycle. */
 export class UIRenderer {
+  private readonly privateScene = new THREE.Scene();
   private readonly privateRoot = new THREE.Group();
   private readonly mounts = new Map<UIElement, MountRecord>();
   private backend?: UIBackend;
@@ -42,7 +42,7 @@ export class UIRenderer {
   private readonly failedRoots = new Set<UIElement>();
   private initialized = false;
   private renderer?: THREE.WebGLRenderer;
-  private scene?: THREE.Scene;
+  private publicScene?: THREE.Scene;
   private themeRevision = -1;
   private presentationThemeChanged = false;
   private connectedOverlayCount = 0;
@@ -56,6 +56,7 @@ export class UIRenderer {
   ) {
     this.privateRoot.name = 'XR Blocks private UI';
     markPrivateUI(this.privateRoot);
+    this.privateScene.add(this.privateRoot);
   }
 
   /** Mounts UI roots already connected when Core initializes. */
@@ -64,12 +65,11 @@ export class UIRenderer {
     renderer: THREE.WebGLRenderer
   ): Promise<void> {
     this.generation++;
-    this.scene = scene;
+    this.publicScene = scene;
     this.renderer = renderer;
     this.initialized = true;
     const roots = this.findAndValidateRoots(scene);
     if (roots.length === 0) return;
-    scene.add(this.privateRoot);
     let backend: UIBackend;
     try {
       backend = await this.loadBackend();
@@ -77,10 +77,9 @@ export class UIRenderer {
       if (cause === STALE_UI_LOAD) return;
       this.backend?.dispose();
       this.backend = undefined;
-      this.privateRoot.removeFromParent();
       this.loadPromise = undefined;
       this.initialized = false;
-      this.scene = undefined;
+      this.publicScene = undefined;
       this.renderer = undefined;
       throw new Error(
         'XR Blocks could not load the UI renderer during initialization.',
@@ -92,8 +91,8 @@ export class UIRenderer {
 
   /** Reconciles public UI and updates current hit geometry. */
   reconcile(deltaSeconds: number, camera: THREE.Camera): void {
-    if (!this.initialized || !this.scene) return;
-    const roots = this.findAndValidateRoots(this.scene);
+    if (!this.initialized || !this.publicScene) return;
+    const roots = this.findAndValidateRoots(this.publicScene);
     const connected = new Set(roots);
     for (const root of this.failedRoots) {
       if (!connected.has(root)) this.failedRoots.delete(root);
@@ -118,7 +117,6 @@ export class UIRenderer {
       this.loadPromise = undefined;
     }
 
-    if (!this.privateRoot.parent) this.scene.add(this.privateRoot);
     const backend = this.backend;
     if (!backend && !this.failed) {
       void this.loadBackend().catch((error) => {
@@ -152,9 +150,26 @@ export class UIRenderer {
     this.presentationThemeChanged = false;
   }
 
+  /** Renders connected world UI into the current spatial render target. */
+  renderWorld(camera: THREE.Camera): void {
+    if (this.mounts.size === 0 || !this.renderer) return;
+    this.privateRoot.updateWorldMatrix(true, true);
+
+    const originalLayers = camera.layers.mask;
+    const originalAutoClear = this.renderer.autoClear;
+    try {
+      camera.layers.disable(UI_OVERLAY_LAYER);
+      this.renderer.autoClear = false;
+      this.renderer.render(this.privateScene, camera);
+    } finally {
+      camera.layers.mask = originalLayers;
+      this.renderer.autoClear = originalAutoClear;
+    }
+  }
+
   /** Renders connected overlays through the camera used for the world pass. */
   renderOverlay(camera: THREE.Camera): void {
-    if (this.connectedOverlayCount === 0 || !this.renderer || !this.scene) {
+    if (this.connectedOverlayCount === 0 || !this.renderer) {
       return;
     }
     for (const record of this.mounts.values()) {
@@ -170,7 +185,7 @@ export class UIRenderer {
       camera.layers.set(UI_OVERLAY_LAYER);
       this.renderer.autoClear = false;
       this.renderer.clearDepth();
-      this.renderer.render(this.scene, camera);
+      this.renderer.render(this.privateScene, camera);
     } finally {
       camera.layers.mask = originalLayers;
       this.renderer.autoClear = originalAutoClear;
@@ -198,9 +213,8 @@ export class UIRenderer {
     this.presentationThemeChanged = false;
     this.connectedOverlayCount = 0;
     this.nextMountOrder = 0;
-    this.privateRoot.removeFromParent();
     this.initialized = false;
-    this.scene = undefined;
+    this.publicScene = undefined;
     this.renderer = undefined;
   }
 
@@ -320,7 +334,7 @@ export class UIRenderer {
   private findAndValidateRoots(scene: THREE.Scene): UIElement[] {
     const roots: UIElement[] = [];
     scene.traverse((object) => {
-      if (isPrivateUI(object) || !isUIElement(object)) return;
+      if (!isUIElement(object)) return;
       const kind = getUIElementKind(object);
       if (kind === 'card' || kind === 'overlay') {
         roots.push(object);
@@ -337,19 +351,13 @@ export class UIRenderer {
   }
 }
 
-export function isPrivateUI(object: THREE.Object3D): boolean {
-  return PRIVATE_NODES.has(object);
-}
-
 export function markPrivateUI(object: THREE.Object3D): void {
-  PRIVATE_NODES.add(object);
   object.userData.xrblocksPrivate = true;
 }
 
 function validateTree(root: UIElement): void {
   const visit = (object: THREE.Object3D, underNonUI: boolean): void => {
     for (const child of object.children) {
-      if (isPrivateUI(child)) continue;
       if (isUIElement(child)) {
         const kind = getUIElementKind(child);
         if (kind === 'card' || kind === 'overlay') {

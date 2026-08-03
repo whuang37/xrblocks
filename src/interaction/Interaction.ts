@@ -27,7 +27,10 @@ import {
   type ResolvedRay,
   type SelectionCapture,
 } from './InteractionTypes.js';
-import {dispatchInteractionPath, isSelectionValid} from './InteractionUtils.js';
+import {
+  dispatchInteractionPath,
+  selectionInvalidReason,
+} from './InteractionUtils.js';
 import {
   createPlanarSurfaceProjector,
   type PlanarSurfaceProjector,
@@ -136,8 +139,14 @@ export class Interaction {
     this.frameSources = nextSources;
 
     for (const [controller, capture] of this.captures) {
-      if (capture.kind === 'target' && !this.isCaptureValid(capture)) {
-        this.cancelCapture(controller, this.invalidReason(capture));
+      if (capture.kind === 'target') {
+        const reason = selectionInvalidReason(
+          capture.selection,
+          capture.ancestry,
+          capture.semanticControl !== undefined &&
+            isSemanticControlDisabled(capture.semanticControl)
+        );
+        if (reason) this.cancelCapture(controller, reason);
       }
     }
 
@@ -664,12 +673,24 @@ export class Interaction {
         const prevented = this.dispatchTouchStart(touchState, contact);
         touchState.prevented = prevented;
         if (!prevented) {
-          this.startTargetCapture(
+          const capture = this.startTargetCapture(
             contact.controller,
             contact.snapshot,
             contact.resolved,
             true
           );
+          if (
+            capture.action === 'select' ||
+            (capture.action === 'semantic' &&
+              capture.semantic?.kind === 'button')
+          ) {
+            this.endSelection(
+              contact.controller,
+              'released',
+              capture.selection.target,
+              contact.snapshot
+            );
+          }
         }
         this.updateGrab(touchState, contact);
       } catch (error) {
@@ -700,12 +721,27 @@ export class Interaction {
       this.dispatchTouch(touch, contact, 'onObjectTouchEnd');
     } finally {
       if (!touch.prevented) {
-        this.cancelCapture(
-          contact.controller,
-          contact.endReason === 'source-lost'
-            ? 'source-lost'
-            : 'released-outside'
-        );
+        const capture = this.captures.get(contact.controller);
+        if (
+          contact.endReason === 'left-target' &&
+          capture?.kind === 'target' &&
+          capture.touch &&
+          capture.action !== 'none'
+        ) {
+          this.endSelection(
+            contact.controller,
+            'released',
+            touch.selection.target,
+            contact.snapshot
+          );
+        } else {
+          this.cancelCapture(
+            contact.controller,
+            contact.endReason === 'source-lost'
+              ? 'source-lost'
+              : 'released-outside'
+          );
+        }
       }
     }
   }
@@ -1025,25 +1061,6 @@ export class Interaction {
       target: targetCapture?.selection.target,
       surface: targetCapture?.selection.surface,
     };
-  }
-
-  private isCaptureValid(capture: TargetCapture): boolean {
-    return (
-      isSelectionValid(capture.selection, capture.ancestry) &&
-      (!capture.semanticControl ||
-        !isSemanticControlDisabled(capture.semanticControl))
-    );
-  }
-
-  private invalidReason(capture: TargetCapture): SelectionEndReason {
-    if (
-      capture.semanticControl &&
-      isSemanticControlDisabled(capture.semanticControl)
-    ) {
-      return 'disabled';
-    }
-    if (!capture.selection.target.visible) return 'hidden';
-    return 'removed';
   }
 
   private hasDeliberateInput(frame: InteractionFrameInput): boolean {

@@ -91,8 +91,6 @@ export class XREffects {
     const xrEnabled = renderer.xr.enabled;
     const xrIsPresenting = renderer.xr.isPresenting;
     const renderTargets = this.renderTargets;
-    const viewport = new THREE.Vector4();
-    renderer.getViewport(viewport);
     renderer.xr.cameraAutoUpdate = false;
     renderer.xr.enabled = false;
     const deltaTime = this.timer.getDelta();
@@ -157,8 +155,6 @@ export class XREffects {
     const renderer = this.renderer;
     const xrEnabled = renderer.xr.enabled;
     const xrIsPresenting = renderer.xr.isPresenting;
-    const viewport = new THREE.Vector4();
-    renderer.getViewport(viewport);
     renderer.xr.cameraAutoUpdate = false;
     renderer.xr.enabled = false;
     const deltaTime = this.timer.getDelta();

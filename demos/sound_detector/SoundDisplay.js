@@ -5,6 +5,10 @@ import {UICard, UIText, UIPanel} from 'xrblocks';
 export class SoundDisplay extends xb.Script {
   static dependencies = {camera: THREE.Camera, world: xb.World};
 
+  cameraPosition = new THREE.Vector3();
+  cameraQuaternion = new THREE.Quaternion();
+  forward = new THREE.Vector3();
+
   init({camera, world}) {
     this.camera = camera;
     this.world = world;
@@ -129,18 +133,19 @@ export class SoundDisplay extends xb.Script {
   update() {
     // Manually update the position and rotation to keep the card in front of camera
     if (this.hudCard && this.camera) {
-      const position = new THREE.Vector3();
-      const quaternion = new THREE.Quaternion();
-
-      this.camera.getWorldPosition(position);
-      this.camera.getWorldQuaternion(quaternion);
+      this.camera.getWorldPosition(this.cameraPosition);
+      this.camera.getWorldQuaternion(this.cameraQuaternion);
 
       // Get forward direction
-      const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(quaternion);
+      const forward = this.forward
+        .set(0, 0, -1)
+        .applyQuaternion(this.cameraQuaternion);
 
       // Position card 1.0m in front of camera.
-      this.hudCard.position.copy(position).addScaledVector(forward, 1.0);
-      this.hudCard.quaternion.copy(quaternion);
+      this.hudCard.position
+        .copy(this.cameraPosition)
+        .addScaledVector(forward, 1.0);
+      this.hudCard.quaternion.copy(this.cameraQuaternion);
     }
   }
 }

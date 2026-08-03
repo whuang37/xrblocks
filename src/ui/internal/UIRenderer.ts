@@ -28,6 +28,7 @@ export type UIBackendLoader = () => Promise<UIBackendModule>;
 const PRIVATE_NODES = new WeakSet<THREE.Object3D>();
 const WARNED_OVERLAY_TRANSFORMS = new WeakSet<UIElement>();
 const IDENTITY_MATRIX = new THREE.Matrix4();
+const OVERLAY_FORWARD = new THREE.Vector3();
 const STALE_UI_LOAD = new Error('Stale UI backend load.');
 
 /** Owns all private UI rendering state for one Core lifecycle. */
@@ -413,7 +414,7 @@ function syncRootTransform(
       camera.getWorldPosition(renderRoot.position);
       camera.getWorldQuaternion(renderRoot.quaternion);
       renderRoot.position.add(
-        new THREE.Vector3(0, 0, -1).applyQuaternion(renderRoot.quaternion)
+        OVERLAY_FORWARD.set(0, 0, -1).applyQuaternion(renderRoot.quaternion)
       );
     }
     renderRoot.scale.setScalar(0.001);

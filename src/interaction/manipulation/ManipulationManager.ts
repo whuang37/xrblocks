@@ -201,15 +201,20 @@ export class ManipulationManager {
     this.sessions.set(session.owner, session);
     suspendTransformScripts(session.owner);
     this.roles.set(snapshot.controller, session);
-    if (
-      session.primaryAction &&
-      baseline &&
-      !this.beginPhase(session, session.primaryAction, baseline)
-    ) {
+    try {
+      if (
+        session.primaryAction &&
+        baseline &&
+        !this.beginPhase(session, session.primaryAction, baseline)
+      ) {
+        this.removeSession(session, false);
+        return false;
+      }
+      return true;
+    } catch (error) {
       this.removeSession(session, false);
-      return false;
+      throw error;
     }
-    return true;
   }
 
   /** Claims a free spatial Select for Scale before normal target resolution. */
@@ -253,11 +258,19 @@ export class ManipulationManager {
     );
     if (baseline?.action !== ManipulationAction.Scale) return false;
 
-    if (session.phase) this.finishPhase(session, 'end');
-    session.auxiliary = auxiliary;
-    this.roles.set(snapshot.controller, session);
-    this.beginPhase(session, ManipulationAction.Scale, baseline);
-    return true;
+    try {
+      if (session.phase) this.finishPhase(session, 'end');
+      session.auxiliary = auxiliary;
+      this.roles.set(snapshot.controller, session);
+      if (!this.beginPhase(session, ManipulationAction.Scale, baseline)) {
+        this.removeSession(session, true);
+        return false;
+      }
+      return true;
+    } catch (error) {
+      this.removeSession(session, true);
+      throw error;
+    }
   }
 
   /** Runs a one-shot Scale phase for simulator and equivalent private intents. */
@@ -316,10 +329,12 @@ export class ManipulationManager {
       scale,
       apply: () => resolution.owner.scale.copy(scale),
     };
-    this.dispatchPhase(session, 'start', proposal);
-    if (!session.phase?.defaultPrevented) proposal.apply();
-    this.dispatchPhase(session, 'update', proposal);
-    this.dispatchPhase(session, 'end', proposal);
+    const phase = session.phase!;
+    this.dispatchPhase(session, phase, 'start', proposal);
+    if (!phase.defaultPrevented) proposal.apply();
+    this.dispatchPhase(session, phase, 'update', proposal);
+    session.phase = undefined;
+    this.dispatchPhase(session, phase, 'end', proposal);
     return true;
   }
 
@@ -356,17 +371,12 @@ export class ManipulationManager {
     }
 
     if (session.primary.snapshot.controller === source) {
-      if (session.phase) this.finishPhase(session, 'end');
-      this.removeSession(session, true);
+      this.finishSession(session, 'end', true);
       return true;
     }
 
     if (session.auxiliary?.controller === source) {
-      this.finishPhase(session, 'end');
-      this.roles.delete(source);
-      session.auxiliary = undefined;
-      if (session.primaryAction)
-        this.startPhase(session, session.primaryAction);
+      this.finishAuxiliary(session, source, 'end');
       return true;
     }
     return false;
@@ -377,16 +387,11 @@ export class ManipulationManager {
     const session = this.roles.get(source);
     if (!session) return false;
     if (session.primary.snapshot.controller === source) {
-      if (session.phase) this.finishPhase(session, 'cancel');
-      this.removeSession(session, true);
+      this.finishSession(session, 'cancel', true);
       return true;
     }
     if (session.auxiliary?.controller === source) {
-      this.finishPhase(session, 'cancel');
-      this.roles.delete(source);
-      session.auxiliary = undefined;
-      if (session.primaryAction)
-        this.startPhase(session, session.primaryAction);
+      this.finishAuxiliary(session, source, 'cancel');
       return true;
     }
     return false;
@@ -395,8 +400,7 @@ export class ManipulationManager {
   cancelOwner(owner: THREE.Object3D): boolean {
     const session = this.sessions.get(owner);
     if (!session) return false;
-    if (session.phase) this.finishPhase(session, 'cancel');
-    this.removeSession(session, true);
+    this.finishSession(session, 'cancel', true);
     return true;
   }
 
@@ -426,12 +430,12 @@ export class ManipulationManager {
 
     if (session.phase?.action === ManipulationAction.Scale && !current.scale) {
       const auxiliary = session.auxiliary;
-      this.finishPhase(session, 'cancel');
-      if (auxiliary) this.roles.delete(auxiliary.controller);
-      session.auxiliary = undefined;
       session.config = current;
-      if (session.primaryAction)
-        this.startPhase(session, session.primaryAction);
+      if (auxiliary) {
+        this.finishAuxiliary(session, auxiliary.controller, 'cancel');
+      } else {
+        this.finishPhase(session, 'cancel');
+      }
       return false;
     }
     if (
@@ -446,11 +450,18 @@ export class ManipulationManager {
   }
 
   private removeSession(session: Session, suppressAuxiliary: boolean): void {
-    this.sessions.delete(session.owner);
-    resumeTransformScripts(session.owner);
-    this.roles.delete(session.primary.snapshot.controller);
+    session.phase = undefined;
+    if (this.sessions.get(session.owner) === session) {
+      this.sessions.delete(session.owner);
+      resumeTransformScripts(session.owner);
+    }
+    if (this.roles.get(session.primary.snapshot.controller) === session) {
+      this.roles.delete(session.primary.snapshot.controller);
+    }
     if (session.auxiliary) {
-      this.roles.delete(session.auxiliary.controller);
+      if (this.roles.get(session.auxiliary.controller) === session) {
+        this.roles.delete(session.auxiliary.controller);
+      }
       if (suppressAuxiliary && session.auxiliary.selected) {
         this.suppressedUntilRelease.add(session.auxiliary.controller);
       }
@@ -471,21 +482,28 @@ export class ManipulationManager {
     baseline: PhaseBaseline
   ): boolean {
     session.phase = {action, baseline, defaultPrevented: false};
+    const phase = session.phase;
     const proposal = this.propose(session);
     if (!proposal) {
       session.phase = undefined;
       return false;
     }
-    session.phase.lastProposal = proposal;
-    this.dispatchPhase(session, 'start', proposal);
+    phase.lastProposal = proposal;
+    try {
+      this.dispatchPhase(session, phase, 'start', proposal);
+    } catch (error) {
+      if (session.phase === phase) session.phase = undefined;
+      throw error;
+    }
     return true;
   }
 
   private finishPhase(session: Session, phase: 'end' | 'cancel'): void {
-    if (!session.phase) return;
-    const proposal = this.propose(session) ?? session.phase.lastProposal;
-    this.dispatchPhase(session, phase, proposal);
+    const active = session.phase;
+    if (!active) return;
+    const proposal = this.propose(session) ?? active.lastProposal;
     session.phase = undefined;
+    this.dispatchPhase(session, active, phase, proposal);
   }
 
   private updateSession(session: Session): void {
@@ -494,7 +512,53 @@ export class ManipulationManager {
     if (!proposal) return;
     session.phase.lastProposal = proposal;
     if (!session.phase.defaultPrevented) proposal.apply();
-    this.dispatchPhase(session, 'update', proposal);
+    try {
+      this.dispatchPhase(session, session.phase, 'update', proposal);
+    } catch (error) {
+      this.removeSession(session, true);
+      throw error;
+    }
+  }
+
+  private finishSession(
+    session: Session,
+    phase: 'end' | 'cancel',
+    suppressAuxiliary: boolean
+  ): void {
+    const active = session.phase;
+    const proposal = active
+      ? (this.propose(session) ?? active.lastProposal)
+      : undefined;
+    this.removeSession(session, suppressAuxiliary);
+    if (active) this.dispatchPhase(session, active, phase, proposal);
+  }
+
+  private finishAuxiliary(
+    session: Session,
+    source: Controller,
+    phase: 'end' | 'cancel'
+  ): void {
+    let phaseFinished = false;
+    try {
+      this.finishPhase(session, phase);
+      phaseFinished = true;
+    } finally {
+      this.releaseAuxiliaryRole(session, source);
+      if (!phaseFinished) this.removeSession(session, true);
+    }
+    if (!session.primaryAction) return;
+    try {
+      if (this.startPhase(session, session.primaryAction)) return;
+    } catch (error) {
+      this.removeSession(session, true);
+      throw error;
+    }
+    this.removeSession(session, true);
+  }
+
+  private releaseAuxiliaryRole(session: Session, source: Controller): void {
+    if (this.roles.get(source) === session) this.roles.delete(source);
+    if (session.auxiliary?.controller === source) session.auxiliary = undefined;
   }
 
   private captureBaseline(
@@ -526,16 +590,17 @@ export class ManipulationManager {
 
   private dispatchPhase(
     session: Session,
+    active: ActivePhase,
     phase: ManipulationPhase,
     proposal: Proposal | undefined
   ): void {
-    if (!session.phase || !proposal) return;
-    const preventState = {value: session.phase.defaultPrevented};
+    if (!proposal) return;
+    const preventState = {value: active.defaultPrevented};
     for (const script of session.primary.capture.scriptPath) {
       const event = createEvent(session, script, phase, proposal, preventState);
       if (this.dispatch(script, event) === true) break;
     }
-    if (phase === 'start') session.phase.defaultPrevented = preventState.value;
+    if (phase === 'start') active.defaultPrevented = preventState.value;
   }
 }
 

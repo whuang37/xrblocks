@@ -159,7 +159,13 @@ export class Interaction {
     }
     this.scaleIntents.clear();
 
-    if (snapshots.length > 0) this.manipulation.update(snapshots);
+    if (snapshots.length > 0) {
+      try {
+        this.manipulation.update(snapshots);
+      } catch (error) {
+        this.cancelFailedManipulations(error);
+      }
+    }
     for (const [controller, capture] of [...this.captures]) {
       if (
         (capture.kind === 'auxiliary' ||
@@ -172,14 +178,18 @@ export class Interaction {
     for (const snapshot of snapshots) {
       const capture = this.captures.get(snapshot.controller);
       if (!capture || capture.kind === 'none') continue;
-      if (capture.kind === 'target') {
-        this.updateLongSelect(capture, snapshot, deltaSeconds);
-        this.updateSemantic(capture, snapshot);
+      try {
+        if (capture.kind === 'target') {
+          this.updateLongSelect(capture, snapshot, deltaSeconds);
+          this.updateSemantic(capture, snapshot);
+        }
+        this.callbacks.invokeGlobal(
+          'onSelecting',
+          this.createSelectEvent(snapshot.controller, capture)
+        );
+      } catch (error) {
+        this.cancelFailedCapture(snapshot.controller, error);
       }
-      this.callbacks.invokeGlobal(
-        'onSelecting',
-        this.createSelectEvent(snapshot.controller, capture)
-      );
     }
   }
 
@@ -420,23 +430,32 @@ export class Interaction {
     this.snapshots.set(controller, selectedSnapshot);
     const resolved = this.resolvedRays.get(controller);
 
-    if (this.manipulation.tryClaimScale(selectedSnapshot, resolved)) {
-      this.captures.set(controller, {kind: 'auxiliary'});
-      this.clearResolvedRay(controller);
-      this.reticle.clear(controller);
-      this.callbacks.invokeGlobal(
-        'onSelectStart',
-        this.createSelectEvent(controller, {kind: 'auxiliary'})
-      );
+    const claimedScale = this.runManipulationTransition(() =>
+      this.manipulation.tryClaimScale(selectedSnapshot, resolved)
+    );
+    if (claimedScale) {
+      const capture = {kind: 'auxiliary'} as const;
+      this.installCapture(controller, capture);
+      this.runCaptureTransition(controller, () => {
+        this.clearResolvedRay(controller);
+        this.reticle.clear(controller);
+        this.callbacks.invokeGlobal(
+          'onSelectStart',
+          this.createSelectEvent(controller, capture)
+        );
+      });
       return;
     }
 
     if (!resolved?.target) {
-      this.captures.set(controller, {kind: 'none'});
-      this.callbacks.invokeGlobal(
-        'onSelectStart',
-        this.createSelectEvent(controller, {kind: 'none'})
-      );
+      const capture = {kind: 'none'} as const;
+      this.installCapture(controller, capture);
+      this.runCaptureTransition(controller, () => {
+        this.callbacks.invokeGlobal(
+          'onSelectStart',
+          this.createSelectEvent(controller, capture)
+        );
+      });
       return;
     }
     this.startTargetCapture(
@@ -499,29 +518,28 @@ export class Interaction {
       lastStablePoint: resolved.intersection.point.clone(),
       touch,
     };
-    this.captures.set(controller, capture);
-    if (capture.exclusiveControl) {
-      this.exclusiveControls.set(capture.exclusiveControl, controller);
-    }
-    const event = this.createSelectEvent(controller, capture);
-    dispatchInteractionPath(
-      this.callbacks,
-      selection.scriptPath,
-      'onObjectSelectStart',
-      event
-    );
-    if (
-      action === 'manipulate' &&
-      !this.manipulation.tryStart(selection, snapshot)
-    ) {
-      capture.action = 'none';
-    }
-    if (action === 'semantic') {
-      this.invokeSemantic(capture, () =>
-        semantic?.begin?.(semanticInput(snapshot, resolved, sliderProjector))
+    this.installCapture(controller, capture);
+    this.runCaptureTransition(controller, () => {
+      const event = this.createSelectEvent(controller, capture);
+      dispatchInteractionPath(
+        this.callbacks,
+        selection.scriptPath,
+        'onObjectSelectStart',
+        event
       );
-    }
-    this.callbacks.invokeGlobal('onSelectStart', event);
+      if (
+        action === 'manipulate' &&
+        !this.manipulation.tryStart(selection, snapshot)
+      ) {
+        capture.action = 'none';
+      }
+      if (action === 'semantic') {
+        this.invokeSemantic(capture, () =>
+          semantic?.begin?.(semanticInput(snapshot, resolved, sliderProjector))
+        );
+      }
+      this.callbacks.invokeGlobal('onSelectStart', event);
+    });
     return capture;
   }
 
@@ -531,10 +549,8 @@ export class Interaction {
     releasedTarget?: THREE.Object3D,
     finalSnapshot?: InteractionSourceSnapshot
   ): void {
-    const capture = this.captures.get(controller);
+    const capture = this.detachCapture(controller);
     if (!capture) return;
-    this.captures.delete(controller);
-    this.releaseExclusiveControl(controller, capture);
     const snapshot = this.snapshots.get(controller);
     if (snapshot) {
       this.snapshots.set(
@@ -546,15 +562,16 @@ export class Interaction {
     let completed = false;
     let endReason = reason;
     if (capture.kind === 'auxiliary') {
-      completed = this.manipulation.end(controller, finalSnapshot ?? snapshot);
+      completed = this.runManipulationTransition(() =>
+        this.manipulation.end(controller, finalSnapshot ?? snapshot)
+      );
     } else if (capture.kind === 'target') {
       const released = this.resolvedRays.get(controller);
       const sameTarget =
         (releasedTarget ?? released?.target) === capture.selection.target;
       if (capture.action === 'manipulate') {
-        completed = this.manipulation.end(
-          controller,
-          finalSnapshot ?? snapshot
+        completed = this.runManipulationTransition(() =>
+          this.manipulation.end(controller, finalSnapshot ?? snapshot)
         );
       } else if (capture.action === 'semantic') {
         const slider = capture.semantic?.kind === 'slider';
@@ -605,11 +622,12 @@ export class Interaction {
     controller: Controller,
     reason: SelectionEndReason
   ): void {
-    const capture = this.captures.get(controller);
+    const capture = this.detachCapture(controller);
     if (!capture) return;
-    this.captures.delete(controller);
-    this.releaseExclusiveControl(controller, capture);
-    this.manipulation.cancelSource(controller);
+    this.suppressedUntilRelease.add(controller);
+    this.runManipulationTransition(() =>
+      this.manipulation.cancelSource(controller)
+    );
     const event: SelectEndEvent = {
       ...this.createSelectEvent(controller, capture),
       completed: false,
@@ -625,13 +643,10 @@ export class Interaction {
       );
     }
     this.callbacks.invokeGlobal('onSelectEnd', event);
-    this.suppressedUntilRelease.add(controller);
   }
 
   private updateTouch(contact: DirectTouchContact): void {
     if (contact.phase === 'start' && contact.resolved?.target) {
-      this.clearResolvedRay(contact.controller);
-      this.reticle.clear(contact.controller);
       const selection = this.createSelection(
         contact.controller,
         contact.resolved
@@ -645,17 +660,24 @@ export class Interaction {
         grabbing: false,
       };
       this.touches.set(contact.controller, touchState);
-      const prevented = this.dispatchTouchStart(touchState, contact);
-      touchState.prevented = prevented;
-      if (!prevented) {
-        this.startTargetCapture(
-          contact.controller,
-          contact.snapshot,
-          contact.resolved,
-          true
-        );
+      try {
+        this.clearResolvedRay(contact.controller);
+        this.reticle.clear(contact.controller);
+        const prevented = this.dispatchTouchStart(touchState, contact);
+        touchState.prevented = prevented;
+        if (!prevented) {
+          this.startTargetCapture(
+            contact.controller,
+            contact.snapshot,
+            contact.resolved,
+            true
+          );
+        }
+        this.updateGrab(touchState, contact);
+      } catch (error) {
+        this.touches.delete(contact.controller);
+        this.cancelFailedCapture(contact.controller, error);
       }
-      this.updateGrab(touchState, contact);
       return;
     }
 
@@ -663,30 +685,38 @@ export class Interaction {
     if (!touch) return;
     touch.point.copy(contact.point);
     if (contact.phase === 'move') {
-      this.dispatchTouch(touch, contact, 'onObjectTouching');
-      this.updateGrab(touch, contact);
+      try {
+        this.dispatchTouch(touch, contact, 'onObjectTouching');
+        this.updateGrab(touch, contact);
+      } catch (error) {
+        this.touches.delete(contact.controller);
+        this.cancelFailedCapture(contact.controller, error);
+      }
       return;
     }
 
     this.touches.delete(contact.controller);
-    this.finishGrab(touch, contact);
-    this.dispatchTouch(touch, contact, 'onObjectTouchEnd');
     this.suppressedUntilRelease.add(contact.controller);
-    if (!touch.prevented) {
-      if (contact.endReason === 'released') {
-        this.endSelection(
-          contact.controller,
-          'released',
-          touch.selection.target,
-          contact.snapshot
-        );
-      } else {
-        this.cancelCapture(
-          contact.controller,
-          contact.endReason === 'source-lost'
-            ? 'source-lost'
-            : 'released-outside'
-        );
+    try {
+      this.finishGrab(touch, contact);
+      this.dispatchTouch(touch, contact, 'onObjectTouchEnd');
+    } finally {
+      if (!touch.prevented) {
+        if (contact.endReason === 'released') {
+          this.endSelection(
+            contact.controller,
+            'released',
+            touch.selection.target,
+            contact.snapshot
+          );
+        } else {
+          this.cancelCapture(
+            contact.controller,
+            contact.endReason === 'source-lost'
+              ? 'source-lost'
+              : 'released-outside'
+          );
+        }
       }
     }
   }
@@ -919,6 +949,8 @@ export class Interaction {
   ): void {
     const nextPath = resolved?.scriptPath ?? [];
     const oldPath = this.hoverPaths.get(controller) ?? [];
+    if (nextPath.length > 0) this.hoverPaths.set(controller, nextPath);
+    else this.hoverPaths.delete(controller);
     let oldIndex = oldPath.length - 1;
     let nextIndex = nextPath.length - 1;
     while (
@@ -953,8 +985,6 @@ export class Interaction {
       event
     );
     dispatchInteractionPath(this.callbacks, nextPath, 'onHovering', event);
-    if (nextPath.length > 0) this.hoverPaths.set(controller, nextPath);
-    else this.hoverPaths.delete(controller);
   }
 
   private createSnapshot(input: RaySourceInput): InteractionSourceSnapshot {
@@ -1047,16 +1077,70 @@ export class Interaction {
       .map(([, resolved]) => resolved);
   }
 
-  private releaseExclusiveControl(
-    controller: Controller,
-    capture: ActiveCapture
-  ): void {
+  private installCapture(controller: Controller, capture: ActiveCapture): void {
+    this.captures.set(controller, capture);
+    if (capture.kind === 'target' && capture.exclusiveControl) {
+      this.exclusiveControls.set(capture.exclusiveControl, controller);
+    }
+  }
+
+  private detachCapture(controller: Controller): ActiveCapture | undefined {
+    const capture = this.captures.get(controller);
+    if (!capture) return undefined;
+    this.captures.delete(controller);
     if (
       capture.kind === 'target' &&
       capture.exclusiveControl &&
       this.exclusiveControls.get(capture.exclusiveControl) === controller
     ) {
       this.exclusiveControls.delete(capture.exclusiveControl);
+    }
+    return capture;
+  }
+
+  private runCaptureTransition(
+    controller: Controller,
+    transition: () => void
+  ): void {
+    try {
+      transition();
+    } catch (error) {
+      this.cancelFailedCapture(controller, error);
+    }
+  }
+
+  private cancelFailedCapture(controller: Controller, error: unknown): never {
+    this.suppressedUntilRelease.add(controller);
+    try {
+      this.cancelCapture(controller, 'pointer-cancel');
+    } catch {
+      // Preserve the callback error which caused the rollback.
+    }
+    throw error;
+  }
+
+  private cancelFailedManipulations(error: unknown): never {
+    for (const [controller, capture] of [...this.captures]) {
+      if (
+        (capture.kind === 'auxiliary' ||
+          (capture.kind === 'target' && capture.action === 'manipulate')) &&
+        !this.manipulation.isSourceActive(controller)
+      ) {
+        try {
+          this.cancelCapture(controller, 'pointer-cancel');
+        } catch {
+          // Preserve the manipulation callback error.
+        }
+      }
+    }
+    throw error;
+  }
+
+  private runManipulationTransition<Result>(transition: () => Result): Result {
+    try {
+      return transition();
+    } catch (error) {
+      this.cancelFailedManipulations(error);
     }
   }
 

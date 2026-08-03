@@ -28,6 +28,13 @@ interface MountRecord {
   order: number;
 }
 
+type BackendState =
+  | {kind: 'idle'}
+  | {kind: 'loading'; promise: Promise<UIBackend>}
+  | {kind: 'ready'; backend: UIBackend}
+  | {kind: 'failed'; error: unknown}
+  | {kind: 'disposed'};
+
 export type UIBackendLoader = () => Promise<UIBackendModule>;
 
 const WARNED_OVERLAY_TRANSFORMS = new WeakSet<UIElement>();
@@ -42,16 +49,11 @@ export class UIRenderer {
   private readonly roots: UIElement[] = [];
   private readonly connectedRoots = new Set<UIElement>();
   private readonly viewport = {width: 0, height: 0};
-  private backend?: UIBackend;
-  private loadPromise?: Promise<UIBackend>;
-  private failed = false;
-  private readonly failedRoots = new Set<UIElement>();
-  private initialized = false;
+  private backendState: BackendState = {kind: 'idle'};
   private renderer?: THREE.WebGLRenderer;
   private publicScene?: THREE.Scene;
   private themeRevision = -1;
   private connectedOverlayCount = 0;
-  private generation = 0;
 
   constructor(
     private readonly interaction: Interaction,
@@ -67,10 +69,8 @@ export class UIRenderer {
     scene: THREE.Scene,
     renderer: THREE.WebGLRenderer
   ): Promise<void> {
-    this.generation++;
     this.publicScene = scene;
     this.renderer = renderer;
-    this.initialized = true;
     scene.add(this.privateRoot);
     const roots = this.collectConnectedRoots();
     if (roots.length === 0) return;
@@ -78,12 +78,10 @@ export class UIRenderer {
     try {
       backend = await this.loadBackend();
     } catch (cause) {
-      if (cause === STALE_UI_LOAD) return;
-      this.backend?.dispose();
-      this.backend = undefined;
+      if (cause === STALE_UI_LOAD || this.backendState.kind === 'disposed') {
+        return;
+      }
       this.privateRoot.removeFromParent();
-      this.loadPromise = undefined;
-      this.initialized = false;
       this.publicScene = undefined;
       this.renderer = undefined;
       throw new Error(
@@ -91,20 +89,18 @@ export class UIRenderer {
         {cause}
       );
     }
-    for (let order = 0; order < roots.length; order++) {
-      this.mount(roots[order], backend, order);
+    const currentRoots = this.collectConnectedRoots();
+    for (let order = 0; order < currentRoots.length; order++) {
+      this.mount(currentRoots[order], backend, order);
     }
   }
 
   /** Reconciles public UI and updates current hit geometry. */
   reconcile(deltaSeconds: number, camera: THREE.Camera): void {
-    if (!this.initialized) return;
+    if (!this.publicScene || !this.renderer) return;
     const roots = this.collectConnectedRoots();
     this.connectedRoots.clear();
     for (const root of roots) this.connectedRoots.add(root);
-    for (const root of this.failedRoots) {
-      if (!this.connectedRoots.has(root)) this.failedRoots.delete(root);
-    }
     for (const root of this.mounts.keys()) {
       if (!this.connectedRoots.has(root)) this.disconnect(root);
     }
@@ -125,18 +121,12 @@ export class UIRenderer {
     }
     if (roots.length === 0) return;
 
-    if (this.failed && roots.some((root) => !this.failedRoots.has(root))) {
-      this.failed = false;
-      this.loadPromise = undefined;
-    }
-
-    const backend = this.backend;
-    if (!backend && !this.failed) {
+    if (this.backendState.kind === 'idle') {
       const loadingRoots = [...roots];
       void this.loadBackend().catch((error) => {
-        if (error === STALE_UI_LOAD) return;
-        this.failed = true;
-        for (const root of loadingRoots) this.failedRoots.add(root);
+        if (error === STALE_UI_LOAD || this.backendState.kind === 'disposed') {
+          return;
+        }
         if (this.reportError) {
           for (const root of loadingRoots) this.reportError(error, root);
         } else {
@@ -145,7 +135,8 @@ export class UIRenderer {
       });
       return;
     }
-    if (!backend) return;
+    if (this.backendState.kind !== 'ready') return;
+    const backend = this.backendState.backend;
     for (let order = 0; order < roots.length; order++) {
       const root = roots[order];
       if (!this.mounts.has(root)) this.mount(root, backend, order);
@@ -191,20 +182,13 @@ export class UIRenderer {
   /** Cancels hit mappings and releases one disconnected public root. */
   release(root: UIElement): void {
     this.unmount(root);
-    if (this.mounts.size === 0 && this.failed) {
-      this.failed = false;
-      this.loadPromise = undefined;
-    }
   }
 
   dispose(): void {
-    this.generation++;
+    const backendState = this.backendState;
+    this.backendState = {kind: 'disposed'};
     for (const root of [...this.mounts.keys()]) this.unmount(root);
-    this.backend?.dispose();
-    this.backend = undefined;
-    this.loadPromise = undefined;
-    this.failed = false;
-    this.failedRoots.clear();
+    if (backendState.kind === 'ready') backendState.backend.dispose();
     this.roots.length = 0;
     this.connectedRoots.clear();
     this.themeRevision = -1;
@@ -212,27 +196,44 @@ export class UIRenderer {
     this.viewport.height = 0;
     this.connectedOverlayCount = 0;
     this.privateRoot.removeFromParent();
-    this.initialized = false;
     this.publicScene = undefined;
     this.renderer = undefined;
   }
 
   private async loadBackend(): Promise<UIBackend> {
-    if (this.backend) return this.backend;
-    const generation = this.generation;
-    this.loadPromise ??= this.loader().then((module) => {
+    const state = this.backendState;
+    if (state.kind === 'ready') return state.backend;
+    if (state.kind === 'loading') return state.promise;
+    if (state.kind === 'failed') throw state.error;
+    if (state.kind === 'disposed') throw STALE_UI_LOAD;
+
+    const promise = Promise.resolve().then(() => this.createBackend());
+    this.backendState = {kind: 'loading', promise};
+    return promise;
+  }
+
+  private async createBackend(): Promise<UIBackend> {
+    try {
+      const module = await this.loader();
       const backend = module.createUIBackend();
-      if (generation !== this.generation || !this.initialized) {
+      if (this.backendState.kind !== 'loading' || !this.renderer) {
         backend.dispose();
         throw STALE_UI_LOAD;
       }
-      this.backend = backend;
-      if (this.renderer) {
+      try {
         backend.configureRenderer?.(this.renderer);
+      } catch (error) {
+        backend.dispose();
+        throw error;
       }
+      this.backendState = {kind: 'ready', backend};
       return backend;
-    });
-    return this.loadPromise;
+    } catch (error) {
+      if (error !== STALE_UI_LOAD && this.backendState.kind === 'loading') {
+        this.backendState = {kind: 'failed', error};
+      }
+      throw error;
+    }
   }
 
   private mount(root: UIElement, backend: UIBackend, order: number): void {
@@ -334,7 +335,10 @@ export class UIRenderer {
 
   private registerHit(mapping: UIHitMapping): () => void {
     mapping.physical.userData.xrblocksHitOrder = mapping.physical.renderOrder;
-    return this.interaction.registerHitSurface(mapping.physical, mapping.logical);
+    return this.interaction.registerHitSurface(
+      mapping.physical,
+      mapping.logical
+    );
   }
 
   private collectConnectedRoots(): readonly UIElement[] {

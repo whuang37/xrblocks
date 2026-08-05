@@ -315,6 +315,7 @@ export class Core {
       },
       () => this.interaction.clear(),
       () => this.uiRenderer.dispose(),
+      () => this.interaction.dispose(),
       () => this.input.dispose(),
       () => {
         const camera = this.deviceCamera;

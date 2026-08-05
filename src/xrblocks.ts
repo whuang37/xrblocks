@@ -66,6 +66,7 @@ export type {
   ReticleMode,
   XBObjectOptions,
 } from './interaction/InteractionTypes';
+export type {HitBoundsSource} from './interaction/HitBoundsSource';
 export {Interaction} from './interaction/Interaction';
 export * from './interaction/manipulation/ManipulationTypes';
 export * from './lighting/Lighting';

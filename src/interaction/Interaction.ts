@@ -16,6 +16,7 @@ import type {Controller} from '../input/Controller.js';
 import {objectIsDescendantOf} from '../utils/SceneGraphUtils.js';
 import {DirectTouch, type DirectTouchContact} from './DirectTouch.js';
 import {GazeDwell} from './GazeDwell.js';
+import type {HitBoundsSource} from './HitBoundsSource.js';
 import {HitRegistry} from './HitRegistry.js';
 import {HitResolver} from './HitResolver.js';
 import {
@@ -80,7 +81,7 @@ export class Interaction {
   private readonly reticle;
   private readonly reticleOptions;
   private readonly scene?: THREE.Scene;
-  private readonly registry = new HitRegistry();
+  private readonly registry: HitRegistry;
   private readonly resolver;
   private readonly directTouch;
   private longSelectDuration;
@@ -108,6 +109,7 @@ export class Interaction {
   constructor(dependencies: InteractionDependencies) {
     this.callbacks = dependencies.callbacks;
     this.scene = dependencies.scene;
+    this.registry = new HitRegistry(dependencies.scene);
     this.manipulation = new ManipulationManager(
       (script, event) => this.callbacks.invokeManipulation(script, event),
       (controller) => this.suppressedUntilRelease.add(controller),
@@ -143,6 +145,7 @@ export class Interaction {
 
   /** Replaces all sampled physical interaction state for one engine frame. */
   update(frame: InteractionFrameInput, deltaSeconds = 0): void {
+    this.registry.prepareFrame();
     const nextSources = this.nextFrameSources;
     nextSources.clear();
     for (const input of frame.raySources) nextSources.add(input.controller);
@@ -232,11 +235,22 @@ export class Interaction {
     this.scaleIntents.clear();
   }
 
+  dispose(): void {
+    this.clear();
+    this.registry.dispose();
+  }
+
+  /**
+   * Maps a physical raycast surface to its logical target.
+   * Provide `boundsSource` when custom raycast or layout behavior makes the
+   * standard BufferGeometry bounds incomplete.
+   */
   registerHitSurface(
     physical: THREE.Object3D,
-    logical: THREE.Object3D
+    logical: THREE.Object3D,
+    boundsSource?: HitBoundsSource
   ): () => void {
-    return this.registry.register(physical, logical);
+    return this.registry.register(physical, logical, boundsSource);
   }
 
   /** Refreshes bounded direct-touch candidates found by the lifecycle pass. */

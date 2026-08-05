@@ -2,13 +2,17 @@ import type RAPIER_NS from 'rapier3d';
 import * as THREE from 'three';
 
 import {MeshScript} from '../core/Script';
+import {
+  HIT_BOUNDS_SOURCE,
+  type HitBoundsSource,
+} from '../interaction/HitBoundsSource';
 import {clamp} from '../utils/utils';
 
 import {DepthMeshTexturedShader} from './DepthMeshTexturedShader';
 import {DepthMeshOptions, DepthOptions} from './DepthOptions';
 import {DepthTextures} from './DepthTextures';
 
-export class DepthMesh extends MeshScript {
+export class DepthMesh extends MeshScript implements HitBoundsSource {
   static dependencies = {
     renderer: THREE.WebGLRenderer,
   };
@@ -35,6 +39,7 @@ export class DepthMesh extends MeshScript {
   private lastColliderUpdateTime = 0;
   private options: DepthMeshOptions;
   private depthTextureMaterialUniforms?;
+  readonly [HIT_BOUNDS_SOURCE]?: HitBoundsSource;
 
   private RAPIER?: typeof RAPIER_NS;
   private blendedWorld?: RAPIER_NS.World;
@@ -109,6 +114,7 @@ export class DepthMesh extends MeshScript {
     this.visible = true;
     this.xb = {pointerEvents: 'none', reticleMode: 'surface'};
     this.options = options;
+    this[HIT_BOUNDS_SOURCE] = this;
     this.lastColliderUpdateTime = performance.now();
     this.updateVertexNormals = options.updateVertexNormals;
     this.colliderUpdateFps = options.colliderUpdateFps;
@@ -302,6 +308,21 @@ export class DepthMesh extends MeshScript {
       geometry.attributes.position.array[3 * i + 1] = vertexPosition.y;
       geometry.attributes.position.array[3 * i + 2] = vertexPosition.z;
     }
+    geometry.computeBoundingBox();
+    geometry.computeBoundingSphere();
+  }
+
+  /** Writes bounds for the geometry used by this object's custom raycast. */
+  writeWorldBounds(target: THREE.Box3): boolean {
+    const mesh = this.downsampledMesh ?? this;
+    const bounds = mesh.geometry.boundingBox;
+    if (!bounds) {
+      target.makeEmpty();
+      return false;
+    }
+    mesh.updateWorldMatrix(true, false);
+    target.copy(bounds).applyMatrix4(mesh.matrixWorld);
+    return !target.isEmpty();
   }
 
   /**

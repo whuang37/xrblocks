@@ -301,7 +301,8 @@ export class UIRenderer {
     mapping.physical.userData.xrblocksOverlay = overlay;
     return this.interaction.registerHitSurface(
       mapping.physical,
-      mapping.logical
+      mapping.logical,
+      mapping.boundsSource
     );
   }
 

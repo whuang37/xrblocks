@@ -26,6 +26,7 @@ import {
 import type {UITheme} from '../UITheme';
 import {GradientPanel} from '../primitives/GradientPanel';
 import {UICardEdge} from './UICardEdge';
+import {createUIKitHitBoundsSource} from './UIKitHitBounds';
 import type {
   UIBackend,
   UIHitMapping,
@@ -268,10 +269,7 @@ function createNode(
         presentation.cursorPointCount > 0 ? cursorPoints?.[0] : undefined,
         presentation.cursorPointCount > 1 ? cursorPoints?.[1] : undefined
       );
-      mappings.push({
-        physical: edge,
-        logical: element,
-      });
+      mappings.push(createHitMapping(edge, element));
     }
     applyPresentation = (state) => {
       const nextPanelProperties = propertiesFor(state);
@@ -327,12 +325,20 @@ function createNode(
   node.visible = element.visible;
   if (overlayRenderOrder !== undefined) node.renderOrder = overlayRenderOrder;
   if (blocksHits) {
-    mappings.push({
-      physical: node,
-      logical: element,
-    });
+    mappings.push(createHitMapping(node, element));
   }
   return node;
+}
+
+function createHitMapping(
+  physical: THREE.Object3D,
+  logical: UIElement
+): UIHitMapping {
+  return {
+    physical,
+    logical,
+    boundsSource: createUIKitHitBoundsSource(physical),
+  };
 }
 
 function changedProperties(

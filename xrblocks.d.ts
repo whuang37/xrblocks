@@ -14,9 +14,9 @@
  * limitations under the License.
  *
  * @file xrblocks.js
- * @version v0.18.0
- * @commitid 62138f1
- * @builddate 2026-07-26T22:14:55.870Z
+ * @version v0.19.0
+ * @commitid 2965866
+ * @builddate 2026-08-06T05:51:41.686Z
  * @description XR Blocks SDK, built from source with the above commit ID.
  * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
  * and follow rules below:
@@ -4606,6 +4606,15 @@ declare class HumansOptions {
             wasmFilesUrl: string;
             modelAssetPath: string;
             /**
+             * Run inference in a web worker so a detection pass does not stall the
+             * render loop. The worker is limited to the CPU delegate because
+             * MediaPipe only creates a GPU surface for a real DOM canvas, so set
+             * this to false to trade a blocked main thread for GPU inference.
+             * Falls back to the main thread automatically when workers are
+             * unavailable.
+             */
+            useWorker: boolean;
+            /**
              * The maximum number of simultaneous human poses/bodies to track.
              */
             numPoses: number;
@@ -9152,11 +9161,13 @@ declare class OcclusionPass extends Pass {
     private occlusionUniforms;
     private occlusionQuad;
     private depthNear;
+    private depthViewMatrices;
+    private depthProjectionMatrices;
     private lastOcclusionMapSize;
     private lastKawaseBlurSize;
     constructor(scene: THREE.Scene, camera: THREE.PerspectiveCamera, useFloatDepth?: boolean, renderToScreen?: boolean, occludableItemsLayer?: number);
     private setupKawaseBlur;
-    setDepthTexture(depthTexture: THREE.Texture, rawValueToMeters: number, viewId: number, depthNear?: number): void;
+    setDepthTexture(depthTexture: THREE.Texture, rawValueToMeters: number, viewId: number, depthNear?: number, depthViewMatrix?: THREE.Matrix4, depthProjectionMatrix?: THREE.Matrix4): void;
     /**
      * Render the occlusion map.
      * @param renderer - The three.js renderer.

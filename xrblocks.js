@@ -15,8 +15,8 @@
  *
  * @file xrblocks.js
  * @version v0.19.0
- * @commitid 17f9f89
- * @builddate 2026-08-07T01:22:28.181Z
+ * @commitid 595c2be
+ * @builddate 2026-08-10T17:06:14.420Z
  * @description XR Blocks SDK, built from source with the above commit ID.
  * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
  * and follow rules below:
@@ -6478,9 +6478,14 @@ class Depth {
     updateGPUDepthData(depthData, viewId) {
         this.gpuDepthData[viewId] = depthData;
         this.updateDepthMatrices(depthData, viewId);
+        // Reading the depth target back is a synchronous GPU stall, and in stereo
+        // this runs once per eye. Only the first view's CPU depth is ever
+        // consumed: getDepth, getDepthInMeters, getVertex and the depth mesh all
+        // read index 0. So the second eye's readback stalls the pipeline for data
+        // nothing looks at.
         // For now, assume that we need cpu depth only if depth mesh is enabled.
         // In the future, add a separate option.
-        const needCpuDepth = this.options.depthMesh.enabled;
+        const needCpuDepth = this.options.depthMesh.enabled && viewId === 0;
         const cpuDepth = needCpuDepth && this.gpuDepthConverter
             ? this.gpuDepthConverter.convertGPUToCPU(depthData)
             : null;
@@ -11145,6 +11150,18 @@ class HumansOptions {
          */
         this.pollingIntervalMs = 0;
         /**
+         * Project each landmark onto the depth mesh to find its world position.
+         *
+         * This is what you want when the people being detected are physically in
+         * front of you, since the ray lands on their actual body. Turn it off when
+         * the camera is showing someone who is not part of the depth scene, such as a
+         * webcam feed on the desktop simulator: every ray would then hit the
+         * surrounding geometry instead and the skeleton would be smeared across it.
+         * With projection off, landmarks are placed along the view ray at a fixed
+         * distance, which keeps the body correctly proportioned.
+         */
+        this.useDepthProjection = true;
+        /**
          * Configuration options for the active pose detection backend.
          */
         this.backendConfig = {
@@ -13707,6 +13724,32 @@ class SimulatorDepth {
         // setTimeout-based fence polling chains stack up and dominate the
         // main thread.
         this.updateInFlight = false;
+        /**
+         * Longest a depth buffer is allowed to go without being refreshed while
+         * nothing detectable has changed, in milliseconds.
+         *
+         * This is not only a hedge against animation the skip cannot see, such as
+         * skinning or vertex shaders. It is also what keeps the depth mesh's
+         * position attribute version advancing while the scene sits still.
+         * `FaceRecognizer`, `HumanRecognizer`, and `ObjectDetector` each cache a
+         * cloned depth mesh, and its BVH, keyed on that version. If this were
+         * removed, a stationary scene would freeze the version, those caches would
+         * never invalidate, and per-landmark raycasts would keep hitting a stale
+         * clone. That is the failure this repository already fixed once, where the
+         * face wireframe only appeared while the camera was moving.
+         *
+         * Raising it trades depth freshness for fewer readbacks; setting it to
+         * `Infinity` would reintroduce that bug.
+         */
+        this.maxDepthAgeMs = 500;
+        this.lastDepthPosition = new THREE.Vector3(NaN, NaN, NaN);
+        this.lastDepthQuaternion = new THREE.Quaternion(NaN, NaN, NaN, NaN);
+        this.lastSceneSignature = NaN;
+        this.lastDepthUpdateMs = -Infinity;
+        // Scratch used to hash the raw bits of a float, so the signature reacts to
+        // any change rather than relying on a tolerance.
+        this.hashFloat = new Float64Array(1);
+        this.hashInts = new Int32Array(this.hashFloat.buffer);
     }
     /**
      * Initialize Simulator Depth.
@@ -13743,11 +13786,66 @@ class SimulatorDepth {
         // was a dominant main-thread cost in perf traces before this).
         if (this.updateInFlight)
             return;
+        // Reading the depth target back stalls the GPU pipeline: the buffer is
+        // only 160x160 but the readback has to wait for the render to finish, so
+        // it costs far more than its size suggests. When neither the view nor
+        // anything in the scene has moved the result would be identical, so skip
+        // the whole render + readback and keep the previous buffer.
+        if (!this.depthNeedsUpdate())
+            return;
         this.renderDepthScene();
+        this.markDepthUpdated();
         this.updateInFlight = true;
         this.updateDepth().finally(() => {
             this.updateInFlight = false;
         });
+    }
+    /**
+     * Whether the depth buffer would differ from the one already captured.
+     *
+     * @returns True when the camera moved, the scene moved, or the buffer has
+     * gone stale.
+     */
+    depthNeedsUpdate() {
+        if (performance.now() - this.lastDepthUpdateMs >= this.maxDepthAgeMs) {
+            return true;
+        }
+        if (!this.depthCamera.position.equals(this.lastDepthPosition) ||
+            !this.depthCamera.quaternion.equals(this.lastDepthQuaternion)) {
+            return true;
+        }
+        return this.computeSceneSignature() !== this.lastSceneSignature;
+    }
+    /**
+     * Cheap hash over the world transforms of everything the depth pass draws.
+     *
+     * Anything that moves, rotates, scales, or is shown or hidden changes the
+     * hash, so a still camera in front of a moving object still refreshes. This
+     * is arithmetic over a few hundred nodes, which is orders of magnitude
+     * cheaper than the GPU stall a readback costs.
+     *
+     * @returns A hash of the scene's current visible transforms.
+     */
+    computeSceneSignature() {
+        let hash = 0;
+        this.simulatorScene.traverse((object) => {
+            hash = (hash ^ (object.visible ? 0x9e3779b9 : 0x85ebca6b)) | 0;
+            if (!object.visible)
+                return;
+            const e = object.matrixWorld.elements;
+            for (let i = 0; i < 16; i++) {
+                this.hashFloat[0] = e[i];
+                hash = Math.imul(hash ^ this.hashInts[0], 0x27220a95) | 0;
+                hash = Math.imul(hash ^ this.hashInts[1], 0x27220a95) | 0;
+            }
+        });
+        return hash;
+    }
+    markDepthUpdated() {
+        this.lastDepthPosition.copy(this.depthCamera.position);
+        this.lastDepthQuaternion.copy(this.depthCamera.quaternion);
+        this.lastSceneSignature = this.computeSceneSignature();
+        this.lastDepthUpdateMs = performance.now();
     }
     updateDepthCamera() {
         const renderingCamera = this.camera;
@@ -19060,13 +19158,24 @@ class DetectedBodyPose extends THREE.Object3D {
      * Returns the 3D world space position of a specific joint/landmark in meters.
      * Exposes both standard MediaPipe landmark mappings and composite VRM/humanoid landmarks.
      *
+     * The pose model always returns all landmarks, including ones it could not
+     * actually see, so a body that is only half in frame still reports legs. Pass
+     * `minVisibility` to drop those guesses instead of drawing them.
+     *
      * @param name - The name of the joint (standard or composite).
-     * @returns A clone of the 3D world space position vector, or `null` if the joint is undetected or unprojected.
+     * @param options - Set `minVisibility` to reject landmarks the model is not
+     *   confident about. Defaults to 0, which keeps every landmark.
+     * @returns A clone of the 3D world space position vector, or `null` if the joint is undetected, unprojected, or below `minVisibility`.
      */
-    getJointPosition(name) {
+    getJointPosition(name, { minVisibility = 0 } = {}) {
         const getMPWorldPos = (index) => {
             const lm = this.landmarks[index];
-            return lm && lm.worldPosition ? lm.worldPosition.clone() : null;
+            if (!lm || !lm.worldPosition)
+                return null;
+            if (minVisibility > 0 && (lm.visibility ?? 0) < minVisibility) {
+                return null;
+            }
+            return lm.worldPosition.clone();
         };
         switch (name) {
             case PoseJointName.Nose:
@@ -19118,8 +19227,10 @@ class DetectedBodyPose extends THREE.Object3D {
             }
             case PoseJointName.Spine: {
                 // Spine is lower center torso (between hips and chest)
-                const hips = this.getJointPosition(PoseJointName.Hips);
-                const chest = this.getJointPosition(PoseJointName.Chest);
+                const hips = this.getJointPosition(PoseJointName.Hips, { minVisibility });
+                const chest = this.getJointPosition(PoseJointName.Chest, {
+                    minVisibility,
+                });
                 if (hips && chest) {
                     return new THREE.Vector3()
                         .addVectors(hips, chest)
@@ -19138,7 +19249,9 @@ class DetectedBodyPose extends THREE.Object3D {
                 return lShoulder || rShoulder || null;
             }
             case PoseJointName.Neck: {
-                const chest = this.getJointPosition(PoseJointName.Chest);
+                const chest = this.getJointPosition(PoseJointName.Chest, {
+                    minVisibility,
+                });
                 const nose = getMPWorldPos(0);
                 if (chest && nose) {
                     return new THREE.Vector3()
@@ -19412,6 +19525,44 @@ async function loadMediaPipeModule$1() {
         throw error;
     }
 }
+/** Where the metric skeleton is placed when depth projection is off. */
+const METRIC_SKELETON_DISTANCE_METRES = 2;
+const cameraPosition = new THREE.Vector3();
+const cameraRight = new THREE.Vector3();
+const cameraUp = new THREE.Vector3();
+const cameraForward = new THREE.Vector3();
+/**
+ * Places a MediaPipe world landmark in front of the viewer, preserving the
+ * body's real proportions.
+ *
+ * World landmarks are metres from the centre of the hips, with x toward the
+ * person's right, y downward and z toward the camera. Screen landmarks cannot
+ * be used for this: they depend on camera intrinsics, and joints outside the
+ * frame are extrapolated, so a half-visible body produces legs that shoot off
+ * into the distance.
+ *
+ * x is deliberately not negated, which makes the skeleton behave like a mirror:
+ * raise your right hand and the skeleton's hand rises on the same side of the
+ * screen.
+ *
+ * @param metric - Metric landmark from MediaPipe, in metres.
+ * @param worldFromView - Camera pose.
+ * @param target - Vector to write the result into.
+ * @returns The world position for the landmark.
+ */
+function placeMetricLandmark(metric, worldFromView, target) {
+    cameraPosition.setFromMatrixPosition(worldFromView);
+    cameraRight.setFromMatrixColumn(worldFromView, 0).normalize();
+    cameraUp.setFromMatrixColumn(worldFromView, 1).normalize();
+    // Cameras look down -Z.
+    cameraForward.setFromMatrixColumn(worldFromView, 2).normalize().negate();
+    return (target
+        .copy(cameraPosition)
+        .addScaledVector(cameraForward, METRIC_SKELETON_DISTANCE_METRES + (metric.z || 0))
+        .addScaledVector(cameraRight, metric.x || 0)
+        // y runs downward in MediaPipe's frame and upward in three.js.
+        .addScaledVector(cameraUp, -(metric.y || 0)));
+}
 /**
  * Convert a raw MediaPipe `PoseLandmarkerResult` into `DetectedBodyPose`
  * objects with world-space joint positions.
@@ -19424,12 +19575,17 @@ async function loadMediaPipeModule$1() {
  * first; when the ray misses, the point is back-projected through the camera
  * frustum and placed ~1.5 m out, modulated by the landmark's relative z.
  *
+ * Pass `useDepthProjection: false` when the detected person is not part of the
+ * depth scene, such as a webcam feed on the desktop simulator. Every ray would
+ * otherwise hit the surrounding geometry and stretch the skeleton across it.
+ *
  * @param result - Raw result from the MediaPipe pose task.
  * @param depthMeshSnapshot - Depth mesh to raycast against.
  * @param cameraParametersSnapshot - Camera matrices for back-projection.
+ * @param options - Projection behaviour.
  * @returns One `DetectedBodyPose` per person in the result.
  */
-function processPoseLandmarkerResult(result, depthMeshSnapshot, cameraParametersSnapshot) {
+function processPoseLandmarkerResult(result, depthMeshSnapshot, cameraParametersSnapshot, { useDepthProjection = true } = {}) {
     const detectedPoses = [];
     // Process each detected person
     for (let i = 0; i < result.landmarks.length; i++) {
@@ -19450,10 +19606,18 @@ function processPoseLandmarkerResult(result, depthMeshSnapshot, cameraParameters
             ymax = Math.max(ymax, lm.y);
             // Transform screen UV to WebXR World Position
             const uv = new THREE.Vector2(lm.x, lm.y);
-            const worldCoords = transformRgbUvToWorld(uv, depthMeshSnapshot, cameraParametersSnapshot);
+            const worldCoords = useDepthProjection
+                ? transformRgbUvToWorld(uv, depthMeshSnapshot, cameraParametersSnapshot)
+                : null;
             let wp;
             if (worldCoords) {
                 wp = worldCoords.worldPosition;
+            }
+            else if (!useDepthProjection && wLm) {
+                // Not projecting, and MediaPipe gave us a metric skeleton: use it so
+                // the body keeps its real proportions regardless of camera intrinsics
+                // or joints sitting outside the frame.
+                wp = placeMetricLandmark(wLm, cameraParametersSnapshot.worldFromView, new THREE.Vector3());
             }
             else {
                 // Robust fallback estimation when physical depth mesh raycast misses
@@ -19471,6 +19635,9 @@ function processPoseLandmarkerResult(result, depthMeshSnapshot, cameraParameters
                 z: wLm ? wLm.z : lm.z,
                 visibility: lm.visibility,
                 worldPosition: wp,
+                metricPosition: wLm
+                    ? new THREE.Vector3(wLm.x, wLm.y, wLm.z)
+                    : undefined,
             });
         }
         const boundingBox = new THREE.Box2(new THREE.Vector2(xmin, ymin), new THREE.Vector2(xmax, ymax));
@@ -19523,7 +19690,9 @@ class MediaPipeHumanBackend extends BaseHumanBackend {
         if (!result || !result.landmarks || result.landmarks.length === 0) {
             return [];
         }
-        return processPoseLandmarkerResult(result, depthMeshSnapshot, cameraParametersSnapshot);
+        return processPoseLandmarkerResult(result, depthMeshSnapshot, cameraParametersSnapshot, {
+            useDepthProjection: this.context.options.humans.useDepthProjection !== false,
+        });
     }
     detectOnMainThread(imageData) {
         if (!this.poseLandmarker) {
@@ -25196,6 +25365,15 @@ class Core {
         this.registry.register(this.xrSystemsGroup);
     }
     dispose() {
+        // Physics steps off the render loop on its own interval, so it keeps
+        // running after teardown unless the handle is cleared. Freeing the Rapier
+        // world matters too: it holds WASM memory that garbage collection cannot
+        // reclaim on its own.
+        if (this.physicsIntervalId !== undefined) {
+            clearInterval(this.physicsIntervalId);
+            this.physicsIntervalId = undefined;
+        }
+        this.physics?.dispose();
         this.input.dispose();
         window.removeEventListener('resize', this.onWindowResize);
     }
@@ -25383,7 +25561,7 @@ class Core {
         await this.scriptsManager.syncScriptsWithScene(this.scene);
         this.renderer.setAnimationLoop(this.update);
         if (this.physics) {
-            setInterval(this.physicsStep, 1000 * this.physics.timestep);
+            this.physicsIntervalId = setInterval(this.physicsStep, 1000 * this.physics.timestep);
         }
         if (this.options.reticles.enabled) {
             this.input.addReticles();

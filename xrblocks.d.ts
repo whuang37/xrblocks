@@ -15,8 +15,8 @@
  *
  * @file xrblocks.js
  * @version v0.19.0
- * @commitid 17f9f89
- * @builddate 2026-08-07T01:22:28.181Z
+ * @commitid 595c2be
+ * @builddate 2026-08-10T17:06:14.420Z
  * @description XR Blocks SDK, built from source with the above commit ID.
  * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
  * and follow rules below:
@@ -4598,6 +4598,18 @@ declare class HumansOptions {
      */
     pollingIntervalMs: number;
     /**
+     * Project each landmark onto the depth mesh to find its world position.
+     *
+     * This is what you want when the people being detected are physically in
+     * front of you, since the ray lands on their actual body. Turn it off when
+     * the camera is showing someone who is not part of the depth scene, such as a
+     * webcam feed on the desktop simulator: every ray would then hit the
+     * surrounding geometry instead and the skeleton would be smeared across it.
+     * With projection off, landmarks are placed along the view ray at a fixed
+     * distance, which keeps the body correctly proportioned.
+     */
+    useDepthProjection: boolean;
+    /**
      * Configuration options for the active pose detection backend.
      */
     backendConfig: {
@@ -6411,6 +6423,30 @@ declare class SimulatorDepth {
     autoUpdateDepthCameraTransform: boolean;
     private projectionMatrixArray;
     private updateInFlight;
+    /**
+     * Longest a depth buffer is allowed to go without being refreshed while
+     * nothing detectable has changed, in milliseconds.
+     *
+     * This is not only a hedge against animation the skip cannot see, such as
+     * skinning or vertex shaders. It is also what keeps the depth mesh's
+     * position attribute version advancing while the scene sits still.
+     * `FaceRecognizer`, `HumanRecognizer`, and `ObjectDetector` each cache a
+     * cloned depth mesh, and its BVH, keyed on that version. If this were
+     * removed, a stationary scene would freeze the version, those caches would
+     * never invalidate, and per-landmark raycasts would keep hitting a stale
+     * clone. That is the failure this repository already fixed once, where the
+     * face wireframe only appeared while the camera was moving.
+     *
+     * Raising it trades depth freshness for fewer readbacks; setting it to
+     * `Infinity` would reintroduce that bug.
+     */
+    maxDepthAgeMs: number;
+    private lastDepthPosition;
+    private lastDepthQuaternion;
+    private lastSceneSignature;
+    private lastDepthUpdateMs;
+    private readonly hashFloat;
+    private readonly hashInts;
     constructor(simulatorScene: SimulatorScene);
     /**
      * Initialize Simulator Depth.
@@ -6418,6 +6454,25 @@ declare class SimulatorDepth {
     init(renderer: THREE.WebGLRenderer, camera: THREE.Camera, depth: Depth): void;
     createRenderTarget(): void;
     update(): void;
+    /**
+     * Whether the depth buffer would differ from the one already captured.
+     *
+     * @returns True when the camera moved, the scene moved, or the buffer has
+     * gone stale.
+     */
+    private depthNeedsUpdate;
+    /**
+     * Cheap hash over the world transforms of everything the depth pass draws.
+     *
+     * Anything that moves, rotates, scales, or is shown or hidden changes the
+     * hash, so a still camera in front of a moving object still refreshes. This
+     * is arithmetic over a few hundred nodes, which is orders of magnitude
+     * cheaper than the GPU stall a readback costs.
+     *
+     * @returns A hash of the scene's current visible transforms.
+     */
+    private computeSceneSignature;
+    private markDepthUpdated;
     private updateDepthCamera;
     private renderDepthScene;
     private updateDepth;
@@ -7074,6 +7129,17 @@ interface PoseLandmark {
      */
     visibility?: number;
     /**
+     * Position in metres relative to the centre of the hips, straight from
+     * MediaPipe's world landmarks, with x toward the person's right, y downward
+     * and z toward the camera.
+     *
+     * Unlike {@link worldPosition} this is independent of where the person is in
+     * the room and of the camera's intrinsics, so it can be used to render a
+     * correctly proportioned skeleton anywhere. Undefined when the backend does
+     * not provide metric landmarks.
+     */
+    metricPosition?: THREE.Vector3;
+    /**
      * The back-projected 3D position in WebXR world space, measured in meters.
      * Null or undefined if depth projection was unsuccessful.
      */
@@ -7100,10 +7166,18 @@ declare class DetectedBodyPose extends THREE.Object3D {
      * Returns the 3D world space position of a specific joint/landmark in meters.
      * Exposes both standard MediaPipe landmark mappings and composite VRM/humanoid landmarks.
      *
+     * The pose model always returns all landmarks, including ones it could not
+     * actually see, so a body that is only half in frame still reports legs. Pass
+     * `minVisibility` to drop those guesses instead of drawing them.
+     *
      * @param name - The name of the joint (standard or composite).
-     * @returns A clone of the 3D world space position vector, or `null` if the joint is undetected or unprojected.
+     * @param options - Set `minVisibility` to reject landmarks the model is not
+     *   confident about. Defaults to 0, which keeps every landmark.
+     * @returns A clone of the 3D world space position vector, or `null` if the joint is undetected, unprojected, or below `minVisibility`.
      */
-    getJointPosition(name: PoseJointName | string): THREE.Vector3 | null;
+    getJointPosition(name: PoseJointName | string, { minVisibility }?: {
+        minVisibility?: number;
+    }): THREE.Vector3 | null;
 }
 
 /**
@@ -8918,6 +8992,7 @@ declare class Core {
     depth: Depth;
     lighting?: Lighting;
     physics?: Physics;
+    private physicsIntervalId?;
     xrButton?: XRButton;
     effects?: XREffects;
     ai: AI;

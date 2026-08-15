@@ -15,8 +15,8 @@
  *
  * @file xrblocks.js
  * @version v0.20.0
- * @commitid 34d1417
- * @builddate 2026-08-13T00:26:47.531Z
+ * @commitid 7d974d7
+ * @builddate 2026-08-15T02:26:45.592Z
  * @description XR Blocks SDK, built from source with the above commit ID.
  * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
  * and follow rules below:
@@ -55,7 +55,7 @@ import { GLTFLoader, GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import * as _sparkjsdev_spark from '@sparkjsdev/spark';
 import { SparkRenderer } from '@sparkjsdev/spark';
 
-declare const GEMINI_DEFAULT_FLASH_MODEL = "gemini-3.6-flash";
+declare const GEMINI_DEFAULT_FLASH_MODEL = "gemini-3.7-flash";
 declare const GEMINI_DEFAULT_LIVE_MODEL = "gemini-3.1-flash-live-preview";
 declare const GEMINI_DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image";
 declare class GeminiOptions {
@@ -3009,7 +3009,7 @@ declare class Options {
     setAppDescription(description: string): this;
 }
 
-type FaceCameraMode = 'cylindrical' | 'spherical';
+type FaceCameraMode = 'capsule' | 'cylindrical' | 'spherical';
 
 declare const ManipulationAction: {
     readonly Translate: "translate";
@@ -3022,6 +3022,8 @@ interface TranslateOptions {
     faceCamera?: boolean;
     /** Camera-facing rotation mode used while translating. */
     mode?: FaceCameraMode;
+    /** Half-height of the upright region used by capsule mode, in meters. */
+    capsuleHalfHeight?: number;
     /** Camera-facing rotation smoothing, matching `FaceCamera`. */
     smoothing?: number;
 }
@@ -9499,6 +9501,8 @@ declare class TransformScript extends Script {
 
 interface FaceCameraOptions {
     mode?: FaceCameraMode;
+    /** Half-height of the upright region used by capsule mode, in meters. */
+    capsuleHalfHeight?: number;
     smoothing?: number;
 }
 /** Rotates its parent to face the active camera. */
@@ -9510,6 +9514,7 @@ declare class FaceCamera extends TransformScript {
     private camera?;
     private timer?;
     private readonly mode;
+    private readonly capsuleHalfHeight;
     private readonly smoothing;
     private readonly worldPosition;
     private readonly cameraPosition;

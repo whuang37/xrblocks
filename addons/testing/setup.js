@@ -48,10 +48,14 @@ if (typeof globalRecord.AudioContext === 'undefined') {
 // Mock three WebGLRenderer for JSDOM headless testing.
 vi.mock('three', async (importOriginal) => {
     const original = await importOriginal();
-    const MockWebGLRenderer = function () {
+    const MockWebGLRenderer = function WebGLRenderer() {
         const self = Object.create(original.WebGLRenderer.prototype);
         self.constructor = MockWebGLRenderer;
         self.domElement = document.createElement('canvas');
+        self.extensions = {
+            has: () => false,
+            get: () => null,
+        };
         const controllers = [new original.Group(), new original.Group()];
         const controllerGrips = [new original.Group(), new original.Group()];
         const hands = [new original.Group(), new original.Group()];
@@ -86,6 +90,9 @@ vi.mock('three', async (importOriginal) => {
         self.clearDepth = () => { };
         self.dispose = () => { };
         self.getRenderTarget = () => null;
+        self.getClearColor = (target) => target ?? new original.Color();
+        self.getClearAlpha = () => 0;
+        self.setClearColor = () => { };
         self.readRenderTargetPixelsAsync = () => Promise.resolve();
         return self;
     };
@@ -93,6 +100,56 @@ vi.mock('three', async (importOriginal) => {
     return {
         ...original,
         WebGLRenderer: MockWebGLRenderer,
+    };
+});
+// Mock three/webgpu WebGPURenderer for JSDOM headless testing.
+vi.mock('three/webgpu', async (importOriginal) => {
+    const actual = await importOriginal();
+    const original = await vi.importActual('three');
+    class MockWebGPURenderer {
+        constructor() {
+            this.isWebGPURenderer = true;
+            this.domElement = document.createElement('canvas');
+            this.shadowMap = { enabled: false };
+            this.xr = {
+                enabled: false,
+                isPresenting: false,
+                getCamera: vi.fn(() => ({ cameras: [] })),
+                getController: vi.fn(() => new original.Group()),
+                getControllerGrip: vi.fn(() => new original.Group()),
+                getHand: vi.fn(() => {
+                    const hand = new original.Group();
+                    hand.joints = {};
+                    return hand;
+                }),
+                addEventListener: vi.fn(),
+                removeEventListener: vi.fn(),
+                setReferenceSpaceType: vi.fn(),
+                setAnimationLoop: vi.fn(),
+                getDepthSensingMesh: vi.fn(() => null),
+            };
+            this.init = vi.fn().mockResolvedValue(undefined);
+            this.setPixelRatio = vi.fn();
+            this.setSize = vi.fn();
+            this.setAnimationLoop = vi.fn();
+            this.render = vi.fn();
+            this.dispose = vi.fn();
+            this.hasFeature = vi.fn(() => false);
+            this.clear = vi.fn();
+            this.clearDepth = vi.fn();
+            this.setRenderTarget = vi.fn();
+            this.getRenderTarget = vi.fn(() => null);
+            this.getClearColor = vi.fn((target) => target ?? new original.Color());
+            this.getClearAlpha = vi.fn(() => 0);
+            this.setClearColor = vi.fn();
+            this.autoClearColor = true;
+            this.getDrawingBufferSize = vi.fn((target) => target.set(160, 160));
+            this.readRenderTargetPixelsAsync = vi.fn(() => Promise.resolve(new Float32Array(160 * 160)));
+        }
+    }
+    return {
+        ...actual,
+        WebGPURenderer: MockWebGPURenderer,
     };
 });
 // Mock GLTFLoader to return a mock hand hierarchy with bones immediately under JSDOM.
@@ -107,7 +164,7 @@ const isWebGLSupported = () => {
 };
 if (!isWebGLSupported()) {
     const { HAND_JOINT_NAMES } = await import('xrblocks');
-    vi.spyOn(GLTFLoader.prototype, 'load').mockImplementation((_url, onLoad) => {
+    GLTFLoader.prototype.load = function (_url, onLoad) {
         const mockHandScene = new THREE.Group();
         for (const jointName of HAND_JOINT_NAMES) {
             const bone = new THREE.Group();
@@ -123,5 +180,5 @@ if (!isWebGLSupported()) {
                 asset: {},
             });
         }
-    });
+    };
 }

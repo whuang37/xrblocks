@@ -14,15 +14,15 @@
  * limitations under the License.
  *
  * @file xrblocks.js
- * @version v0.21.0
- * @commitid 097f03a
- * @builddate 2026-08-25T01:04:27.433Z
+ * @version v0.21.1
+ * @commitid 4d7c04d
+ * @builddate 2026-09-27T20:45:08.479Z
  * @description XR Blocks SDK, built from source with the above commit ID.
  * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
  * and follow rules below:
  * 1. Include the following importmap for maximum compatibility:
-    "three": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/",
+    "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/",
     "@pmndrs/uikit": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit@1.0.64/dist/index.min.js",
     "@pmndrs/uikit-pub-sub": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit-pub-sub@1.0.64/dist/index.min.js",
     "@pmndrs/msdfonts": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.64/dist/index.min.js",
@@ -42,17 +42,8 @@
  */
 import { Container, Component, Custom, abortableEffect, Image, Text, reversePainterSortStable, Svg } from '@pmndrs/uikit';
 import * as THREE from 'three';
-import { T as TransformScript, t as MAX_GRADIENT_STOPS, u as DEFAULT_GRADIENT_PANEL_PROPS, v as ManipulationAction, w as getUIElementKind, x as getUIStructureRevision, U as UICard, y as setResolvedUICardSize, z as UIText, A as registerUIPresentationObject, B as isUIElement, C as getUIRevision, E as getUICardEdgeOptions, F as getSemanticControl, G as UIOverlay } from './entry.js';
+import { T as TransformScript, v as MAX_GRADIENT_STOPS, w as DEFAULT_GRADIENT_PANEL_PROPS, x as ManipulationAction, y as getUIPresentationObject, z as bindScrollView, A as updateScrollViewLayout, B as bindTextInput, C as normalizeTextInputValue, E as isUIElement, U as UIScrollView, F as getUIElementKind, G as getUIStructureRevision, J as UICard, L as setUICardContentMeasurer, N as setResolvedUICardSize, Q as UIText, V as UITextInput, Y as registerUIPresentationObject, Z as getUIRevision, _ as getUICardEdgeOptions, $ as normalizeManipulationConfig, a0 as getSemanticControl, a1 as UIOverlay } from './entry.js';
 import { signal, computed, effect } from '@preact/signals-core';
-import 'three/addons/postprocessing/Pass.js';
-import 'three/addons/webxr/XRControllerModelFactory.js';
-import 'three/addons/webxr/XRHandModelFactory.js';
-import 'three/addons/webxr/XREstimatedLight.js';
-import 'three/addons/loaders/FontLoader.js';
-import 'three/addons/geometries/TextGeometry.js';
-import 'three/addons/loaders/DRACOLoader.js';
-import 'three/addons/loaders/GLTFLoader.js';
-import 'three/addons/loaders/KTX2Loader.js';
 
 /**
  * A Container that renders one or more PanelLayers as its background.
@@ -117,6 +108,14 @@ class ShaderPanel extends Container {
 }
 
 const CommonFunctionsShader = `
+#include <clipping_planes_pars_fragment>
+
+float panelClipAlpha() {
+    vec4 diffuseColor = vec4(1.0);
+    #include <clipping_planes_fragment>
+    return diffuseColor.a;
+}
+
 // SDF for a rounded box in 2D.
 float sdRoundedBox(vec2 p, vec2 b, float r) {
     vec2 d = abs(p) - (b - r);
@@ -277,6 +276,7 @@ uniform float u_drop_spread;
 uniform float u_drop_falloff;
 
 void main() {
+    float clippingAlpha = panelClipAlpha();
     // 1. Setup Coordinates.
     vec2 pos = vUv * u_resolution;
     vec2 size = u_resolution;
@@ -363,6 +363,7 @@ void main() {
 
     gl_FragColor = vec4(finalColor.rgb, finalAlpha);
 
+    gl_FragColor.a *= clippingAlpha;
     #include <dithering_fragment>
 }
 `;
@@ -670,10 +671,13 @@ function updateStrokeUniforms(uniforms, properties) {
 }
 
 const PanelVertexShader = `
+#include <clipping_planes_pars_vertex>
 varying vec2 vUv;
 void main() {
     vUv = uv;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * mvPosition;
+    #include <clipping_planes_vertex>
 }
 `;
 
@@ -692,7 +696,15 @@ class PanelShaderMaterial extends THREE.ShaderMaterial {
         super({
             vertexShader: PanelVertexShader,
             // Default to pink to indicate "Missing Shader" - Subclasses must override
-            fragmentShader: 'void main() { gl_FragColor = vec4(1.0, 0.0, 1.0, 1.0); }',
+            fragmentShader: `
+        #include <clipping_planes_pars_fragment>
+        void main() {
+          vec4 diffuseColor = vec4(1.0, 0.0, 1.0, 1.0);
+          #include <clipping_planes_fragment>
+          gl_FragColor = diffuseColor;
+        }
+      `,
+            clipping: true,
             transparent: true,
             side: THREE.FrontSide,
             forceSinglePass: true,
@@ -825,6 +837,7 @@ uniform vec4 u_fill_gradientColors[MAX_GRADIENT_STOPS];
 uniform int u_fill_numStops;
 
 void main() {
+    float clippingAlpha = panelClipAlpha();
     // 1. Setup Coordinates.
     vec2 pos = vUv * u_resolution;
     vec2 size = u_resolution;
@@ -871,6 +884,7 @@ void main() {
     finalColor.a *= alphaMask * u_opacity;
 
     gl_FragColor = finalColor;
+    gl_FragColor.a *= clippingAlpha;
 
     #include <dithering_fragment>
 }
@@ -935,6 +949,7 @@ uniform float u_inner_spread;
 uniform float u_inner_falloff;
 
 void main() {
+    float clippingAlpha = panelClipAlpha();
     // 1. Setup Coordinates.
     vec2 pos = vUv * u_resolution;
     vec2 size = u_resolution;
@@ -1051,6 +1066,7 @@ void main() {
 
     gl_FragColor = vec4(finalColor.rgb, finalAlpha);
 
+    gl_FragColor.a *= clippingAlpha;
     #include <dithering_fragment>
 }
 `;
@@ -1118,6 +1134,7 @@ uniform float u_drop_shadow_margin;
 varying vec2 vUv;
 
 void main() {
+    float clippingAlpha = panelClipAlpha();
     // 1. Setup Coordinates.
     vec2 pos = vUv * u_resolution;
     vec2 size = u_resolution;
@@ -1174,6 +1191,7 @@ void main() {
 
     gl_FragColor = vec4(finalColor.rgb, finalColor.a * alphaMask * u_opacity);
 
+    gl_FragColor.a *= clippingAlpha;
     #include <dithering_fragment>
 }
 `;
@@ -1622,6 +1640,21 @@ class GradientPanel extends ShaderPanel {
     }
 }
 
+/**
+ * Length of each resize corner along the card's sides, beyond the rounded
+ * corner, in edge margins.
+ */
+const RESIZE_CORNER_SIDE_MARGINS = 2;
+/**
+ * Largest share of each side's half-length a resize corner may cover, so the
+ * middle of every side stays available for moving the card.
+ */
+const MAX_RESIZE_CORNER_FRACTION = 0.5;
+/** Stroke width multiplier for a hovered resize corner. */
+const RESIZE_CORNER_EDGE_WIDTH_SCALE = 2;
+
+/** Formats a number as a GLSL float literal, which needs a decimal point. */
+const glslFloat = (value) => Number.isInteger(value) ? `${value}.0` : `${value}`;
 /** Fragment shader for the hover-lit manipulation edge around a UI card. */
 const UICardEdgeFragmentShader = CommonFunctionsShader +
     `
@@ -1643,6 +1676,30 @@ uniform float u_show_glow;
 uniform vec2 u_cursor_uv_2;
 uniform float u_show_glow_2;
 uniform float u_debug;
+uniform float u_resizable;
+
+const float RESIZE_CORNER_SIDE_MARGINS = ${glslFloat(RESIZE_CORNER_SIDE_MARGINS)};
+const float MAX_RESIZE_CORNER_FRACTION = ${glslFloat(MAX_RESIZE_CORNER_FRACTION)};
+const float RESIZE_CORNER_EDGE_WIDTH_SCALE = ${glslFloat(RESIZE_CORNER_EDGE_WIDTH_SCALE)};
+
+// Matches isOuterEdgeHit and isCornerHit in UICardEdge.ts.
+float cornerHighlight(
+    vec2 p,
+    vec2 cursorUv,
+    float showCursor,
+    vec2 size,
+    vec2 cornerStart,
+    vec2 innerHalfSize,
+    float innerRadius
+) {
+    if (showCursor < 0.5) return 0.0;
+    vec2 cursor = cursorUv * size - size * 0.5;
+    if (sdRoundedBox(cursor, innerHalfSize, innerRadius) < 0.0) return 0.0;
+    bool fragmentInCorner = all(greaterThanEqual(abs(p), cornerStart));
+    bool cursorInCorner = all(greaterThanEqual(abs(cursor), cornerStart));
+    bool sameCorner = all(equal(sign(p), sign(cursor)));
+    return fragmentInCorner && cursorInCorner && sameCorner ? 1.0 : 0.0;
+}
 
 void main() {
     vec2 pixelRes = u_resolution;
@@ -1709,7 +1766,26 @@ void main() {
 
     glowAlpha *= edgeBandMask;
 
-    if (glowAlpha > 0.001) {
+    float corner = 0.0;
+    if (u_resizable > 0.5) {
+        vec2 cornerExtent = min(
+            vec2(innerRadius + RESIZE_CORNER_SIDE_MARGINS * margin),
+            halfSize * MAX_RESIZE_CORNER_FRACTION
+        );
+        vec2 cornerStart = halfSize - cornerExtent;
+        corner = max(
+            cornerHighlight(
+                p, u_cursor_uv, u_show_glow, size, cornerStart,
+                innerHalfSize, innerRadius
+            ),
+            cornerHighlight(
+                p, u_cursor_uv_2, u_show_glow_2, size, cornerStart,
+                innerHalfSize, innerRadius
+            )
+        );
+    }
+
+    if (glowAlpha > 0.001 || corner > 0.0) {
         vec4 glow = u_cursor_spotlight_color;
         glow.a *= glowAlpha;
 
@@ -1728,13 +1804,15 @@ void main() {
             accumColor = vec4(outRGB, outA);
         }
 
-        float width = u_edge_width;
+        // Hovering a resize corner lights its whole arc with a thicker stroke.
+        float width =
+            u_edge_width * mix(1.0, RESIZE_CORNER_EDGE_WIDTH_SCALE, corner);
         float edgeMask = smoothstep(
             -width - aa,
             -width,
             distToEdge
         );
-        float edgeOpacity = glowAlpha;
+        float edgeOpacity = max(glowAlpha, corner);
 
         vec4 edgeResult = vec4(0.0);
         if (edgeMask > 0.0 && edgeOpacity > 0.0) {
@@ -1784,6 +1862,7 @@ const DEFAULT_EDGE_PROPERTIES = {
     spotlightRadius: 20,
     spotlightBlur: 40,
     debug: false,
+    resizable: false,
 };
 class UICardEdgeLayer extends PanelLayer {
     constructor(inputProperties, initialClasses, config = {}) {
@@ -1806,6 +1885,7 @@ class UICardEdgeLayer extends PanelLayer {
             setVector2(this.material, 'u_cursor_uv_2', signals.u_cursor_uv_2?.value);
             setNumber(this.material, 'u_show_glow_2', signals.u_show_glow_2?.value);
             setNumber(this.material, 'u_debug', signals.u_debug?.value);
+            setNumber(this.material, 'u_resizable', signals.u_resizable?.value);
         }, this.abortSignal);
     }
     setCursor(uv, index) {
@@ -1850,26 +1930,62 @@ class UICardEdge extends UICardEdgeLayer {
             u_cursor_uv_2: new THREE.Vector2(0.5, 0.5),
             u_show_glow_2: 0,
             u_debug: resolved.debug ? 1 : 0,
+            u_resizable: resolved.resizable ? 1 : 0,
         });
         this.name = 'UICardEdge';
+        /**
+         * Hit target that edge corner intersections are retargeted to. UIKit only
+         * accepts UIKit children, so it stays detached and mirrors the edge's world
+         * matrix for reticle normals.
+         */
+        this.resizeHandle = new THREE.Object3D();
         this.cursorLocal = [new THREE.Vector3(), new THREE.Vector3()];
         this.cursorUV = [new THREE.Vector2(), new THREE.Vector2()];
+        /** Returns true when a world point lies in the outer edge hit band. */
+        this.containsPoint = (point, padding = 0) => {
+            const size = this.size.value;
+            if (!size)
+                return false;
+            this.updateWorldMatrix(true, false);
+            if (Math.abs(this.matrixWorld.determinant()) < Number.EPSILON)
+                return false;
+            const local = this.worldToLocal(point.clone());
+            const xScale = new THREE.Vector3()
+                .setFromMatrixColumn(this.matrixWorld, 0)
+                .length();
+            const paddingPixels = padding > 0 && xScale > Number.EPSILON ? (padding / xScale) * size[0] : 0;
+            const uv = new THREE.Vector2(local.x + 0.5, local.y + 0.5);
+            return isOuterEdgeHit(uv, size, this.margin, this._cardCornerRadius, paddingPixels);
+        };
         this.xb = {
             manipulationHandle: { action: ManipulationAction.Translate },
         };
         this.margin = margin;
         this._cardCornerRadius = cardCornerRadius;
+        this._resizable = resolved.resizable;
+        this.resizeHandle.name = 'UICardResizeHandle';
+        this.resizeHandle.xb = {
+            manipulationHandle: { action: ManipulationAction.Resize },
+        };
+        this.resizeHandle.matrixAutoUpdate = false;
+        this.resizeHandle.matrixWorldAutoUpdate = false;
         const baseRaycast = this.raycast.bind(this);
         this.raycast = (raycaster, intersections) => {
             const firstNewIntersection = intersections.length;
             baseRaycast(raycaster, intersections);
             const size = this.size.value;
             for (let index = intersections.length - 1; index >= firstNewIntersection; index--) {
-                const uv = intersections[index].uv;
+                const intersection = intersections[index];
+                const uv = intersection.uv;
                 if (!size ||
                     !uv ||
                     !isOuterEdgeHit(uv, size, this.margin, this._cardCornerRadius)) {
                     intersections.splice(index, 1);
+                }
+                else if (this._resizable &&
+                    isCornerHit(uv, size, this.margin, this._cardCornerRadius)) {
+                    this.resizeHandle.matrixWorld.copy(this.matrixWorld);
+                    intersection.object = this.resizeHandle;
                 }
             }
         };
@@ -1884,6 +2000,31 @@ class UICardEdge extends UICardEdgeLayer {
         if (signal)
             signal.value = nextRadius;
         setNumber(this.material, 'u_card_corner_radius', nextRadius);
+    }
+    get resizable() {
+        return this._resizable;
+    }
+    setResizable(resizable) {
+        this._resizable = resizable;
+        const signal = this.properties.signal.u_resizable;
+        if (signal)
+            signal.value = resizable ? 1 : 0;
+        setNumber(this.material, 'u_resizable', resizable ? 1 : 0);
+    }
+    /** Returns the resize handle when a world point touches a resize corner. */
+    touchTarget(point) {
+        const size = this.size.value;
+        if (!this._resizable || !size)
+            return undefined;
+        this.updateWorldMatrix(true, false);
+        const local = this.worldToLocal(point.clone());
+        const uv = new THREE.Vector2(local.x + 0.5, local.y + 0.5);
+        if (!isOuterEdgeHit(uv, size, this.margin, this._cardCornerRadius) ||
+            !isCornerHit(uv, size, this.margin, this._cardCornerRadius)) {
+            return undefined;
+        }
+        this.resizeHandle.matrixWorld.copy(this.matrixWorld);
+        return this.resizeHandle;
     }
     setCursorPoints(first, second) {
         this.setCursorPoint(first, 0);
@@ -1912,6 +2053,7 @@ function createUniforms() {
         u_cursor_uv_2: { value: new THREE.Vector2(0.5, 0.5) },
         u_show_glow_2: { value: 0 },
         u_debug: { value: 0 },
+        u_resizable: { value: 0 },
     };
 }
 function setNumber(material, name, value) {
@@ -1928,7 +2070,7 @@ function setVector2(material, name, value) {
     if (value !== undefined)
         material.uniforms[name].value.copy(value);
 }
-function isOuterEdgeHit(uv, size, margin, cardCornerRadius) {
+function isOuterEdgeHit(uv, size, margin, cardCornerRadius, padding = 0) {
     const halfWidth = size[0] / 2;
     const halfHeight = size[1] / 2;
     const x = uv.x * size[0] - halfWidth;
@@ -1937,8 +2079,23 @@ function isOuterEdgeHit(uv, size, margin, cardCornerRadius) {
     const innerHalfHeight = Math.max(0, halfHeight - margin);
     const innerRadius = Math.min(cardCornerRadius, innerHalfWidth, innerHalfHeight);
     const outerRadius = Math.min(innerRadius + margin, halfWidth, halfHeight);
-    return (roundedBoxDistance(x, y, halfWidth, halfHeight, outerRadius) <= 0 &&
-        roundedBoxDistance(x, y, innerHalfWidth, innerHalfHeight, innerRadius) >= 0);
+    return (roundedBoxDistance(x, y, halfWidth, halfHeight, outerRadius) <= padding &&
+        roundedBoxDistance(x, y, innerHalfWidth, innerHalfHeight, innerRadius) >=
+            -padding);
+}
+/**
+ * Returns true inside the band's corner regions. Each region covers the rounded
+ * corner arc plus one margin width along both adjoining sides.
+ */
+function isCornerHit(uv, size, margin, cardCornerRadius) {
+    const halfWidth = size[0] / 2;
+    const halfHeight = size[1] / 2;
+    const innerRadius = Math.min(cardCornerRadius, Math.max(0, halfWidth - margin), Math.max(0, halfHeight - margin));
+    const extent = innerRadius + RESIZE_CORNER_SIDE_MARGINS * margin;
+    const x = Math.abs(uv.x * size[0] - halfWidth);
+    const y = Math.abs(uv.y * size[1] - halfHeight);
+    return (x >= halfWidth - Math.min(extent, halfWidth * MAX_RESIZE_CORNER_FRACTION) &&
+        y >= halfHeight - Math.min(extent, halfHeight * MAX_RESIZE_CORNER_FRACTION));
 }
 function roundedBoxDistance(x, y, halfWidth, halfHeight, radius) {
     const qx = Math.abs(x) - halfWidth + radius;
@@ -2018,7 +2175,7 @@ function canRenderEmojiText(value) {
 function emojiContainerProperties(properties) {
     return {
         flexDirection: 'row',
-        flexWrap: properties.whiteSpace === 'nowrap' ? 'nowrap' : 'wrap',
+        flexWrap: properties.whiteSpace === 'nowrap' ? 'no-wrap' : 'wrap',
         alignItems: 'center',
         justifyContent: properties.textAlign === 'center'
             ? 'center'
@@ -2073,14 +2230,92 @@ function emojiUrl(emoji) {
     return `https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/${hex}.png`;
 }
 
+/** Shared scrollbar width and reserved gutter, in UI layout units. */
+const DEFAULT_SCROLLBAR_WIDTH = 8;
+/** Line-height fallback as a multiple of the current font size. */
+const DEFAULT_TEXT_LINE_HEIGHT = 1.2;
+/** Font-size fallback, in UI layout units, when a style supplies none. */
+const DEFAULT_TEXT_FONT_SIZE = 16;
+/** Width of an editable tab stop, measured in spaces. */
+const DEFAULT_TEXT_TAB_SIZE = 4;
+
+/**
+ * Font stack shared by every canvas-rendered UI text.
+ *
+ * It resolves to the host operating system's UI face, so the platform's own
+ * fallback chain covers every script the device can display instead of a single
+ * bundled typeface that would draw missing-glyph boxes.
+ */
+const SYSTEM_FONT_STACK = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+const NORMAL_FONT_WEIGHT = 400;
+const MEDIUM_FONT_WEIGHT = 500;
+const BOLD_FONT_WEIGHT = 700;
+/** Largest canvas edge we allocate, which every WebGL 2 device supports. */
 const MAX_CANVAS_DIMENSION = 4096;
+/**
+ * Samples per device pixel. Text is magnified by the headset optics, so one
+ * device pixel per layout pixel leaves visible stair-stepping on glyph edges.
+ */
 const CANVAS_SUPERSAMPLING = 2;
-const MEASURE_MODE_UNDEFINED = 0;
-const MEASURE_MODE_EXACTLY = 1;
-const SYSTEM_FONT = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-const graphemeSegmenter = new Intl.Segmenter(undefined, {
+const graphemeSegmenter$1 = new Intl.Segmenter(undefined, {
     granularity: 'grapheme',
 });
+/** Maps the CSS-like weight keywords onto numeric CSS font weights. */
+function resolveFontWeight(value) {
+    if (typeof value === 'number')
+        return value;
+    if (value === 'bold')
+        return BOLD_FONT_WEIGHT;
+    if (value === 'medium')
+        return MEDIUM_FONT_WEIGHT;
+    return NORMAL_FONT_WEIGHT;
+}
+/** Builds a CSS `font` shorthand for a canvas context or a DOM mirror. */
+function fontShorthand(fontSize, weight) {
+    return `${resolveFontWeight(weight)} ${fontSize}px ${SYSTEM_FONT_STACK}`;
+}
+/** Converts a Three.js color representation into a CSS color string. */
+function cssColor(color) {
+    if (typeof color === 'string')
+        return color;
+    return `#${new THREE.Color(color).getHexString()}`;
+}
+/**
+ * Resolves a CSS-like line height into layout units. Bare numbers are a
+ * multiple of the font size, matching CSS.
+ */
+function resolveLineHeight(value, fontSize) {
+    if (typeof value === 'number')
+        return value * fontSize;
+    if (typeof value === 'string' && value.endsWith('px')) {
+        return Number.parseFloat(value);
+    }
+    if (typeof value === 'string' && value.endsWith('%')) {
+        return (Number.parseFloat(value) / 100) * fontSize;
+    }
+    return fontSize * DEFAULT_TEXT_LINE_HEIGHT;
+}
+/** Splits text into user-perceived characters, never inside a grapheme. */
+function graphemes(text) {
+    return Array.from(graphemeSegmenter$1.segment(text), ({ segment }) => segment);
+}
+/** Splits text into graphemes carrying their UTF-16 start index. */
+function graphemeSegments(text) {
+    return Array.from(graphemeSegmenter$1.segment(text), ({ segment, index }) => ({
+        segment,
+        index,
+    }));
+}
+/**
+ * Supersampling factor for a canvas covering `width` by `height` layout units,
+ * capped so the backing texture stays within {@link MAX_CANVAS_DIMENSION}.
+ */
+function resolveRasterScale(width, height) {
+    return Math.max(Number.EPSILON, Math.min((globalThis.devicePixelRatio || 1) * CANVAS_SUPERSAMPLING, MAX_CANVAS_DIMENSION / width, MAX_CANVAS_DIMENSION / height));
+}
+
+const MEASURE_MODE_UNDEFINED = 0;
+const MEASURE_MODE_EXACTLY = 1;
 /** Canvas-backed text used when UIkit's fixed glyph atlas cannot render text. */
 class UnicodeText extends Image {
     constructor(properties) {
@@ -2141,7 +2376,7 @@ class UnicodeText extends Image {
     draw(width, height) {
         if (!(width > 0) || !(height > 0))
             return;
-        const scale = Math.max(Number.EPSILON, Math.min((window.devicePixelRatio || 1) * CANVAS_SUPERSAMPLING, MAX_CANVAS_DIMENSION / width, MAX_CANVAS_DIMENSION / height));
+        const scale = resolveRasterScale(width, height);
         const pixelWidth = Math.max(1, Math.ceil(width * scale));
         const pixelHeight = Math.max(1, Math.ceil(height * scale));
         if (this.canvas.width !== pixelWidth ||
@@ -2182,10 +2417,10 @@ function imageProperties(properties, texture) {
     };
 }
 function metricsStyle(properties) {
-    const fontSize = properties.fontSize ?? 16;
+    const fontSize = properties.fontSize ?? DEFAULT_TEXT_FONT_SIZE;
     return {
         color: cssColor(properties.color ?? '#ffffff'),
-        font: `${fontWeight(properties.fontWeight)} ${fontSize}px ${SYSTEM_FONT}`,
+        font: fontShorthand(fontSize, properties.fontWeight),
         lineHeight: resolveLineHeight(properties.lineHeight, fontSize),
         textAlign: properties.textAlign ?? 'left',
         whiteSpace: properties.whiteSpace ?? 'normal',
@@ -2193,31 +2428,6 @@ function metricsStyle(properties) {
 }
 function applyFont(context, style) {
     context.font = style.font;
-}
-function fontWeight(value) {
-    if (typeof value === 'number')
-        return value;
-    if (value === 'bold')
-        return 700;
-    if (value === 'medium')
-        return 500;
-    return 400;
-}
-function resolveLineHeight(value, fontSize) {
-    if (typeof value === 'number')
-        return value * fontSize;
-    if (typeof value === 'string' && value.endsWith('px')) {
-        return Number.parseFloat(value);
-    }
-    if (typeof value === 'string' && value.endsWith('%')) {
-        return (Number.parseFloat(value) / 100) * fontSize;
-    }
-    return fontSize * 1.2;
-}
-function cssColor(color) {
-    if (typeof color === 'string')
-        return color;
-    return `#${new THREE.Color(color).getHexString()}`;
 }
 function layoutText(context, text, style, availableWidth) {
     const paragraphs = style.whiteSpace === 'pre-line'
@@ -2282,9 +2492,6 @@ function widestCharacter(context, text) {
         }
     }
     return widest || ' ';
-}
-function graphemes(text) {
-    return Array.from(graphemeSegmenter.segment(text), ({ segment }) => segment);
 }
 
 /** Stable layout node that selects native or canvas glyph rendering internally. */
@@ -2364,8 +2571,13 @@ function nativeTextProperties(properties) {
     const shared = glyphProperties(properties);
     return {
         ...shared,
-        whiteSpace: properties.whiteSpace === 'nowrap' ? 'normal' : properties.whiteSpace,
-        wordBreak: properties.whiteSpace === 'nowrap' ? 'keep-all' : 'break-word',
+        ...nativeTextWrapping(properties.whiteSpace),
+    };
+}
+function nativeTextWrapping(whiteSpace) {
+    return {
+        whiteSpace: whiteSpace === 'nowrap' ? 'normal' : whiteSpace,
+        wordBreak: whiteSpace === 'nowrap' ? 'keep-all' : 'break-word',
     };
 }
 function unicodeTextProperties(properties) {
@@ -2387,10 +2599,958 @@ function glyphProperties(properties) {
     };
 }
 
+/** Keeps scroll clipping inside the decorative shell instead of clipping its shadows. */
+class ScrollViewPresentation {
+    constructor(view, shell) {
+        this.view = view;
+        this.viewport = new Container({
+            width: '100%',
+            flexGrow: 1,
+            flexShrink: 1,
+            flexBasis: 0,
+            minHeight: 0,
+            overflow: 'scroll',
+            scrollbarWidth: DEFAULT_SCROLLBAR_WIDTH,
+            paddingRight: DEFAULT_SCROLLBAR_WIDTH,
+            flexDirection: 'column',
+        });
+        this.content = new Container({
+            width: '100%',
+            flexShrink: 0,
+            flexDirection: 'column',
+            alignItems: 'stretch',
+        });
+        this.projectPoint = (point) => {
+            const size = this.viewport.size.peek();
+            if (!size || size[0] <= 0 || size[1] <= 0)
+                return undefined;
+            const local = this.viewport.worldToLocal(point.clone());
+            return new THREE.Vector2((local.x + 0.5) * size[0], (0.5 - local.y) * size[1]);
+        };
+        this.applyOffset = (offset) => {
+            const current = this.viewport.scrollPosition.peek();
+            this.viewport.scrollVelocity.set(0, 0);
+            if (current[0] !== 0 || current[1] !== offset) {
+                this.viewport.scrollPosition.value = [0, offset];
+            }
+        };
+        this.reveal = (child) => {
+            const physical = getUIPresentationObject(child);
+            if (!(physical instanceof THREE.Mesh)) {
+                throw new Error('Cannot reveal UI before its presentation is mounted.');
+            }
+            physical.updateWorldMatrix(true, false);
+            const points = [-0.5, 0.5].flatMap((x) => [-0.5, 0.5].map((y) => this.projectPoint(new THREE.Vector3(x, y, 0).applyMatrix4(physical.matrixWorld))));
+            if (points.some((point) => !point)) {
+                throw new Error('Cannot reveal UI before its viewport has a layout.');
+            }
+            const ys = points.map((point) => point.y);
+            const top = Math.min(...ys);
+            const bottom = Math.max(...ys);
+            if (top < 0)
+                this.view.scrollBy(top);
+            else if (bottom > this.view.clientHeight) {
+                this.view.scrollBy(bottom - this.view.clientHeight);
+            }
+        };
+        shell.add(this.viewport);
+        this.viewport.add(this.content);
+        this.unbind = bindScrollView(view, {
+            projectPoint: this.projectPoint,
+            reveal: this.reveal,
+            applyOffset: this.applyOffset,
+            scrollbarHit: (point) => scrollbarHit(this.viewport, point),
+        });
+    }
+    commit(properties) {
+        this.content.setProperties({
+            flexDirection: properties.flexDirection ?? 'column',
+            alignItems: properties.alignItems ?? 'stretch',
+            justifyContent: properties.justifyContent ?? 'flex-start',
+            gapRow: properties.rowGap ?? properties.gap,
+            gapColumn: properties.columnGap ?? properties.gap,
+        });
+        this.viewport.setProperties({
+            scrollbarColor: properties.color ?? '#888888',
+        });
+    }
+    afterLayout() {
+        const size = this.viewport.size.peek();
+        if (!size)
+            return;
+        const height = size[1];
+        const maximum = this.viewport.maxScrollPosition.peek()[1] ?? 0;
+        updateScrollViewLayout(this.view, height, height + maximum);
+        this.applyOffset(this.view.scrollTop);
+    }
+    dispose() {
+        this.unbind();
+        this.content.removeFromParent();
+        this.content.dispose();
+        this.viewport.removeFromParent();
+        this.viewport.dispose();
+    }
+}
+/** Maps the viewport's proportional thumb/track to a vertical scroll gesture. */
+function scrollbarHit(viewport, point) {
+    const size = viewport.size.peek();
+    const maximum = viewport.maxScrollPosition.peek()[1];
+    if (!size || maximum === undefined || maximum <= 0)
+        return undefined;
+    const width = viewport.properties.peek().scrollbarWidth;
+    const [top, right, bottom] = viewport.borderInset.peek() ?? [0, 0, 0, 0];
+    const local = viewport.worldToLocal(point.clone());
+    const x = (local.x + 0.5) * size[0];
+    const y = (0.5 - local.y) * size[1] - top;
+    const height = size[1] - top - bottom;
+    if (x < size[0] - right - width ||
+        x > size[0] - right ||
+        y < 0 ||
+        y > height) {
+        return undefined;
+    }
+    const thumb = Math.max(width, (height * height) / (height + maximum));
+    const travel = height - thumb;
+    if (travel <= 0)
+        return undefined;
+    const offset = viewport.scrollPosition.peek()[1];
+    const start = (offset / maximum) * travel;
+    return {
+        offset: y >= start && y <= start + thumb
+            ? offset
+            : Math.max(0, Math.min(maximum, ((y - thumb / 2) * maximum) / travel)),
+        scale: maximum / travel,
+    };
+}
+
+const MIN_AREA_VECTOR_LENGTH_SQ = 1e-20;
+/** Shares mounted clipping geometry between ray hits, touch, and scene context. */
+class UIHitRegion {
+    constructor(node) {
+        this.node = node;
+        this.containsPoint = (point, padding = 0) => {
+            const node = this.node;
+            if (!this.available())
+                return false;
+            node.updateWorldMatrix(true, false);
+            if (Math.abs(node.matrixWorld.determinant()) < Number.EPSILON)
+                return false;
+            const local = node.worldToLocal(point.clone());
+            const xScale = new THREE.Vector3()
+                .setFromMatrixColumn(node.matrixWorld, 0)
+                .length();
+            const yScale = new THREE.Vector3()
+                .setFromMatrixColumn(node.matrixWorld, 1)
+                .length();
+            if (Math.abs(local.x) > 0.5 + padding / xScale ||
+                Math.abs(local.y) > 0.5 + padding / yScale) {
+                return false;
+            }
+            const global = point.clone().applyMatrix4(this.globalToWorld().invert());
+            return this.planes().every((plane) => plane.distanceToPoint(global) >= -1e-9);
+        };
+        this.bounds = (target) => {
+            if (!this.available())
+                return null;
+            const panel = this.node.globalPanelMatrix.peek();
+            if (!panel)
+                return null;
+            let polygon = [
+                new THREE.Vector3(-0.5, -0.5, 0),
+                new THREE.Vector3(0.5, -0.5, 0),
+                new THREE.Vector3(0.5, 0.5, 0),
+                new THREE.Vector3(-0.5, 0.5, 0),
+            ].map((point) => point.applyMatrix4(panel));
+            for (const plane of this.planes())
+                polygon = clipPolygon(polygon, plane);
+            if (polygon.length < 3)
+                return null;
+            const area = new THREE.Vector3();
+            for (let i = 1; i + 1 < polygon.length; i++) {
+                area.add(polygon[i]
+                    .clone()
+                    .sub(polygon[0])
+                    .cross(polygon[i + 1].clone().sub(polygon[0])));
+            }
+            if (area.lengthSq() < MIN_AREA_VECTOR_LENGTH_SQ)
+                return null;
+            const matrix = this.globalToWorld();
+            target.makeEmpty();
+            for (const point of polygon)
+                target.expandByPoint(point.applyMatrix4(matrix));
+            return target;
+        };
+    }
+    available() {
+        const size = this.node.size.peek();
+        return Boolean(this.node.visible &&
+            this.node.displayed.peek() &&
+            !this.node.isClipped.peek() &&
+            size &&
+            size[0] > 0 &&
+            size[1] > 0);
+    }
+    planes() {
+        return this.node.parentContainer.peek()?.clippingRect.peek()?.planes ?? [];
+    }
+    globalToWorld() {
+        const root = this.node.root.peek().component;
+        root.parent?.updateWorldMatrix(true, false);
+        root.updateMatrix();
+        const matrix = root.matrix.clone();
+        if (root.parent)
+            matrix.premultiply(root.parent.matrixWorld);
+        return matrix;
+    }
+}
+function clipPolygon(polygon, plane) {
+    const result = [];
+    for (let i = 0; i < polygon.length; i++) {
+        const a = polygon[i];
+        const b = polygon[(i + 1) % polygon.length];
+        const da = plane.distanceToPoint(a);
+        const db = plane.distanceToPoint(b);
+        if (da >= 0)
+            result.push(a);
+        if (da < 0 !== db < 0) {
+            result.push(a.clone().lerp(b, da / (da - db)));
+        }
+    }
+    return result;
+}
+
+const IME_COMPOSITION_KEY_CODE = 229;
+const editors = new Set();
+let focusedEditor;
+/**
+ * Owns the hidden native element that performs real text editing.
+ *
+ * The native control stays authoritative for physical keyboards, IME, and
+ * clipboard. This class only mirrors its results into the retained field and
+ * exposes the narrow operations a virtual keyboard or automation needs.
+ */
+class TextInputEditor {
+    constructor(field, presentation) {
+        this.field = field;
+        this.presentation = presentation;
+        this.listeners = [];
+        this.available = true;
+        this.disposed = false;
+        this.composing = false;
+        this.nativeKeyboardSuppressed = false;
+        this.element = createEditingElement(field);
+        this.host = bindTextInput(field, this.createBinding());
+        document.body.appendChild(this.element);
+        this.listen('input', () => this.host.notifyInput(this.element.value));
+        this.listen('compositionstart', () => (this.composing = true));
+        this.listen('compositionend', () => {
+            this.composing = false;
+            this.host.notifyInput(this.element.value);
+        });
+        this.listen('keydown', (event) => this.handleKeyDown(event));
+        this.listen('focus', () => {
+            setFocusedEditor(this);
+            this.host.notifyFocus();
+            this.presentation.reveal?.();
+        });
+        this.listen('blur', () => {
+            if (focusedEditor === this)
+                setFocusedEditor(undefined);
+            this.anchor = undefined;
+            this.host.notifyBlur();
+        });
+        editors.add(this);
+        this.sync(true);
+    }
+    /**
+     * Applies retained field state to the native control.
+     *
+     * Pass false for hidden or unmounted fields, which also releases focus.
+     * Clipping alone is not an unmounted state.
+     */
+    sync(available = true) {
+        if (this.disposed)
+            return;
+        this.available = available;
+        const element = this.element;
+        if (!available) {
+            this.releaseFocus();
+            element.disabled = true;
+            return;
+        }
+        const field = this.field;
+        if (field.disabled)
+            this.releaseFocus();
+        element.disabled = field.disabled;
+        element.tabIndex = this.presentation.isReady() ? 0 : -1;
+        element.readOnly = field.readOnly;
+        this.syncKeyboardPolicy();
+        element.placeholder = field.placeholder;
+        element.setAttribute('aria-label', field.ariaLabel);
+        if (field.maxLength === undefined)
+            element.removeAttribute('maxlength');
+        else
+            element.maxLength = field.maxLength;
+        if (element.value !== field.value)
+            element.value = field.value;
+    }
+    dispose() {
+        if (this.disposed)
+            return;
+        this.releaseFocus();
+        for (const [type, listener] of this.listeners) {
+            this.element.removeEventListener(type, listener);
+        }
+        this.listeners.length = 0;
+        this.element.remove();
+        this.disposed = true;
+        this.available = false;
+        editors.delete(this);
+        if (focusedEditor === this)
+            setFocusedEditor(undefined);
+        this.host.unbind();
+    }
+    /** Blurs the focused field unless the pointer target preserves its focus. */
+    static handlePointerTarget(target) {
+        const editor = focusedEditor;
+        if (!editor)
+            return;
+        if (target && preservesFocus(editor.field, target))
+            return;
+        editor.element.blur();
+    }
+    /**
+     * Suppresses the browser's default canvas blur while a field is focused.
+     *
+     * Propagation is untouched, and unrelated DOM controls keep their default
+     * behavior because only events targeting the canvas are prevented.
+     */
+    static guardCanvas(canvas) {
+        const guard = (event) => {
+            if (!focusedEditor)
+                return;
+            if (event.target !== canvas)
+                return;
+            event.preventDefault();
+        };
+        canvas.addEventListener('pointerdown', guard);
+        canvas.addEventListener('mousedown', guard);
+        let removed = false;
+        return () => {
+            if (removed)
+                return;
+            removed = true;
+            canvas.removeEventListener('pointerdown', guard);
+            canvas.removeEventListener('mousedown', guard);
+        };
+    }
+    listen(type, listener) {
+        this.element.addEventListener(type, listener);
+        this.listeners.push([type, listener]);
+    }
+    createBinding() {
+        return {
+            isReady: () => this.isReady(),
+            getError: () => this.presentation.getError?.(),
+            applyValue: (value) => {
+                if (this.element.value === value)
+                    return;
+                const selection = this.getSelection();
+                this.element.value = value;
+                if (selection) {
+                    this.setSelectionRange(selection.start, selection.end, selection.direction);
+                }
+            },
+            applyOptions: () => this.sync(this.available),
+            getSelection: () => this.getSelection(),
+            setSelectionRange: (start, end, direction) => this.setSelectionRange(start, end, direction),
+            focus: () => this.focusElement(),
+            blur: () => this.element.blur(),
+            insertText: (text) => void this.replaceSelection(text),
+            pressKey: (key, modifiers) => this.pressKey(key, modifiers),
+            begin: (input) => this.beginPointer(input),
+            update: (input) => this.updatePointer(input),
+            complete: () => (this.anchor = undefined),
+            cancel: () => (this.anchor = undefined),
+            getScroll: () => this.presentation.scroll,
+        };
+    }
+    isReady() {
+        return !this.disposed && this.available && this.presentation.isReady();
+    }
+    canFocus() {
+        return this.isReady() && !this.field.disabled;
+    }
+    syncKeyboardPolicy() {
+        const suppressed = this.field.nativeKeyboardSuppressed;
+        if (suppressed === this.nativeKeyboardSuppressed)
+            return;
+        this.nativeKeyboardSuppressed = suppressed;
+        if (!suppressed) {
+            this.element.removeAttribute('inputmode');
+            this.element.removeAttribute('virtualkeyboardpolicy');
+            return;
+        }
+        this.element.inputMode = 'none';
+        this.element.setAttribute('virtualkeyboardpolicy', 'manual');
+        if (document.activeElement !== this.element)
+            return;
+        const keyboard = 'virtualKeyboard' in navigator ? navigator.virtualKeyboard : undefined;
+        if (keyboard &&
+            typeof keyboard === 'object' &&
+            'hide' in keyboard &&
+            typeof keyboard.hide === 'function') {
+            keyboard.hide();
+        }
+    }
+    releaseFocus() {
+        if (focusedEditor === this || document.activeElement === this.element) {
+            this.element.blur();
+        }
+    }
+    getSelection() {
+        const { selectionStart, selectionEnd, selectionDirection } = this.element;
+        if (selectionStart == null || selectionEnd == null)
+            return undefined;
+        return {
+            start: selectionStart,
+            end: selectionEnd,
+            direction: (selectionDirection ??
+                'none'),
+        };
+    }
+    setSelectionRange(start, end, direction) {
+        this.element.setSelectionRange(Math.max(0, start), Math.max(0, end), direction);
+    }
+    handleKeyDown(event) {
+        const composing = this.composing ||
+            event.isComposing ||
+            event.keyCode === IME_COMPOSITION_KEY_CODE;
+        if (composing)
+            return;
+        if (this.presentation.handleKeyDown?.(event))
+            return;
+        if (event.key === 'Escape' && !composing) {
+            event.preventDefault();
+            this.element.blur();
+            return;
+        }
+        if (event.key !== 'Enter' || composing)
+            return;
+        if (!this.field.multiline) {
+            event.preventDefault();
+            this.host.notifySubmit();
+            return;
+        }
+        if (event.ctrlKey || event.metaKey) {
+            event.preventDefault();
+            this.host.notifySubmit();
+        }
+    }
+    pressKey(key, modifiers = {}) {
+        if (!this.isReady() || this.field.disabled || this.composing)
+            return false;
+        switch (key) {
+            case 'Tab':
+                return this.navigate(modifiers.shiftKey === true);
+            case 'Enter':
+                if (!this.field.multiline ||
+                    modifiers.ctrlKey === true ||
+                    modifiers.metaKey === true) {
+                    this.host.notifySubmit();
+                    return true;
+                }
+                return this.replaceSelection('\n');
+            case 'Backspace':
+                return this.deleteAtCaret('backward');
+            case 'Delete':
+                return this.deleteAtCaret('forward');
+            case 'Escape':
+                this.element.blur();
+                return true;
+            default:
+                if (countGraphemes(key) !== 1)
+                    return false;
+                return this.replaceSelection(key);
+        }
+    }
+    navigate(backward) {
+        const eligible = [...editors].filter((editor) => editor.canFocus());
+        const index = eligible.indexOf(this);
+        if (index < 0)
+            return false;
+        const next = eligible[backward ? index - 1 : index + 1];
+        if (!next) {
+            this.element.blur();
+            return true;
+        }
+        next.focusElement();
+        return true;
+    }
+    beginPointer(input) {
+        if (!this.canFocus())
+            return;
+        const index = this.presentation.caretAtPoint(input.point);
+        this.anchor = index;
+        this.focusElement();
+        if (index !== undefined)
+            this.setSelectionRange(index, index, 'none');
+    }
+    updatePointer(input) {
+        if (this.anchor === undefined || !this.isReady())
+            return;
+        const index = this.presentation.caretAtPoint(input.point);
+        if (index === undefined)
+            return;
+        const anchor = this.anchor;
+        this.setSelectionRange(Math.min(anchor, index), Math.max(anchor, index), anchor <= index ? 'forward' : 'backward');
+    }
+    deleteAtCaret(direction) {
+        const value = this.element.value;
+        const selection = this.getSelection() ?? {
+            start: value.length,
+            end: value.length};
+        if (selection.start !== selection.end)
+            return this.replaceSelection('');
+        const containing = containingGrapheme(value, selection.start);
+        if (containing)
+            return this.replaceRange(containing.start, containing.end, '');
+        if (direction === 'backward') {
+            if (selection.start === 0)
+                return false;
+            const start = graphemeBoundaryBefore(value, selection.start);
+            return this.replaceRange(start, selection.end, '');
+        }
+        if (selection.end >= value.length)
+            return false;
+        const end = graphemeBoundaryAfter(value, selection.end);
+        return this.replaceRange(selection.start, end, '');
+    }
+    replaceSelection(text) {
+        const value = this.element.value;
+        const selection = this.getSelection();
+        const start = selection?.start ?? value.length;
+        const end = selection?.end ?? value.length;
+        return this.replaceRange(start, end, text);
+    }
+    replaceRange(start, end, text) {
+        if (!this.isReady() ||
+            this.field.disabled ||
+            this.field.readOnly ||
+            this.composing) {
+            return false;
+        }
+        const element = this.element;
+        const value = element.value;
+        const from = Math.min(Math.max(0, start), value.length);
+        const to = Math.min(Math.max(from, end), value.length);
+        const insertion = clampInsertion(normalizeTextInputValue(text, this.field.multiline), value.length - (to - from), this.field.maxLength);
+        const next = value.slice(0, from) + insertion + value.slice(to);
+        if (next === value)
+            return false;
+        element.value = next;
+        const caret = from + insertion.length;
+        element.setSelectionRange(caret, caret, 'none');
+        this.host.notifyInput(element.value);
+        return true;
+    }
+    focusElement() {
+        this.element.focus();
+        if (document.activeElement !== this.element) {
+            throw new Error('The browser did not focus the text field.');
+        }
+    }
+}
+function setFocusedEditor(editor) {
+    focusedEditor = editor;
+}
+function createEditingElement(field) {
+    const element = field.multiline
+        ? document.createElement('textarea')
+        : document.createElement('input');
+    if (element instanceof HTMLInputElement)
+        element.type = 'text';
+    element.spellcheck = false;
+    element.setAttribute('autocomplete', 'off');
+    element.setAttribute('autocorrect', 'off');
+    element.setAttribute('autocapitalize', 'off');
+    element.setAttribute('aria-label', field.ariaLabel);
+    const style = element.style;
+    style.setProperty('position', 'fixed');
+    style.setProperty('left', '0');
+    style.setProperty('top', '0');
+    style.setProperty('width', '1px');
+    style.setProperty('height', '1px');
+    style.setProperty('padding', '0');
+    style.setProperty('border', '0');
+    style.setProperty('outline', 'none');
+    style.setProperty('opacity', '0');
+    style.setProperty('z-index', '-1');
+    style.setProperty('pointer-events', 'none');
+    style.setProperty('caret-color', 'transparent');
+    return element;
+}
+function preservesFocus(field, target) {
+    let node = target;
+    while (node) {
+        if (node === field)
+            return true;
+        if (node.xb?.preserveTextFocus)
+            return true;
+        node = node.parent;
+    }
+    return false;
+}
+function clampInsertion(text, retainedLength, maxLength) {
+    if (maxLength === undefined)
+        return text;
+    const remaining = maxLength - retainedLength;
+    if (remaining <= 0)
+        return '';
+    if (text.length <= remaining)
+        return text;
+    return truncateToGrapheme(text, remaining);
+}
+let graphemeSegmenter;
+function getGraphemeSegmenter() {
+    if (graphemeSegmenter === undefined) {
+        graphemeSegmenter =
+            typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function'
+                ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+                : null;
+    }
+    return graphemeSegmenter;
+}
+function countGraphemes(value) {
+    const segmenter = getGraphemeSegmenter();
+    if (!segmenter)
+        return [...value].length;
+    let count = 0;
+    for (const _segment of segmenter.segment(value))
+        count++;
+    return count;
+}
+function containingGrapheme(value, index) {
+    const segmenter = getGraphemeSegmenter();
+    if (!segmenter)
+        return undefined;
+    for (const { index: start, segment } of segmenter.segment(value)) {
+        const end = start + segment.length;
+        if (start < index && index < end)
+            return { start, end };
+        if (start >= index)
+            break;
+    }
+    return undefined;
+}
+/** Returns the cluster-safe offset preceding a UTF-16 caret position. */
+function graphemeBoundaryBefore(value, index) {
+    if (index <= 0)
+        return 0;
+    const segmenter = getGraphemeSegmenter();
+    if (!segmenter)
+        return codePointBoundaryBefore(value, index);
+    let boundary = 0;
+    for (const { index: start } of segmenter.segment(value)) {
+        if (start >= index)
+            break;
+        boundary = start;
+    }
+    return boundary;
+}
+/** Returns the cluster-safe offset following a UTF-16 caret position. */
+function graphemeBoundaryAfter(value, index) {
+    if (index >= value.length)
+        return value.length;
+    const segmenter = getGraphemeSegmenter();
+    if (!segmenter)
+        return codePointBoundaryAfter(value, index);
+    for (const { index: start, segment } of segmenter.segment(value)) {
+        const end = start + segment.length;
+        if (end > index)
+            return end;
+    }
+    return value.length;
+}
+function codePointBoundaryBefore(value, index) {
+    const code = value.charCodeAt(index - 1);
+    const isTrailSurrogate = code >= 0xdc00 && code <= 0xdfff;
+    return Math.max(0, index - (isTrailSurrogate && index >= 2 ? 2 : 1));
+}
+function codePointBoundaryAfter(value, index) {
+    const code = value.charCodeAt(index);
+    const isLeadSurrogate = code >= 0xd800 && code <= 0xdbff;
+    return Math.min(value.length, index + (isLeadSurrogate ? 2 : 1));
+}
+function truncateToGrapheme(value, limit) {
+    const boundary = graphemeBoundaryBefore(value, limit + 1);
+    return value.slice(0, Math.min(boundary, limit));
+}
+
+const CARET_BLINK_INTERVAL_SECONDS = 0.5;
+const TEXT_DEPTH_OFFSET = -1;
+/** The native editor stays light; glyph rendering loads only for editable fields. */
+class TextFieldPresentation {
+    constructor(field, shell, changed) {
+        this.field = field;
+        this.shell = shell;
+        this.changed = changed;
+        this.row = new Container({
+            width: '100%',
+            flexGrow: 1,
+            flexShrink: 1,
+            flexBasis: 0,
+            minHeight: 0,
+            flexDirection: 'row',
+            alignItems: 'stretch',
+        });
+        this.viewport = new Container({
+            flexGrow: 1,
+            flexBasis: 0,
+            minWidth: 0,
+            height: '100%',
+            overflow: 'hidden',
+        });
+        this.scrollbar = new Container({
+            width: DEFAULT_SCROLLBAR_WIDTH,
+            height: '100%',
+            flexShrink: 0,
+            overflow: 'scroll',
+            scrollbarWidth: DEFAULT_SCROLLBAR_WIDTH,
+            pointerEvents: 'none',
+        });
+        this.spacer = new Container({
+            width: DEFAULT_SCROLLBAR_WIDTH,
+            height: 0,
+            flexShrink: 0,
+        });
+        this.available = true;
+        this.active = true;
+        this.disposed = false;
+        this.elapsed = 0;
+        this.selectionKey = '';
+        this.contentHeight = -1;
+        shell.add(this.row);
+        this.row.add(this.viewport, this.scrollbar);
+        this.scrollbar.add(this.spacer);
+        this.scrollbar.setProperties({ display: field.multiline ? 'flex' : 'none' });
+        this.editor = new TextInputEditor(field, {
+            caretAtPoint: (point) => this.editable?.caretAtPoint(point),
+            isReady: () => this.editable?.isReady === true && this.hasLayout(),
+            getError: () => this.error,
+            reveal: () => this.revealField(),
+            handleKeyDown: (event) => this.handleKeyDown(event),
+            scroll: field.multiline
+                ? {
+                    getOffset: () => this.editable?.offsetY ?? 0,
+                    getViewportHeight: () => this.editable?.scroll.getViewportHeight() ?? 0,
+                    projectPoint: (point) => this.projectPoint(point),
+                    scrollBy: (delta) => this.editable?.scrollBy(delta) ?? false,
+                    scrollbarHit: (point) => field.multiline ? scrollbarHit(this.scrollbar, point) : undefined,
+                }
+                : undefined,
+        });
+        void import('./EditableText.js')
+            .then(({ EditableText: Presentation }) => {
+            if (this.disposed)
+                return;
+            this.editable = new Presentation(this.viewport, {
+                onError: (failure) => this.reportFailure(failure),
+                onLayout: () => {
+                    if (this.disposed)
+                        return;
+                    this.error = undefined;
+                    this.editor.sync(this.available);
+                    this.changed();
+                },
+            });
+            this.update();
+            this.changed();
+        })
+            .catch((cause) => {
+            if (this.disposed)
+                return;
+            this.reportFailure({
+                kind: 'layout-failed',
+                message: 'Editable text could not be initialized. Deploy the complete XR Blocks build directory.',
+                cause,
+            });
+        });
+    }
+    commit(theme) {
+        this.theme = theme;
+        this.scrollbar.setProperties({ scrollbarColor: theme.colors.outline });
+        this.update();
+    }
+    update(deltaSeconds = 0) {
+        if (this.disposed)
+            return;
+        this.available = this.active && this.publiclyVisible();
+        this.editor.sync(this.available);
+        const editable = this.editable;
+        if (!editable || !this.theme || !this.hasLayout())
+            return;
+        const selection = this.field.selection;
+        const key = `${this.field.focused}|${selection?.start}|${selection?.end}|${this.field.value.length}`;
+        if (key !== this.selectionKey) {
+            this.selectionKey = key;
+            this.elapsed = 0;
+        }
+        else {
+            this.elapsed += Math.max(0, deltaSeconds);
+        }
+        const properties = this.shell.properties.peek();
+        const fontSize = typeof properties.fontSize === 'number'
+            ? properties.fontSize
+            : Number.parseFloat(properties.fontSize);
+        const size = this.viewport.size.peek();
+        const lineHeight = lineHeightRatio(properties.lineHeight, fontSize);
+        const fontWeight = properties.fontWeight;
+        const color = properties.color;
+        const state = {
+            text: this.field.value,
+            placeholder: this.field.placeholder,
+            multiline: this.field.multiline,
+            focused: this.field.focused,
+            caretVisible: Math.floor(this.elapsed / CARET_BLINK_INTERVAL_SECONDS) % 2 === 0,
+            selectionStart: selection?.start,
+            selectionEnd: selection?.end,
+            selectionDirection: selection?.direction,
+            fontSize,
+            lineHeight,
+            fontWeight: typeof fontWeight === 'number' ||
+                fontWeight === 'medium' ||
+                fontWeight === 'bold'
+                ? fontWeight
+                : 'normal',
+            textAlign: properties.textAlign === 'center' || properties.textAlign === 'right'
+                ? properties.textAlign
+                : 'left',
+            color: typeof color === 'string' ||
+                typeof color === 'number' ||
+                color instanceof THREE.Color
+                ? color
+                : this.field.disabled
+                    ? this.theme.colors.disabledText
+                    : this.theme.colors.text,
+            placeholderColor: this.theme.colors.secondaryText,
+            caretColor: this.theme.colors.primary,
+            selectionColor: this.theme.colors.primary,
+            opacity: typeof properties.opacity === 'string'
+                ? Number.parseFloat(properties.opacity) / 100
+                : properties.opacity,
+            depthTest: properties.depthTest,
+            depthOffset: TEXT_DEPTH_OFFSET,
+            renderOrder: this.shell.renderOrder,
+        };
+        const nativeStyle = this.editor.element.style;
+        nativeStyle.width = `${size[0]}px`;
+        nativeStyle.height = `${size[1]}px`;
+        nativeStyle.font = fontShorthand(fontSize, state.fontWeight);
+        nativeStyle.lineHeight = String(lineHeight);
+        nativeStyle.fontKerning = 'normal';
+        nativeStyle.fontVariantLigatures = 'normal';
+        nativeStyle.tabSize = String(DEFAULT_TEXT_TAB_SIZE);
+        nativeStyle.textAlign = state.textAlign ?? 'left';
+        this.editor.element.dir = state.direction ?? 'auto';
+        editable.afterLayout();
+        editable.update(state);
+        this.editor.sync(this.available);
+        if (this.contentHeight !== editable.scrollHeight) {
+            this.contentHeight = editable.scrollHeight;
+            this.spacer.setProperties({ height: this.contentHeight });
+        }
+        this.scrollbar.scrollVelocity.set(0, 0);
+        if (this.scrollbar.scrollPosition.peek()[1] !== editable.offsetY) {
+            this.scrollbar.scrollPosition.value = [0, editable.offsetY];
+        }
+    }
+    setActive(active) {
+        this.active = active;
+        if (!active) {
+            this.available = false;
+            this.editor.sync(false);
+        }
+    }
+    dispose() {
+        if (this.disposed)
+            return;
+        this.disposed = true;
+        this.editor.dispose();
+        this.editable?.dispose();
+        for (const node of [this.spacer, this.scrollbar, this.viewport, this.row]) {
+            node.removeFromParent();
+            node.dispose();
+        }
+    }
+    hasLayout() {
+        const size = this.viewport.size.peek();
+        return Boolean(size && size[0] > 0 && size[1] > 0);
+    }
+    projectPoint(point) {
+        const size = this.viewport.size.peek();
+        if (!size || !this.hasLayout())
+            return undefined;
+        const local = this.viewport.worldToLocal(point.clone());
+        return new THREE.Vector2((local.x + 0.5) * size[0], (0.5 - local.y) * size[1]);
+    }
+    publiclyVisible() {
+        let object = this.field;
+        while (object) {
+            if (!object.visible ||
+                (isUIElement(object) && object.style.display === 'none'))
+                return false;
+            object = object.parent;
+        }
+        return this.field.parent !== null;
+    }
+    revealField() {
+        let parent = this.field.parent;
+        while (parent) {
+            if (parent instanceof UIScrollView && parent.ready)
+                parent.reveal(this.field);
+            parent = parent.parent;
+        }
+    }
+    handleKeyDown(event) {
+        if (event.ctrlKey ||
+            event.metaKey ||
+            event.altKey ||
+            !isNavigationKey(event.key))
+            return false;
+        this.update();
+        const next = this.editable?.navigate(event.key, { extend: event.shiftKey });
+        if (!next)
+            return false;
+        event.preventDefault();
+        this.field.setSelectionRange(next.start, next.end, next.direction);
+        this.update();
+        return true;
+    }
+    reportFailure(failure) {
+        this.error = new Error(failure.message, { cause: failure.cause });
+        console.error('XR Blocks editable text:', this.error);
+        this.changed();
+    }
+}
+function isNavigationKey(key) {
+    return (key === 'ArrowUp' || key === 'ArrowDown' || key === 'Home' || key === 'End');
+}
+function lineHeightRatio(value, fontSize) {
+    if (typeof value === 'number')
+        return value;
+    if (value.endsWith('%'))
+        return Number.parseFloat(value) / 100;
+    if (value.endsWith('px'))
+        return Number.parseFloat(value) / fontSize;
+    return DEFAULT_TEXT_LINE_HEIGHT;
+}
+
 const ICON_BASE = 'https://cdn.jsdelivr.net/gh/marella/material-symbols@v0.33.0/svg/';
 const OVERLAY_RENDER_ORDER_BASE = 1_000_000_000;
 const OVERLAY_Z_INDEX_STEP = 100_000_000;
 const OVERLAY_ROOT_ORDER_STEP = 1_000_000;
+const CARD_SIZE_PROPERTY_KEYS = new Set(['width', 'height', 'sizeX', 'sizeY']);
 const imageTextureLoader = new THREE.TextureLoader();
 class UIKitMount {
     constructor(root, icons) {
@@ -2410,9 +3570,15 @@ class UIKitMount {
         this.object.name = `Private ${root.name}`;
         this.isOverlay = getUIElementKind(root) === 'overlay';
     }
+    prepareCommit() {
+        if (this.structureRevision !== getUIStructureRevision(this.root)) {
+            this.binding?.removeDetachedChildren();
+        }
+    }
     commit(theme, viewport, rootOrder) {
         if (this.disposed)
             return undefined;
+        this.prepareCommit();
         for (const work of this.readyWork.splice(0))
             work();
         const rootStack = this.isOverlay
@@ -2435,16 +3601,29 @@ class UIKitMount {
             this.structureRevision = getUIStructureRevision(this.root);
             this.object.add(this.rendered);
             this.hitMappingsChanged = true;
+            if (this.root instanceof UICard) {
+                const card = this.root;
+                setUICardContentMeasurer(card, {
+                    height: (width) => this.measureCardContentHeight(card, width),
+                    minWidth: () => this.measureCardMinContentWidth(card),
+                });
+            }
         }
-        if (this.structureRevision !== getUIStructureRevision(this.root)) {
-            this.structureRevision = getUIStructureRevision(this.root);
+        const structureRevision = getUIStructureRevision(this.root);
+        if (this.structureRevision !== structureRevision) {
             this.binding.reconcileTree(context);
+            this.structureRevision = structureRevision;
             this.hitMappingsChanged = true;
+            this.cachedMinContentWidth = undefined;
         }
         if (this.isOverlay)
             this.updateViewport(viewport);
-        if (this.binding.commit(context))
+        context.sequence.value = 0;
+        const commitResult = this.binding.commit(context);
+        if (commitResult.hitMappingsChanged)
             this.hitMappingsChanged = true;
+        if (commitResult.contentChanged)
+            this.cachedMinContentWidth = undefined;
         if (!this.hitMappingsChanged)
             return undefined;
         this.hitMappingsChanged = false;
@@ -2455,6 +3634,7 @@ class UIKitMount {
     }
     update(deltaSeconds) {
         this.rendered?.update(deltaSeconds * 1000);
+        this.binding?.afterLayout(deltaSeconds);
         if (!(this.root instanceof UICard) || !this.binding)
             return;
         const size = this.binding.node.size.peek();
@@ -2480,7 +3660,9 @@ class UIKitMount {
                 });
                 continue;
             }
-            if (element instanceof UIText && node.isClipped.peek()) {
+            if (element instanceof UIText &&
+                node.isClipped.peek() &&
+                !hasScrollAncestor(element)) {
                 issues.push({
                     code: 'text-clipped',
                     severity: 'error',
@@ -2513,6 +3695,9 @@ class UIKitMount {
     dispose() {
         this.disposed = true;
         this.readyWork.length = 0;
+        if (this.root instanceof UICard) {
+            setUICardContentMeasurer(this.root, undefined);
+        }
         const binding = this.binding;
         const rendered = this.rendered;
         binding?.dispose();
@@ -2523,6 +3708,80 @@ class UIKitMount {
         this.binding = undefined;
         this.rendered = undefined;
         this.object.clear();
+    }
+    setActive(active) {
+        this.binding?.setActive(active);
+    }
+    /**
+     * Lays the card out once at `width` with an automatic height, reads the
+     * natural height, then restores the committed layout.
+     */
+    measureCardContentHeight(card, width) {
+        if (!(width > 0))
+            return undefined;
+        const height = this.withAutoHeightLayout((yoga) => {
+            yoga.setWidth(width / card.pixelSize);
+            yoga.calculateLayout(undefined, undefined);
+            return yoga.getComputedHeight() * card.pixelSize;
+        });
+        return height !== undefined && Number.isFinite(height) && height > 0
+            ? height
+            : undefined;
+    }
+    /**
+     * Finds the narrowest width at which no content overflows its container,
+     * searching between zero and the current width. Words never break, so text
+     * that no longer fits overflows and narrows the search.
+     */
+    measureCardMinContentWidth(card) {
+        const current = card.size.width / card.pixelSize;
+        if (!(current > 0))
+            return undefined;
+        if (this.cachedMinContentWidth !== undefined &&
+            this.cachedMinContentWidth <= current * card.pixelSize) {
+            return this.cachedMinContentWidth;
+        }
+        const width = this.withAutoHeightLayout((yoga) => {
+            const overflowsAt = (value) => {
+                yoga.setWidth(value);
+                yoga.calculateLayout(undefined, undefined);
+                return yogaContentOverflows(yoga);
+            };
+            if (overflowsAt(current))
+                return current;
+            let fits = current;
+            let overflows = 0;
+            while (fits - overflows > MIN_WIDTH_SEARCH_PRECISION) {
+                const middle = (fits + overflows) / 2;
+                if (overflowsAt(middle))
+                    overflows = middle;
+                else
+                    fits = middle;
+            }
+            return fits;
+        });
+        if (width === undefined)
+            return undefined;
+        const measured = width * card.pixelSize;
+        this.cachedMinContentWidth = measured;
+        return measured;
+    }
+    /** Runs `measure` on the root yoga node, then restores the committed layout. */
+    withAutoHeightLayout(measure) {
+        const yoga = this.binding?.node.node
+            ?.yogaNode;
+        if (!yoga)
+            return undefined;
+        const previousWidth = yoga.getWidth();
+        const previousHeight = yoga.getHeight();
+        try {
+            yoga.setHeightAuto();
+            return measure(yoga);
+        }
+        finally {
+            yoga.setWidth(yogaDimension(previousWidth));
+            yoga.setHeight(yogaDimension(previousHeight));
+        }
     }
     updateViewport(viewport) {
         const wrapper = this.rendered;
@@ -2550,6 +3809,7 @@ class UIKitBackend {
             return;
         this.restoreRenderer();
         this.renderer = renderer;
+        this.releaseFocusGuard = TextInputEditor.guardCanvas(renderer.domElement);
         this.previousLocalClippingEnabled = renderer.localClippingEnabled;
         renderer.localClippingEnabled = true;
         renderer.setTransparentSort(reversePainterSortStable);
@@ -2557,16 +3817,65 @@ class UIKitBackend {
     createMount(root) {
         return new UIKitMount(root, this.icons);
     }
+    handlePointerTarget(target) {
+        TextInputEditor.handlePointerTarget(target);
+    }
     dispose() {
         this.restoreRenderer();
         this.icons.dispose();
     }
     restoreRenderer() {
+        this.releaseFocusGuard?.();
+        this.releaseFocusGuard = undefined;
         if (!this.renderer)
             return;
         this.renderer.localClippingEnabled = this.previousLocalClippingEnabled;
         this.renderer = undefined;
     }
+}
+// Values of yoga-layout's `Unit`, `Edge`, and `PositionType` enums. yoga-layout
+// is only reached through uikit, so these mirror its enums instead of adding a
+// direct dependency.
+const YOGA_UNIT_POINT = 1;
+const YOGA_UNIT_PERCENT = 2;
+const YOGA_UNIT_AUTO = 3;
+const YOGA_EDGE_LEFT = 0;
+const YOGA_EDGE_RIGHT = 2;
+const YOGA_POSITION_ABSOLUTE = 2;
+// Layout pixels. Matches uikit's own threshold for scrollable overflow.
+const OVERFLOW_TOLERANCE = 0.5;
+// Layout pixels. One pixel is below what a card edge can visibly show.
+const MIN_WIDTH_SEARCH_PRECISION = 1;
+/** True when any in-flow node extends past either side of its parent's content box. */
+function yogaContentOverflows(node) {
+    const left = node.getComputedPadding(YOGA_EDGE_LEFT) +
+        node.getComputedBorder(YOGA_EDGE_LEFT) -
+        OVERFLOW_TOLERANCE;
+    const right = node.getComputedWidth() -
+        node.getComputedPadding(YOGA_EDGE_RIGHT) -
+        node.getComputedBorder(YOGA_EDGE_RIGHT) +
+        OVERFLOW_TOLERANCE;
+    for (let index = 0; index < node.getChildCount(); index++) {
+        const child = node.getChild(index);
+        if (child.getPositionType() === YOGA_POSITION_ABSOLUTE)
+            continue;
+        const childLeft = child.getComputedLeft();
+        if (childLeft < left || childLeft + child.getComputedWidth() > right) {
+            return true;
+        }
+        if (yogaContentOverflows(child))
+            return true;
+    }
+    return false;
+}
+function yogaDimension({ unit, value }) {
+    if (unit === YOGA_UNIT_POINT)
+        return value;
+    if (unit === YOGA_UNIT_PERCENT)
+        return `${value}%`;
+    if (unit === YOGA_UNIT_AUTO)
+        return 'auto';
+    return undefined;
 }
 function createUIBackend() {
     return new UIKitBackend();
@@ -2587,6 +3896,7 @@ class UIKitNodeBinding {
             if (!this.disposed)
                 this.enqueue(() => this.resourceRevision++);
         };
+        this.contentProperties = {};
         this.ownsImageTexture = false;
         this.imageRequest = 0;
         this.resourceRevision = 0;
@@ -2610,16 +3920,36 @@ class UIKitNodeBinding {
         else {
             this.node = new GradientPanel(properties);
         }
-        this.unregisterPresentationObject = registerUIPresentationObject(this.element, this.node);
+        if (element instanceof UIScrollView && this.node instanceof Container) {
+            this.scrollView = new ScrollViewPresentation(element, this.node);
+        }
+        if (element instanceof UITextInput && this.node instanceof Container) {
+            this.textInput = new TextFieldPresentation(element, this.node, this.notifyResource);
+        }
+        this.hitRegion = new UIHitRegion(this.node);
+        this.unregisterPresentationObject = registerUIPresentationObject(this.element, this.node, this.hitRegion.bounds);
         this.baseProperties = properties;
         this.presentedProperties = properties;
         this.theme = context.theme;
         this.reconcileTree(context);
         this.commit(context);
     }
+    removeDetachedChildren() {
+        for (const [element, binding] of this.children) {
+            if (element.parent !== this.element) {
+                this.children.delete(element);
+                this.childOrder.splice(this.childOrder.indexOf(element), 1);
+                binding.dispose();
+            }
+            else {
+                binding.removeDetachedChildren();
+            }
+        }
+    }
     reconcileTree(context) {
         if (!isContainerNode(this.node))
             return;
+        const content = this.scrollView?.content ?? this.node;
         const nextOrder = this.element.children.filter(isUIElement);
         const next = new Map();
         for (const child of nextOrder) {
@@ -2637,19 +3967,22 @@ class UIKitNodeBinding {
             const binding = next.get(child);
             this.children.set(child, binding);
             this.childOrder.push(child);
-            this.node.add(binding.node);
+            content.add(binding.node);
             binding.reconcileTree(context);
         }
         this.ensurePrivateNodes(context.theme);
+        this.scrollView?.commit(this.contentProperties);
+        this.textInput?.commit(context.theme);
         if (this.edge) {
             this.edge.removeFromParent();
             this.node.add(this.edge);
         }
     }
-    /** Returns true when physical hit mappings changed. */
+    /** Returns whether physical hit mappings or layout content changed. */
     commit(context) {
-        if (this.disposed)
-            return false;
+        if (this.disposed) {
+            return { hitMappingsChanged: false, contentChanged: false };
+        }
         const order = context.rootStack === undefined
             ? undefined
             : context.rootStack +
@@ -2664,34 +3997,52 @@ class UIKitNodeBinding {
             nextPointerEvents !== this.pointerEvents ||
             this.resourceRevision !== this.appliedResourceRevision;
         let hitMappingsChanged = orderChanged;
+        let contentChanged = false;
         if (needsProperties) {
+            const base = baseState(this.element);
             this.renderOrder = order;
-            const properties = this.propertiesFor(context, baseState(this.element), order);
+            const properties = this.propertiesFor(context, base, order);
+            const changed = changedProperties(this.presentedProperties, properties);
+            contentChanged =
+                !(this.element instanceof UICard) ||
+                    Object.keys(changed).some((key) => !CARD_SIZE_PROPERTY_KEYS.has(key));
             this.applyProperties(properties);
             this.baseProperties = properties;
             this.presentedProperties = properties;
-            this.presentationKey = -1;
+            this.presentationKey = stateKey(base);
             this.revision = revision;
             this.theme = context.theme;
+            this.pointerEvents = nextPointerEvents;
             this.appliedResourceRevision = this.resourceRevision;
             this.ensurePrivateNodes(context.theme);
-            hitMappingsChanged = this.syncEdge(properties);
+            this.scrollView?.commit(this.contentProperties);
+            this.textInput?.commit(context.theme);
+            if (this.syncEdge(properties))
+                hitMappingsChanged = true;
         }
         this.node.visible = this.element.visible;
         this.syncImage();
         this.setHitEnabled(this.baseProperties);
         for (const child of this.childOrder) {
-            if (this.children.get(child).commit(context))
+            const childResult = this.children.get(child).commit(context);
+            if (childResult.hitMappingsChanged)
                 hitMappingsChanged = true;
+            if (childResult.contentChanged)
+                contentChanged = true;
         }
-        return hitMappingsChanged;
+        return { hitMappingsChanged, contentChanged };
     }
     present(stateFor) {
         if (this.disposed)
             return;
-        const state = stateFor(this.element, this.edge ? this.cursorPoints : undefined);
-        const key = stateKey(state);
+        const rawState = stateFor(this.element, this.edge ? this.cursorPoints : undefined);
+        const focused = this.element instanceof UITextInput && this.element.focused;
+        const key = Number(rawState.hovered) |
+            (Number(rawState.active) << 1) |
+            (Number(rawState.disabled) << 2) |
+            (Number(focused) << 3);
         if (key !== this.presentationKey) {
+            const state = { ...rawState, focused };
             const context = {
                 theme: this.theme,
                 rootStack: undefined,
@@ -2702,17 +4053,32 @@ class UIKitNodeBinding {
             this.presentedProperties = properties;
             this.presentationKey = key;
             this.ensurePrivateNodes(this.theme);
+            this.scrollView?.commit(this.contentProperties);
+            this.textInput?.commit(this.theme);
         }
-        this.edge?.setCursorPoints(state.cursorPointCount > 0 ? this.cursorPoints[0] : undefined, state.cursorPointCount > 1 ? this.cursorPoints[1] : undefined);
+        this.edge?.setCursorPoints(rawState.cursorPointCount > 0 ? this.cursorPoints[0] : undefined, rawState.cursorPointCount > 1 ? this.cursorPoints[1] : undefined);
         for (const child of this.childOrder)
             this.children.get(child).present(stateFor);
     }
     hitMappings() {
         const mappings = [
-            { physical: this.node, logical: this.element },
+            {
+                physical: this.node,
+                logical: this.element,
+                options: { containsPoint: this.hitRegion.containsPoint },
+            },
         ];
-        if (this.edge)
-            mappings.push({ physical: this.edge, logical: this.element });
+        if (this.edge) {
+            const edge = this.edge;
+            mappings.push({
+                physical: edge,
+                logical: this.element,
+                options: {
+                    containsPoint: edge.containsPoint,
+                    touchTarget: (point) => edge.touchTarget(point),
+                },
+            }, { physical: edge.resizeHandle, logical: this.element });
+        }
         for (const child of this.childOrder) {
             mappings.push(...this.children.get(child).hitMappings());
         }
@@ -2722,6 +4088,17 @@ class UIKitNodeBinding {
         yield [this.element, this.node];
         for (const child of this.childOrder)
             yield* this.children.get(child).elementNodes();
+    }
+    afterLayout(deltaSeconds) {
+        this.scrollView?.afterLayout();
+        this.textInput?.update(deltaSeconds);
+        for (const child of this.childOrder)
+            this.children.get(child).afterLayout(deltaSeconds);
+    }
+    setActive(active) {
+        this.textInput?.setActive(active);
+        for (const child of this.childOrder)
+            this.children.get(child).setActive(active);
     }
     dispose() {
         if (this.disposed)
@@ -2739,6 +4116,8 @@ class UIKitNodeBinding {
         this.buttonLabel?.removeFromParent();
         this.buttonLabel?.dispose();
         this.sliderContent?.dispose();
+        this.scrollView?.dispose();
+        this.textInput?.dispose();
         if (this.ownsImageTexture)
             this.imageTexture?.dispose();
         this.imageTexture = undefined;
@@ -2746,7 +4125,8 @@ class UIKitNodeBinding {
         this.node.dispose();
     }
     propertiesFor(context, state, renderOrder) {
-        const style = toUIKitStyle(resolveStyle(this.element, state, context.theme));
+        const resolvedStyle = resolveStyle(this.element, state, context.theme);
+        const style = toUIKitStyle(resolvedStyle);
         if (renderOrder !== undefined) {
             style.depthTest = false;
             style.depthWrite = false;
@@ -2780,6 +4160,20 @@ class UIKitNodeBinding {
                 ...style,
                 pointerEvents: this.element.xb?.pointerEvents ?? 'auto',
             };
+        }
+        if (kind === 'scroll' || kind === 'input') {
+            this.contentProperties = {
+                ...resolvedStyle,
+                color: resolvedStyle.color ?? context.theme.colors.outline,
+            };
+            return panelDefaults(this.element, context.theme, {
+                ...style,
+                flexDirection: 'column',
+                alignItems: 'stretch',
+                justifyContent: 'flex-start',
+                gapRow: 0,
+                gapColumn: 0,
+            });
         }
         return panelDefaults(this.element, context.theme, style);
     }
@@ -2839,6 +4233,8 @@ class UIKitNodeBinding {
             const properties = {
                 text: button.label,
                 color,
+                ...nativeTextWrapping(this.presentedProperties
+                    .whiteSpace),
                 pointerEvents: 'none',
             };
             if (!this.buttonLabel) {
@@ -2867,14 +4263,18 @@ class UIKitNodeBinding {
             this.edge = undefined;
             return true;
         }
+        const resizable = !!options &&
+            !!normalizeManipulationConfig(this.element.xb?.manipulation)?.resize;
         if (options && !this.edge) {
             this.edge = new UICardEdge({
                 cardCornerRadius: numericCornerRadius(properties.cornerRadius),
+                resizable,
             });
             this.node.add(this.edge);
             return true;
         }
         this.edge?.setCardCornerRadius(numericCornerRadius(properties.cornerRadius));
+        this.edge?.setResizable(resizable);
         return false;
     }
     syncImage() {
@@ -2924,6 +4324,8 @@ class UIKitNodeBinding {
         const kind = getUIElementKind(this.element);
         const blocksHits = kind === 'button' ||
             kind === 'slider' ||
+            kind === 'scroll' ||
+            kind === 'input' ||
             !isTransparent(properties.fillColor);
         const pointerEvents = this.element.xb?.pointerEvents;
         const enabled = blocksHits && pointerEvents !== 'none';
@@ -2937,11 +4339,21 @@ class UIKitNodeBinding {
 function isContainerNode(node) {
     return node instanceof Container || node instanceof GradientPanel;
 }
+function hasScrollAncestor(element) {
+    let parent = element.parent;
+    while (parent) {
+        if (parent instanceof UIScrollView)
+            return true;
+        parent = parent.parent;
+    }
+    return false;
+}
 function baseState(element) {
     return {
         hovered: false,
         active: false,
         disabled: getSemanticControl(element)?.isDisabled() ?? false,
+        focused: element instanceof UITextInput && element.focused,
         cursorPointCount: 0,
     };
 }
@@ -2982,6 +4394,18 @@ function resolveStyle(element, state, theme) {
     const themeStyle = kind === 'card' || kind === 'overlay' ? {} : (theme.styles?.[kind] ?? {});
     const style = element.style;
     return {
+        ...(kind === 'input'
+            ? {
+                backgroundColor: theme.colors.raisedSurface,
+                borderColor: state.focused
+                    ? theme.colors.primary
+                    : theme.colors.outline,
+                borderWidth: 1,
+                borderRadius: 8,
+                fontSize: 24,
+                padding: 8,
+            }
+            : {}),
         ...surfaceStyle,
         ...themeStyle,
         ...style,
@@ -2994,12 +4418,15 @@ function resolveStyle(element, state, theme) {
         ...(state.disabled ? surfaceStyle?.[':disabled'] : undefined),
         ...(state.disabled ? themeStyle[':disabled'] : undefined),
         ...(state.disabled ? style[':disabled'] : undefined),
+        ...(state.focused ? themeStyle[':focus'] : undefined),
+        ...(state.focused ? style[':focus'] : undefined),
     };
 }
 function stateKey(state) {
     return (Number(state.hovered) |
         (Number(state.active) << 1) |
-        (Number(state.disabled) << 2));
+        (Number(state.disabled) << 2) |
+        (Number(state.focused) << 3));
 }
 function isTransparent(color) {
     if (color === undefined || color === 'transparent')
@@ -3320,5 +4747,10 @@ function defaultIconAssetPath(icon) {
     return `400/outlined/${encodeURIComponent(icon)}.svg`;
 }
 
-export { createUIBackend };
+var UIKitBackend$1 = /*#__PURE__*/Object.freeze({
+    __proto__: null,
+    createUIBackend: createUIBackend
+});
+
+export { DEFAULT_TEXT_TAB_SIZE as D, UIKitBackend$1 as U, DEFAULT_TEXT_LINE_HEIGHT as a, DEFAULT_TEXT_FONT_SIZE as b, cssColor as c, fontShorthand as f, graphemeSegments as g, resolveRasterScale as r };
 //# sourceMappingURL=UIKitBackend.js.map

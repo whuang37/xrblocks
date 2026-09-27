@@ -14,15 +14,15 @@
  * limitations under the License.
  *
  * @file xrblocks.js
- * @version v0.21.0
- * @commitid 097f03a
- * @builddate 2026-08-25T01:04:27.433Z
+ * @version v0.21.1
+ * @commitid 4d7c04d
+ * @builddate 2026-09-27T20:45:08.479Z
  * @description XR Blocks SDK, built from source with the above commit ID.
  * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
  * and follow rules below:
  * 1. Include the following importmap for maximum compatibility:
-    "three": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/",
+    "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/",
     "@pmndrs/uikit": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit@1.0.64/dist/index.min.js",
     "@pmndrs/uikit-pub-sub": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit-pub-sub@1.0.64/dist/index.min.js",
     "@pmndrs/msdfonts": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.64/dist/index.min.js",
@@ -773,7 +773,9 @@ function ScriptMixin(base) {
         /**
          * Called when the script is removed from the scene. Opposite of init.
          */
-        dispose() { }
+        dispose() {
+            super.dispose();
+        }
     }
     markDefaultScriptMethods(MixedScript.prototype);
     return MixedScript;
@@ -982,7 +984,7 @@ function parseBase64DataURL(dataURL) {
     }
 }
 
-const GEMINI_DEFAULT_FLASH_MODEL = 'gemini-3.7-flash';
+const GEMINI_DEFAULT_FLASH_MODEL = 'gemini-3.8-flash';
 const GEMINI_DEFAULT_LIVE_MODEL = 'gemini-3.1-flash-live-preview';
 const GEMINI_DEFAULT_IMAGE_MODEL = 'gemini-3.1-flash-image';
 class GeminiOptions {
@@ -1330,6 +1332,8 @@ class Gemini extends BaseAIModel {
         this.inited = false;
         this.isLiveMode = false;
         this.liveCallbacks = {};
+        this.liveSessionGeneration = 0;
+        this.liveSessionStopped = false;
     }
     async init() {
         await loadGoogleGenAIModule();
@@ -1348,6 +1352,11 @@ class Gemini extends BaseAIModel {
     isLiveAvailable() {
         return this.isAvailable() && EndSensitivity && StartSensitivity && Modality;
     }
+    /**
+     * Shares a pending connection between concurrent starts. Stopping or disposing
+     * invalidates that start; any session returned later is closed and the start
+     * rejects with AbortError. The provider cannot be aborted before it returns.
+     */
     async startLiveSession(params = {}, model) {
         if (!this.isLiveAvailable()) {
             throw new Error('Live API not available. Make sure @google/genai module is loaded.');
@@ -1355,6 +1364,13 @@ class Gemini extends BaseAIModel {
         if (this.liveSession) {
             return this.liveSession;
         }
+        if (this.liveSessionPromise) {
+            return this.liveSessionPromise;
+        }
+        const generation = ++this.liveSessionGeneration;
+        this.liveSessionStopped = false;
+        const isCurrent = () => generation === this.liveSessionGeneration;
+        const isRunning = () => isCurrent() && !this.liveSessionStopped;
         const defaultConfig = {
             responseModalities: [Modality.AUDIO],
             speechConfig: {
@@ -1366,6 +1382,8 @@ class Gemini extends BaseAIModel {
         };
         const callbacks = {
             onopen: () => {
+                if (!isRunning())
+                    return;
                 this.isLiveMode = true;
                 console.log('🔓 Live session opened.');
                 if (this.liveCallbacks?.onopen) {
@@ -1373,17 +1391,25 @@ class Gemini extends BaseAIModel {
                 }
             },
             onmessage: (e) => {
+                if (!isRunning())
+                    return;
                 if (this.liveCallbacks?.onmessage) {
                     this.liveCallbacks.onmessage(e);
                 }
             },
             onerror: (e) => {
+                if (!isRunning())
+                    return;
                 console.error('❌ Live session error:', e);
                 if (this.liveCallbacks?.onerror) {
                     this.liveCallbacks.onerror(e);
                 }
             },
             onclose: (event) => {
+                if (!isCurrent())
+                    return;
+                this.liveSessionStopped = true;
+                this.liveSessionPromise = undefined;
                 this.isLiveMode = false;
                 this.liveSession = undefined;
                 if (event.reason) {
@@ -1397,28 +1423,56 @@ class Gemini extends BaseAIModel {
                 }
             },
         };
-        try {
-            const connectParams = {
-                model: model ?? this.options.liveModel,
-                callbacks: callbacks,
-                config: defaultConfig,
-            };
-            console.log('Connecting with params:', connectParams);
-            this.liveSession = await this.ai.live.connect(connectParams);
-            return this.liveSession;
-        }
-        catch (error) {
-            console.error('❌ Failed to start live session:', error);
-            throw error;
-        }
+        const connectParams = {
+            model: model ?? this.options.liveModel,
+            callbacks: callbacks,
+            config: defaultConfig,
+        };
+        // Publish the pending promise before provider callbacks can reenter start.
+        this.liveSessionPromise = Promise.resolve().then(async () => {
+            try {
+                if (!isRunning()) {
+                    throw new DOMException('Live session start cancelled.', 'AbortError');
+                }
+                console.log('Connecting with params:', connectParams);
+                const session = await this.ai.live.connect(connectParams);
+                if (!isRunning()) {
+                    session.close();
+                    throw new DOMException('Live session start cancelled.', 'AbortError');
+                }
+                this.liveSession = session;
+                return session;
+            }
+            catch (error) {
+                if (isCurrent()) {
+                    this.liveSessionStopped = true;
+                    this.isLiveMode = false;
+                }
+                console.error('❌ Failed to start live session:', error);
+                throw error;
+            }
+            finally {
+                if (isCurrent())
+                    this.liveSessionPromise = undefined;
+            }
+        });
+        return this.liveSessionPromise;
     }
     async stopLiveSession() {
-        if (!this.liveSession) {
-            return;
-        }
-        this.liveSession.close();
+        this.closeLiveSession();
+    }
+    /** Invalidates live work synchronously without creating a teardown promise. */
+    dispose() {
+        ++this.liveSessionGeneration;
+        this.closeLiveSession();
+    }
+    closeLiveSession() {
+        this.liveSessionStopped = true;
+        this.liveSessionPromise = undefined;
+        const session = this.liveSession;
         this.liveSession = undefined;
         this.isLiveMode = false;
+        session?.close();
     }
     // Set Live session callbacks
     setLiveCallbacks(callbacks) {
@@ -1804,6 +1858,10 @@ class AI extends Script {
         }
         return await this.model.query(input, tools);
     }
+    /**
+     * Concurrent starts share a connection. A start invalidated by stop or dispose
+     * rejects with AbortError when the provider returns, closing that late session.
+     */
     async startLiveSession(config = {}, model) {
         if (!this.model) {
             throw new Error('AI model is not initialized.');
@@ -1820,6 +1878,10 @@ class AI extends Script {
             throw error;
         }
     }
+    /**
+     * Invalidates pending live work and closes any established session. This does
+     * not wait for an in-flight provider connection to finish.
+     */
     async stopLiveSession() {
         if (!this.model)
             return;
@@ -1829,6 +1891,13 @@ class AI extends Script {
         catch (error) {
             console.error('❌ Error stopping Live session:', error);
         }
+    }
+    /** Closes live resources synchronously for the Script disposal contract. */
+    dispose() {
+        if (this.model instanceof Gemini) {
+            this.model.dispose();
+        }
+        super.dispose();
     }
     async setLiveCallbacks(callbacks) {
         if (this.model && 'setLiveCallbacks' in this.model) {
@@ -1856,7 +1925,7 @@ class AI extends Script {
             'isLiveAvailable' in this.model &&
             this.model.isLiveAvailable());
     }
-    async generate(prompt, type = 'image', systemInstruction = 'Generate an image', model = undefined) {
+    async generate(prompt, type = 'image', systemInstruction = 'Generate an image', model) {
         if (!this.isAvailable()) {
             throw new Error("AI is not available. Check if it's enabled and properly initialized.");
         }
@@ -2393,6 +2462,41 @@ async function cropImage(imageSource, boundingBox) {
 }
 
 /**
+ * Type guard to determine if a renderer instance is a THREE.WebGPURenderer.
+ *
+ * @param renderer - The renderer instance to test.
+ * @returns True if the renderer is a WebGPURenderer, false otherwise.
+ */
+function isWebGPURenderer(renderer) {
+    return (renderer != null &&
+        typeof renderer === 'object' &&
+        'isWebGPURenderer' in renderer &&
+        renderer.isWebGPURenderer === true);
+}
+/**
+ * Asserts that the provided renderer is a THREE.WebGLRenderer.
+ *
+ * @param renderer - The renderer instance to check.
+ * @param consumerName - The name of the subsystem or feature requiring WebGLRenderer.
+ * @throws Error if the renderer is a WebGPURenderer.
+ */
+function assertWebGLRenderer(renderer, consumerName) {
+    if (isWebGPURenderer(renderer)) {
+        throw new Error(`${consumerName} requires THREE.WebGLRenderer, but Core is configured with WebGPURenderer.`);
+    }
+}
+/**
+ * Dependency injection holder for the active Three.js renderer (`WebGLRenderer`
+ * or `WebGPURenderer`), allowing scripts to request the renderer via `Registry`
+ * in O(1) time without statically importing `three/webgpu`.
+ */
+class RendererHolder {
+    constructor(renderer) {
+        this.renderer = renderer;
+    }
+}
+
+/**
  * Enum for video stream states.
  */
 var StreamState;
@@ -2493,11 +2597,59 @@ class VideoStream extends Script {
             }
         }
     }
+    /**
+     * Waits for the next new video frame before returning, so a subsequent
+     * {@link getSnapshot} reads fresh pixels instead of whatever (possibly
+     * stale) frame the `<video>` element currently holds. Hidden or
+     * non-composited video elements — the normal situation inside an immersive
+     * XR session — can be throttled by the browser, in which case the held
+     * frame may be arbitrarily old.
+     *
+     * Resolves with the frame's metadata (whose `captureTime`, when present,
+     * dates the pixels in the `performance.now()` timebase), or `null` when the
+     * signal is unavailable (`requestVideoFrameCallback` unsupported, no active
+     * media stream) or no frame arrived within `timeoutMs`.
+     */
+    waitForFreshFrame(timeoutMs = 400) {
+        const video = this.video_;
+        if (!this.loaded || !video.requestVideoFrameCallback || !video.srcObject) {
+            return Promise.resolve(null);
+        }
+        return new Promise((resolve) => {
+            let done = false;
+            const handle = video.requestVideoFrameCallback((_now, metadata) => {
+                if (done)
+                    return;
+                done = true;
+                clearTimeout(timer);
+                resolve(metadata);
+            });
+            const timer = setTimeout(() => {
+                if (done)
+                    return;
+                done = true;
+                video.cancelVideoFrameCallback?.(handle);
+                resolve(null);
+            }, timeoutMs);
+        });
+    }
+    /**
+     * Whether the current snapshot source has pixels available.
+     * Subclasses may override this to provide non-video sources while preserving
+     * {@link getSnapshot}'s format handling.
+     */
+    snapshotSourceAvailable_() {
+        return this.video_.readyState >= this.video_.HAVE_CURRENT_DATA;
+    }
+    /**
+     * Draws the current snapshot source into `context` at the requested size.
+     * Subclasses may override this to provide pixels from another source.
+     */
+    drawSnapshotSource_(context, width, height) {
+        context.drawImage(this.video_, 0, 0, width, height);
+    }
     getSnapshot({ width = this.width, height = this.height, outputFormat = 'texture', ...rest } = {}) {
-        if (!this.loaded ||
-            !width ||
-            !height ||
-            this.video_.readyState < this.video_.HAVE_CURRENT_DATA) {
+        if (!this.loaded || !width || !height || !this.snapshotSourceAvailable_()) {
             return null;
         }
         if (width > this.width || height > this.height) {
@@ -2517,12 +2669,12 @@ class VideoStream extends Script {
                     willReadFrequently: this.willCaptureFrequently_,
                 });
             }
-            this.context_.drawImage(this.video_, 0, 0, width, height);
+            this.drawSnapshotSource_(this.context_, width, height);
             switch (outputFormat) {
                 case 'imageData':
                     return this.context_.getImageData(0, 0, width, height);
                 case 'base64':
-                    return new Promise((resolve) => this.canvas_.toBlob(resolve, mimeType, quality)).then((blob) => (blob ? blobToBase64(blob) : null));
+                    return new Promise((resolve) => this.canvas_.toBlob(resolve, mimeType, quality)).then(async (blob) => (blob ? await blobToBase64(blob) : null));
                 case 'blob':
                     return new Promise((resolve) => this.canvas_.toBlob(resolve, mimeType, quality));
                 case 'texture':
@@ -2571,6 +2723,18 @@ class VideoStream extends Script {
     }
 }
 
+/** Flips RGBA pixels read from WebGL's bottom-left origin into top-left image order. */
+function flipWebGLPixelRows(source, width, height) {
+    const rowBytes = width * 4;
+    const target = new Uint8ClampedArray(source.length);
+    for (let y = 0; y < height; y++) {
+        const sourceStart = (height - 1 - y) * rowBytes;
+        const targetStart = y * rowBytes;
+        target.set(source.subarray(sourceStart, sourceStart + rowBytes), targetStart);
+    }
+    return target;
+}
+
 /**
  * Handles video capture from a device camera, manages the device list,
  * and reports its state using VideoStream's event model.
@@ -2587,8 +2751,13 @@ class XRDeviceCamera extends VideoStream {
         this.availableDevices_ = [];
         this.currentDeviceIndex_ = -1;
         this.useXRCameraAccess_ = false;
+        this.xrCameraSnapshotImageData_ = null;
+        this.xrCameraSnapshotCanvas_ = null;
+        this.xrCameraSnapshotContext_ = null;
+        this.pendingXRCameraCaptures_ = [];
         this.xrCameraAccessTimeout_ = null;
         this.disposed_ = false;
+        this.mediaTexture_ = this.texture;
         this.videoConstraints_ = options.videoConstraints ?? {
             facingMode: 'environment',
         };
@@ -2627,6 +2796,7 @@ class XRDeviceCamera extends VideoStream {
         if (this.disposed_)
             return;
         this.useXRCameraAccess_ = false;
+        this.disposeXRCameraAccessResources_();
         this.clearXRCameraAccessTimeout_();
         this.setState_(StreamState.INITIALIZING);
         try {
@@ -2834,6 +3004,48 @@ class XRDeviceCamera extends VideoStream {
     get isUsingXRCameraAccess() {
         return this.useXRCameraAccess_;
     }
+    captureSnapshot(options = {}) {
+        if (!this.useXRCameraAccess_) {
+            return Promise.resolve(this.getSnapshot(options));
+        }
+        if (!this.renderer_)
+            return Promise.resolve(null);
+        return new Promise((resolve) => {
+            const request = {
+                options,
+                resolve,
+                timeout: setTimeout(() => {
+                    const index = this.pendingXRCameraCaptures_.indexOf(request);
+                    if (index !== -1) {
+                        this.pendingXRCameraCaptures_.splice(index, 1);
+                        resolve(null);
+                    }
+                }, 1000),
+            };
+            this.pendingXRCameraCaptures_.push(request);
+        });
+    }
+    snapshotSourceAvailable_() {
+        if (this.useXRCameraAccess_)
+            return this.xrCameraSnapshotImageData_ !== null;
+        return super.snapshotSourceAvailable_();
+    }
+    drawSnapshotSource_(context, width, height) {
+        if (!this.useXRCameraAccess_) {
+            super.drawSnapshotSource_(context, width, height);
+            return;
+        }
+        const imageData = this.xrCameraSnapshotImageData_;
+        if (!imageData)
+            return;
+        if (width === imageData.width && height === imageData.height) {
+            context.putImageData(imageData, 0, 0);
+            return;
+        }
+        const canvas = this.snapshotCanvasForImageData_(imageData);
+        if (canvas)
+            context.drawImage(canvas, 0, 0, width, height);
+    }
     /**
      * Updates the camera texture from the WebXR Raw Camera Access API.
      * Must be called each frame from the render loop when in XR camera mode.
@@ -2841,6 +3053,7 @@ class XRDeviceCamera extends VideoStream {
     updateXRCamera(frame) {
         if (!this.useXRCameraAccess_ || !this.renderer_ || !frame)
             return;
+        assertWebGLRenderer(this.renderer_, 'XRDeviceCamera.updateXRCamera');
         const binding = this.renderer_.xr.getBinding();
         const refSpace = this.renderer_.xr.getReferenceSpace();
         if (!binding || !refSpace)
@@ -2882,6 +3095,7 @@ class XRDeviceCamera extends VideoStream {
                     aspectRatio: this.aspectRatio,
                 });
             }
+            this.processPendingXRCameraCapture_();
             break;
         }
     }
@@ -2891,12 +3105,144 @@ class XRDeviceCamera extends VideoStream {
     dispose() {
         this.disposed_ = true;
         this.clearXRCameraAccessTimeout_();
-        this.xrCameraTexture_?.dispose();
-        this.xrCameraTexture_ = undefined;
+        this.disposeXRCameraAccessResources_();
         this.renderer_ = undefined;
         this.simulatorCamera = undefined;
         this.useXRCameraAccess_ = false;
         super.dispose();
+    }
+    processPendingXRCameraCapture_() {
+        if (!this.pendingXRCameraCaptures_.length)
+            return;
+        const requests = this.pendingXRCameraCaptures_.splice(0);
+        for (const request of requests)
+            clearTimeout(request.timeout);
+        try {
+            this.xrCameraSnapshotImageData_ = this.captureXRCameraSnapshot_();
+            for (const request of requests) {
+                const result = this.getSnapshot(request.options);
+                request.resolve(result);
+            }
+        }
+        catch (error) {
+            console.error('Error capturing WebXR camera snapshot:', error);
+            for (const request of requests)
+                request.resolve(null);
+        }
+    }
+    captureXRCameraSnapshot_() {
+        if (!this.renderer_ ||
+            !this.xrCameraTexture_ ||
+            !this.width ||
+            !this.height) {
+            return null;
+        }
+        assertWebGLRenderer(this.renderer_, 'XRDeviceCamera.captureSnapshot');
+        this.ensureXRCameraCopyObjects_();
+        this.ensureXRCameraRenderTarget_();
+        if (!this.xrCameraRenderTarget_)
+            return null;
+        if (this.xrCameraCopyMaterial_.map !== this.xrCameraTexture_) {
+            this.xrCameraCopyMaterial_.map = this.xrCameraTexture_;
+            this.xrCameraCopyMaterial_.needsUpdate = true;
+        }
+        const previousTarget = this.renderer_.getRenderTarget();
+        const previousXrEnabled = this.renderer_.xr.enabled;
+        this.renderer_.xr.enabled = false;
+        try {
+            this.renderer_.setRenderTarget(this.xrCameraRenderTarget_);
+            this.renderer_.render(this.xrCameraCopyScene_, this.xrCameraCopyCamera_);
+        }
+        finally {
+            this.renderer_.setRenderTarget(previousTarget);
+            this.renderer_.xr.enabled = previousXrEnabled;
+        }
+        const width = this.xrCameraRenderTarget_.width;
+        const height = this.xrCameraRenderTarget_.height;
+        const pixels = new Uint8Array(width * height * 4);
+        this.renderer_.readRenderTargetPixels(this.xrCameraRenderTarget_, 0, 0, width, height, pixels);
+        return new ImageData(flipWebGLPixelRows(pixels, width, height), width, height);
+    }
+    ensureXRCameraRenderTarget_() {
+        if (this.xrCameraRenderTarget_ &&
+            this.xrCameraRenderTarget_.width === this.width &&
+            this.xrCameraRenderTarget_.height === this.height) {
+            return;
+        }
+        this.xrCameraRenderTarget_?.dispose();
+        this.xrCameraRenderTarget_ = new THREE.WebGLRenderTarget(this.width, this.height, {
+            format: THREE.RGBAFormat,
+            type: THREE.UnsignedByteType,
+            depthBuffer: false,
+            stencilBuffer: false,
+        });
+        this.xrCameraRenderTarget_.texture.colorSpace = THREE.SRGBColorSpace;
+    }
+    ensureXRCameraCopyObjects_() {
+        if (this.xrCameraCopyScene_)
+            return;
+        this.xrCameraCopyScene_ = new THREE.Scene();
+        this.xrCameraCopyCamera_ = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+        this.xrCameraCopyMaterial_ = new THREE.MeshBasicMaterial({
+            depthTest: false,
+            depthWrite: false,
+            toneMapped: false,
+        });
+        const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.xrCameraCopyMaterial_);
+        this.xrCameraCopyScene_.add(quad);
+    }
+    snapshotCanvasForImageData_(imageData) {
+        if (!this.xrCameraSnapshotCanvas_ ||
+            this.xrCameraSnapshotCanvas_.width !== imageData.width ||
+            this.xrCameraSnapshotCanvas_.height !== imageData.height) {
+            this.xrCameraSnapshotCanvas_ = document.createElement('canvas');
+            this.xrCameraSnapshotCanvas_.width = imageData.width;
+            this.xrCameraSnapshotCanvas_.height = imageData.height;
+            this.xrCameraSnapshotContext_ =
+                this.xrCameraSnapshotCanvas_.getContext('2d');
+        }
+        if (!this.xrCameraSnapshotContext_)
+            return null;
+        this.xrCameraSnapshotContext_.putImageData(imageData, 0, 0);
+        return this.xrCameraSnapshotCanvas_;
+    }
+    resolvePendingXRCameraCaptures_(value) {
+        const requests = this.pendingXRCameraCaptures_.splice(0);
+        for (const request of requests) {
+            clearTimeout(request.timeout);
+            request.resolve(value);
+        }
+    }
+    disposeXRCameraAccessResources_() {
+        this.resolvePendingXRCameraCaptures_(null);
+        this.xrCameraSnapshotImageData_ = null;
+        if (this.texture === this.xrCameraTexture_)
+            this.texture = this.mediaTexture_;
+        this.xrCameraTexture_?.dispose();
+        this.xrCameraTexture_ = undefined;
+        this.xrCameraRenderTarget_?.dispose();
+        this.xrCameraRenderTarget_ = undefined;
+        if (this.xrCameraCopyMaterial_) {
+            this.xrCameraCopyMaterial_.map = null;
+            this.xrCameraCopyMaterial_.dispose();
+        }
+        this.xrCameraCopyMaterial_ = undefined;
+        this.xrCameraCopyScene_?.traverse((object) => {
+            if (object instanceof THREE.Mesh)
+                object.geometry.dispose();
+        });
+        this.xrCameraCopyScene_ = undefined;
+        this.xrCameraCopyCamera_ = undefined;
+        this.xrCameraSnapshotCanvas_ = null;
+        this.xrCameraSnapshotContext_ = null;
+    }
+    onXRSessionEnded() {
+        if (!this.useXRCameraAccess_)
+            return;
+        this.useXRCameraAccess_ = false;
+        this.loaded = false;
+        this.disposeXRCameraAccessResources_();
+        this.setState_(StreamState.IDLE);
     }
     startXRCameraAccessFallback_(reason, error) {
         if (this.disposed_)
@@ -2922,6 +3268,9 @@ class XRDeviceCamera extends VideoStream {
         }, XRDeviceCamera.XR_CAMERA_ACCESS_TIMEOUT_MS);
     }
     isXRCameraAccessGranted_() {
+        if (this.renderer_ && isWebGPURenderer(this.renderer_)) {
+            return false;
+        }
         const session = this.renderer_?.xr.getSession();
         if (!session) {
             return true;
@@ -2971,7 +3320,7 @@ class ScreenshotSynthesizer {
         this.virtualCaptureInFlight = false;
         this.virtualRealCaptureInFlight = false;
     }
-    async onAfterRender(renderer, renderSceneFn, deviceCamera) {
+    onAfterRender(renderer, renderSceneFn, deviceCamera) {
         if (this.pendingScreenshotRequests.length == 0) {
             return;
         }
@@ -3008,16 +3357,23 @@ class ScreenshotSynthesizer {
             });
         }
         else if (haveVirtualAndRealReqeusts && !deviceCamera) {
-            throw new Error('No device camera provided');
+            this.rejectVirtualRealRequests(new Error('No device camera provided'));
         }
     }
     async createVirtualImageDataURL(renderer, renderSceneFn) {
         const mainRenderTarget = renderer.getRenderTarget();
         const isRenderingStereo = renderer.xr.isPresenting && renderer.xr.getCamera().cameras.length == 2;
+        const mainRenderTargetSize = new THREE.Vector2();
+        if (mainRenderTarget) {
+            mainRenderTargetSize.set(mainRenderTarget.width, mainRenderTarget.height);
+        }
+        else {
+            renderer.getSize(mainRenderTargetSize);
+        }
         const mainRenderTargetSingleViewWidth = isRenderingStereo
-            ? mainRenderTarget.width / 2
-            : mainRenderTarget.width;
-        const scaledHeight = Math.round(mainRenderTarget.height *
+            ? mainRenderTargetSize.x / 2
+            : mainRenderTargetSize.x;
+        const scaledHeight = Math.round(mainRenderTargetSize.y *
             (this.renderTargetWidth / mainRenderTargetSingleViewWidth));
         if (!this.virtualRenderTarget ||
             this.virtualRenderTarget.width != this.renderTargetWidth) {
@@ -3415,6 +3771,29 @@ class HandsOptions {
         this.enabled = true;
         this.visualization = true;
         return this;
+    }
+}
+
+/**
+ * Options for WebXR composition layers.
+ *
+ * Off by default. Layers are an optional session feature and the layer types
+ * an app would want are newer than the SDK's baseline browser, so asking for
+ * them unconditionally would mean every app pays for a capability most do not
+ * use.
+ */
+class LayersOptions {
+    constructor() {
+        /** Whether to request the `layers` session feature. */
+        this.enabled = false;
+        /**
+         * Whether a video shown through {@link VideoView} should be presented as a
+         * composition layer when the platform allows it.
+         *
+         * Falls back to rendering into the scene as a texture when it cannot, so an
+         * app can leave this on and still work everywhere.
+         */
+        this.video = true;
     }
 }
 
@@ -4678,14 +5057,24 @@ function pathLength(points) {
     }
     return d;
 }
-/** Resamples a path into n evenly spaced points. */
+/** Resamples a path into n evenly spaced points, or returns null if it cannot advance. */
 function resample(points, n) {
     const interval = pathLength(points) / (n - 1);
+    if (points.length < 2 || !Number.isFinite(interval) || interval <= 0) {
+        return null;
+    }
     let D = 0;
     const newPoints = [points[0]];
     const pts = points.slice();
     let i = 1;
+    // At most m - 1 segment consumptions plus n - 1 insertions are needed.
+    // The budget scales with input length and deliberately allows two extra iterations.
+    const maxIterations = points.length + n;
+    let iterations = 0;
     while (i < pts.length) {
+        if (iterations++ >= maxIterations) {
+            return null;
+        }
         const pt1 = pts[i - 1];
         const pt2 = pts[i];
         const d = distance(pt1, pt2);
@@ -4695,6 +5084,11 @@ function resample(points, n) {
                 x: pt1.x + t * (pt2.x - pt1.x),
                 y: pt1.y + t * (pt2.y - pt1.y),
             };
+            if (!Number.isFinite(q.x) ||
+                !Number.isFinite(q.y) ||
+                (q.x === pt1.x && q.y === pt1.y)) {
+                return null;
+            }
             newPoints.push(q);
             pts.splice(i, 0, q);
             D = 0;
@@ -4832,11 +5226,23 @@ class OneDollarUnistrokeRecognizer extends StrokeRecognizerBackend {
     /**
      * Recognizes a stroke from a list of 2D points by comparing it against stored templates.
      * Supports both forward and backward matching to handle bi-directional strokes.
+     * Returns Unknown with zero confidence for input that cannot form a valid normalized stroke.
      * @param points - The list of points captured during the stroke.
      * @returns The recognition result containing the shape name and confidence score.
      */
     recognize(points) {
+        if (points.length < 2 ||
+            points.some((point) => !Number.isFinite(point.x) || !Number.isFinite(point.y))) {
+            return { recognizedShape: 'Unknown', confidence: 0 };
+        }
+        const length = pathLength(points);
+        if (length === 0 || !Number.isFinite(length)) {
+            return { recognizedShape: 'Unknown', confidence: 0 };
+        }
         const resampledForward = resample(points, 64);
+        if (!resampledForward) {
+            return { recognizedShape: 'Unknown', confidence: 0 };
+        }
         const resampledBackward = resampledForward.slice().reverse();
         const pointsForwardUnrotated = this.scaleAndTranslate(resampledForward);
         const pointsBackwardUnrotated = pointsForwardUnrotated.slice().reverse();
@@ -4932,6 +5338,7 @@ class OneDollarUnistrokeRecognizer extends StrokeRecognizerBackend {
      * @param name - The name of the shape.
      * @param points -  The points defining the shape.
      * @param useRotation - Whether to use rotation invariance.
+     * @throws RangeError if the template cannot be resampled.
      */
     addClosedTemplate(name, points, useRotation = true) {
         const n = points.length;
@@ -4948,6 +5355,7 @@ class OneDollarUnistrokeRecognizer extends StrokeRecognizerBackend {
      * @param name - The name of the shape.
      * @param points - The points defining the shape.
      * @param useRotation - Whether to use rotation invariance.
+     * @throws RangeError if the template cannot be resampled.
      */
     addTemplate(name, points, useRotation = true) {
         this.templates.push({
@@ -4962,9 +5370,14 @@ class OneDollarUnistrokeRecognizer extends StrokeRecognizerBackend {
      * @param points - The list of points to preprocess.
      * @param useRotation - Whether to rotate the points to zero.
      * @returns The preprocessed list of points.
+     * @throws RangeError if the stroke cannot be resampled.
      */
     preprocess(points, useRotation = true) {
-        points = resample(points, 64);
+        const resampled = resample(points, 64);
+        if (!resampled) {
+            throw new RangeError('Cannot normalize stroke: resampling failed.');
+        }
+        points = resampled;
         if (useRotation) {
             points = rotateToZero(points);
         }
@@ -5278,7 +5691,7 @@ const DEFAULT_MANIFESTS = [
         objects: [],
     },
     {
-        name: 'Emulator Scene V5',
+        name: 'Daytime Loft',
         scenePath: `${SIMULATOR_SCENES_PATH}XREmulatorsceneV5.glb`,
         scenePlanesPath: `${SIMULATOR_SCENES_PATH}XREmulatorsceneV5_planes.json`,
         navMeshPath: `${SIMULATOR_SCENES_PATH}XREmulatorsceneV5_navmesh.glb`,
@@ -5286,7 +5699,7 @@ const DEFAULT_MANIFESTS = [
         objects: [],
     },
     {
-        name: 'Emulator Scene Dark',
+        name: 'Evening Loft',
         scenePath: `${SIMULATOR_SCENES_PATH}XREmulatorscene_Dark.glb`,
         scenePlanesPath: `${SIMULATOR_SCENES_PATH}XREmulatorsceneV5_planes.json`,
         navMeshPath: `${SIMULATOR_SCENES_PATH}XREmulatorsceneV5_navmesh.glb`,
@@ -5969,6 +6382,7 @@ class XRTransitionOptions {
     }
 }
 const FORM_FACTORS = ['auto', 'xr', 'hud', 'vr', 'desktop', 'mobile'];
+const RENDERER_BACKENDS = ['webgl', 'webgpu'];
 /**
  * A central configuration class for the entire XR Blocks system. It aggregates
  * all settings and provides chainable methods for enabling common features.
@@ -6017,6 +6431,10 @@ class Options {
          */
         this.stencil = false;
         /**
+         * The rendering backend to use.
+         */
+        this.rendererBackend = 'webgl';
+        /**
          * Any additional required features when initializing webxr.
          */
         this.webxrRequiredFeatures = [];
@@ -6043,6 +6461,7 @@ class Options {
         this.world = new WorldOptions();
         this.context = new ContextOptions();
         this.physics = new PhysicsOptions();
+        this.layers = new LayersOptions();
         this.transition = new XRTransitionOptions();
         this.camera = {
             near: 0.01,
@@ -6093,9 +6512,29 @@ class Options {
             FORM_FACTORS.includes(formFactorUrlParam)) {
             this.formFactor = formFactorUrlParam;
         }
+        const rendererBackendUrlParam = getUrlParameter('rendererBackend');
+        if (rendererBackendUrlParam &&
+            RENDERER_BACKENDS.includes(rendererBackendUrlParam)) {
+            this.rendererBackend = rendererBackendUrlParam;
+        }
+        if (getUrlParamBool('forceWebGL')) {
+            this.webgpuOptions = {
+                ...this.webgpuOptions,
+                forceWebGL: true,
+            };
+        }
         if (getUrlParamBool('xrAutomation')) {
             this.enableAutomationMode();
         }
+    }
+    /**
+     * Configures Core to use THREE.WebGPURenderer instead of THREE.WebGLRenderer.
+     * @param options - Optional WebGPU renderer settings such as `forceWebGL`.
+     */
+    enableWebGPU(options) {
+        this.rendererBackend = 'webgpu';
+        this.webgpuOptions = options;
+        return this;
     }
     /**
      * Sets the session mode to VR and disables the simulator passthrough scene.
@@ -6144,6 +6583,23 @@ class Options {
      */
     enableDepth() {
         this.depth = new DepthOptions(xrDepthMeshOptions);
+        return this;
+    }
+    /**
+     * Enables WebXR composition layers.
+     *
+     * Content presented as a layer is composited once at its own resolution
+     * rather than being drawn into the eye buffer and resampled again, so video
+     * and text come out sharper, and the compositor keeps reprojecting it to the
+     * latest head pose even when the app's own frame rate dips.
+     *
+     * Requested optionally, and each layer falls back to ordinary in-scene
+     * rendering where the platform cannot present one.
+     *
+     * @returns The instance for chaining.
+     */
+    enableLayers() {
+        this.layers.enabled = true;
         return this;
     }
     /**
@@ -6456,7 +6912,17 @@ class DirectTouch {
         for (const input of inputs) {
             this.present.add(input.controller);
             const previous = this.active.get(input.controller);
-            const resolved = this.resolver.resolve(this.registry.intersectionsAt(input.point, previous ? DirectTouch.EXIT_PADDING : 0, previous?.resolved.hitObject), 'direct-touch');
+            const resolved = previous?.captureRegion
+                ? this.registry.containsPoint(previous.captureRegion, input.point, DirectTouch.EXIT_PADDING)
+                    ? {
+                        ...previous.resolved,
+                        intersection: {
+                            ...previous.resolved.intersection,
+                            point: input.point.clone(),
+                        },
+                    }
+                    : undefined
+                : this.resolver.resolve(this.registry.intersectionsAt(input.point, previous ? DirectTouch.EXIT_PADDING : 0, previous?.resolved.hitObject), 'direct-touch');
             if (this.awaitingExit.has(input.controller)) {
                 if (!resolved)
                     this.awaitingExit.delete(input.controller);
@@ -6524,6 +6990,12 @@ class DirectTouch {
     }
     has(controller) {
         return this.active.has(controller);
+    }
+    /** A scroll candidate keeps contact with its viewport as children move. */
+    setCaptureRegion(controller, region) {
+        const contact = this.active.get(controller);
+        if (contact)
+            contact.captureRegion = region;
     }
     clear() {
         this.active.clear();
@@ -6600,16 +7072,21 @@ class GazeDwell {
     }
 }
 
+const POINT_AND_LINE_THRESHOLD_METERS = 0.01;
 /** Owns physical hit registration, collection, and logical mapping. */
 class HitRegistry {
-    constructor() {
+    constructor(camera) {
         this.raycaster = new THREE.Raycaster();
         this.mappings = new WeakMap();
         this.registered = new Set();
         this.touchCandidates = new Map();
+        if (camera)
+            this.raycaster.camera = camera;
+        this.raycaster.params.Line = { threshold: POINT_AND_LINE_THRESHOLD_METERS };
+        this.raycaster.params.Points = { threshold: POINT_AND_LINE_THRESHOLD_METERS };
     }
-    register(physical, logical) {
-        const entry = { physical, logical };
+    register(physical, logical, options = {}) {
+        const entry = { physical, logical, ...options };
         this.mappings.set(physical, entry);
         this.registered.add(entry);
         this.touchCandidates.set(physical, entry);
@@ -6654,6 +7131,23 @@ class HitRegistry {
         }
         return { physical: object, logical: object };
     }
+    find(logical) {
+        for (const entry of this.registered) {
+            if (entry.logical === logical)
+                return entry;
+        }
+        return undefined;
+    }
+    containsPoint(physical, point, padding = 0) {
+        if (physical.xb?.pointerEvents === 'none' || !effectiveVisible$1(physical))
+            return false;
+        const box = new THREE.Box3().setFromObject(physical);
+        if (padding > 0)
+            box.expandByScalar(padding);
+        return (!box.isEmpty() &&
+            box.containsPoint(point) &&
+            this.resolve(physical).containsPoint?.(point, padding) !== false);
+    }
     /** Collects ordered raw hits from the public scene and detached surfaces. */
     raycast(scene, ray, intersections) {
         intersections.length = 0;
@@ -6686,7 +7180,7 @@ class HitRegistry {
         const intersections = [];
         const box = new THREE.Box3();
         const center = new THREE.Vector3();
-        for (const { physical } of this.touchCandidates.values()) {
+        for (const { physical, containsPoint, touchTarget, } of this.touchCandidates.values()) {
             if (physical.xb?.pointerEvents === 'none')
                 continue;
             if (!effectiveVisible$1(physical))
@@ -6701,9 +7195,11 @@ class HitRegistry {
                 box.expandByScalar(padding);
             if (box.isEmpty() || !box.containsPoint(point))
                 continue;
+            if (containsPoint?.(point, padding) === false)
+                continue;
             intersections.push({
                 distance: box.getCenter(center).distanceTo(point),
-                object: physical,
+                object: touchTarget?.(point) ?? physical,
                 point: point.clone(),
             });
         }
@@ -6840,6 +7336,8 @@ class HitResolver {
             const registered = this.registry.resolve(rawIntersection.object);
             if (registered.physical.xb?.pointerEvents === 'none')
                 continue;
+            if (registered.containsPoint?.(rawIntersection.point) === false)
+                continue;
             if (registered.logical === rawIntersection.object &&
                 hasPrivateAncestor(rawIntersection.object)) {
                 continue;
@@ -6852,7 +7350,13 @@ class HitResolver {
             const semanticCandidate = eligiblePath.find(isSemanticControl);
             const disabledSemantic = semanticCandidate !== undefined &&
                 isSemanticControlDisabled(semanticCandidate);
-            const semanticControl = disabledSemantic ? undefined : semanticCandidate;
+            const scrollFallback = disabledSemantic
+                ? eligiblePath.find((object) => getSemanticControl(object)?.kind === 'scroll' &&
+                    !isSemanticControlDisabled(object))
+                : undefined;
+            const semanticControl = disabledSemantic
+                ? scrollFallback
+                : semanticCandidate;
             const physicalHandle = registered.physical !== eligiblePath[0] &&
                 registered.physical.xb?.manipulationHandle !== undefined
                 ? registered.physical
@@ -6861,7 +7365,7 @@ class HitResolver {
                 ? undefined
                 : this.manipulation.resolve(physicalHandle ? [physicalHandle, ...eligiblePath] : eligiblePath);
             const callbackTarget = eligiblePath.find((object) => this.callbacks.hasTargetHandler(object, sourceType));
-            const target = disabledSemantic
+            const target = disabledSemantic && !scrollFallback
                 ? undefined
                 : (semanticControl ??
                     this.nearestTarget(eligiblePath, callbackTarget, manipulation?.owner));
@@ -7089,6 +7593,24 @@ function createPlanarSurfaceProjector(surface) {
         };
     };
 }
+/** Supplies the same UV contract for a tracked contact as for a captured ray. */
+function projectPointOnSurface(surface, point) {
+    if (!(surface instanceof THREE.Mesh))
+        return undefined;
+    surface.geometry.computeBoundingBox();
+    const bounds = surface.geometry.boundingBox;
+    if (!bounds || !hasFinitePlanarBounds(bounds))
+        return undefined;
+    surface.updateWorldMatrix(true, false);
+    if (Math.abs(surface.matrixWorld.determinant()) < Number.EPSILON)
+        return undefined;
+    const local = surface.worldToLocal(point.clone());
+    local.z = (bounds.min.z + bounds.max.z) / 2;
+    return {
+        point: local.clone().applyMatrix4(surface.matrixWorld),
+        uv: new THREE.Vector2((local.x - bounds.min.x) / (bounds.max.x - bounds.min.x), (local.y - bounds.min.y) / (bounds.max.y - bounds.min.y)),
+    };
+}
 function hasFinitePlanarBounds(bounds) {
     return (Number.isFinite(bounds.min.x) &&
         Number.isFinite(bounds.max.x) &&
@@ -7292,6 +7814,7 @@ const STYLE_KEYS = new Set([
     ':hover',
     ':active',
     ':disabled',
+    ':focus',
 ]);
 const STATE_STYLE_KEYS = new Set([
     'backgroundColor',
@@ -7387,8 +7910,9 @@ const ENUM_VALUES = {
     whiteSpace: ['normal', 'nowrap', 'pre-line'],
     textOverflow: ['clip', 'ellipsis'],
 };
-const states = new WeakMap();
+const states$2 = new WeakMap();
 const presentationObjects = new WeakMap();
+const presentationBounds = new WeakMap();
 const rootReferences = new Set();
 class UIElement extends Script {
     constructor(kind, options = {}) {
@@ -7396,7 +7920,7 @@ class UIElement extends Script {
         this.isUI = true;
         this.styleTarget = {};
         this.markUIDirty = () => {
-            const state = states.get(this);
+            const state = states$2.get(this);
             if (state)
                 state.revision++;
         };
@@ -7424,7 +7948,7 @@ class UIElement extends Script {
                 throw new Error('Every UI element must be below one UICard or UIOverlay root.');
             }
         };
-        states.set(this, {
+        states$2.set(this, {
             kind,
             revision: 0,
             structureRevision: 0,
@@ -7478,30 +8002,37 @@ class UIElement extends Script {
     }
 }
 function isUIElement(object) {
-    return states.has(object);
+    return states$2.has(object);
 }
 function getUIElementKind(element) {
-    return states.get(element).kind;
+    return states$2.get(element).kind;
 }
 /** Returns the rendered object that owns an element's calculated layout. */
 function getUIPresentationObject(element) {
     return presentationObjects.get(element);
 }
 /** Registers one rendered object for world-space UI queries. */
-function registerUIPresentationObject(element, presentation) {
+function registerUIPresentationObject(element, presentation, bounds) {
     presentationObjects.set(element, presentation);
+    if (bounds)
+        presentationBounds.set(element, bounds);
     return () => {
         if (presentationObjects.get(element) === presentation) {
             presentationObjects.delete(element);
+            presentationBounds.delete(element);
         }
     };
 }
+/** Undefined means no clipping-aware presentation is registered. */
+function getUIPresentationBounds(object, target) {
+    return presentationBounds.get(object)?.(target);
+}
 function getUIRevision(element) {
-    return states.get(element).revision;
+    return states$2.get(element).revision;
 }
 /** Returns the revision that changes only when the physical UI tree changes. */
 function getUIStructureRevision(element) {
-    return states.get(element).structureRevision;
+    return states$2.get(element).structureRevision;
 }
 /** Collects public UI roots without retaining their application lifetime. */
 function collectUIRoots(target) {
@@ -7622,7 +8153,7 @@ function findUIRoot(object) {
 function markRootStructureDirty(root) {
     if (!root)
         return;
-    states.get(root).structureRevision++;
+    states$2.get(root).structureRevision++;
 }
 function isUIRootKind(kind) {
     return kind === 'card' || kind === 'overlay';
@@ -7713,7 +8244,10 @@ function validateStyle(property, value, stateOnly) {
     }
 }
 function isStateStyleKey(property) {
-    return (property === ':hover' || property === ':active' || property === ':disabled');
+    return (property === ':hover' ||
+        property === ':active' ||
+        property === ':disabled' ||
+        property === ':focus');
 }
 function isUIUnit(value) {
     return ((typeof value === 'number' && Number.isFinite(value)) ||
@@ -7803,6 +8337,7 @@ const ManipulationAction = {
     Translate: 'translate',
     Rotate: 'rotate',
     Scale: 'scale',
+    Resize: 'resize',
     None: 'none',
 };
 
@@ -7820,12 +8355,13 @@ function normalizeManipulationConfig(value) {
     const translate = normalizeAction(value.actions?.translate);
     const rotate = normalizeAction(value.actions?.rotate);
     const scale = normalizeAction(value.actions?.scale);
+    const resize = normalizeAction(value.actions?.resize);
     const handle = value.handle?.action;
     if (handle !== undefined && !isHandleAction(handle))
         return undefined;
-    if (!translate && !rotate && !scale)
+    if (!translate && !rotate && !scale && !resize)
         return undefined;
-    return { translate, rotate, scale, handle };
+    return { translate, rotate, scale, resize, handle };
 }
 function isManipulationActionEnabled(config, action) {
     if (action === ManipulationAction.Translate)
@@ -7834,6 +8370,8 @@ function isManipulationActionEnabled(config, action) {
         return !!config.rotate;
     if (action === ManipulationAction.Scale)
         return !!config.scale;
+    if (action === ManipulationAction.Resize)
+        return !!config.resize;
     return false;
 }
 function isHandleAction(value) {
@@ -7866,7 +8404,8 @@ function normalizeAction(value) {
 function isManipulationAction(value) {
     return (value === ManipulationAction.Translate ||
         value === ManipulationAction.Rotate ||
-        value === ManipulationAction.Scale);
+        value === ManipulationAction.Scale ||
+        value === ManipulationAction.Resize);
 }
 function isFiniteVector$1(value) {
     return (Number.isFinite(value.x) &&
@@ -7957,6 +8496,482 @@ function scaleLimitVector(value, fallback, allowInfinity) {
     return valid ? result : undefined;
 }
 
+function validateUIAppearance(value) {
+    if (value !== 'surface' && value !== 'none') {
+        throw new Error(`Invalid UI appearance "${String(value)}".`);
+    }
+}
+
+/** The only world-transform root in a spatial UI tree. */
+class UICard extends UIElement {
+    constructor({ size, pixelSize = 0.001, anchorX = 'center', anchorY = 'center', appearance = 'surface', manipulation, edge = false, ...options }) {
+        validateSize(size);
+        validatePixelSize(pixelSize);
+        validateAnchor(anchorX, ['left', 'center', 'right'], 'anchorX');
+        validateAnchor(anchorY, ['bottom', 'center', 'top'], 'anchorY');
+        validateUIAppearance(appearance);
+        super('card', options);
+        this.name = 'UICard';
+        this.edgeTarget = {
+            translateFromSurface: false,
+        };
+        this.edgeEnabled = false;
+        this.pixelSize = pixelSize;
+        this.anchorX = anchorX;
+        this.anchorY = anchorY;
+        this.appearance = appearance;
+        this.sizeTarget = { ...size };
+        this.sizeProxy = new Proxy(this.sizeTarget, {
+            set: (target, property, value) => {
+                if (property === 'width') {
+                    validateFixedSize(value);
+                }
+                else if (property === 'height') {
+                    validateHeight(value);
+                }
+                else {
+                    throw new Error(`Unknown UICard size property "${String(property)}".`);
+                }
+                Reflect.set(target, property, value);
+                resolvedSizes.delete(this);
+                this.markUIDirty();
+                return true;
+            },
+        });
+        this.edgeProxy = new Proxy(this.edgeTarget, {
+            set: (target, property, value) => {
+                if (property !== 'translateFromSurface' || typeof value !== 'boolean') {
+                    throw new Error(`Unknown or invalid UICard edge option "${String(property)}".`);
+                }
+                const previous = Reflect.get(target, property);
+                Reflect.set(target, property, value);
+                try {
+                    this.validateEdge();
+                }
+                catch (error) {
+                    Reflect.set(target, property, previous);
+                    throw error;
+                }
+                this.markUIDirty();
+                return true;
+            },
+        });
+        this.manipulation = manipulation;
+        this.edge = edge;
+    }
+    get size() {
+        return this.sizeProxy;
+    }
+    set size(value) {
+        validateSize(value);
+        this.sizeProxy.width = value.width;
+        this.sizeProxy.height = value.height;
+    }
+    get manipulation() {
+        return this.xb?.manipulation;
+    }
+    set manipulation(value) {
+        const normalized = normalizeCardManipulation(value);
+        this.validateEdge(this.edgeEnabled, normalized);
+        this.xb ??= {};
+        this.xb.manipulation = normalized;
+        this.markUIDirty();
+    }
+    get edge() {
+        return this.edgeEnabled ? this.edgeProxy : false;
+    }
+    set edge(value) {
+        const enabled = value !== false;
+        const options = value && value !== true ? value : {};
+        const next = {
+            translateFromSurface: options.translateFromSurface ?? false,
+        };
+        this.validateEdge(enabled, this.xb?.manipulation);
+        this.edgeEnabled = enabled;
+        this.edgeTarget.translateFromSurface = next.translateFromSurface;
+        this.markUIDirty();
+    }
+    validateEdge(enabled = this.edgeEnabled, manipulation = this.xb
+        ?.manipulation) {
+        if (!enabled)
+            return;
+        const config = normalizeManipulationConfig(manipulation);
+        if (!config?.translate && !config?.resize) {
+            throw new Error('UICard edge requires Translate or Resize manipulation.');
+        }
+    }
+}
+function getUICardEdgeOptions(card) {
+    return card.edge || undefined;
+}
+const resolvedSizes = new WeakMap();
+/** Returns the current physical card size after layout resolves. */
+function getResolvedUICardSize(card) {
+    if (card.size.height !== 'auto') {
+        return { width: card.size.width, height: card.size.height };
+    }
+    return resolvedSizes.get(card);
+}
+/** Stores a backend-calculated physical size for an automatic-height card. */
+function setResolvedUICardSize(card, size) {
+    if (card.size.height !== 'auto')
+        return;
+    resolvedSizes.set(card, size);
+}
+const contentMeasurers = new WeakMap();
+/** Registers the backend that measures a card's content. */
+function setUICardContentMeasurer(card, measurer) {
+    if (measurer)
+        contentMeasurers.set(card, measurer);
+    else
+        contentMeasurers.delete(card);
+}
+/**
+ * Returns the height in meters that the card's content needs at `width`, or
+ * undefined before the card has a layout.
+ */
+function measureUICardContentHeight(card, width) {
+    return contentMeasurers.get(card)?.height(width);
+}
+/**
+ * Returns the narrowest width in meters at which the card's content does not
+ * overflow, or undefined before the card has a layout.
+ */
+function measureUICardMinContentWidth(card) {
+    return contentMeasurers.get(card)?.minWidth();
+}
+// Android XR's default panel movement limits, in meters from the viewer.
+const CARD_MIN_DISTANCE = 0.75;
+const CARD_MAX_DISTANCE = 5;
+function normalizeCardManipulation(value) {
+    if (value === undefined || value === false)
+        return value;
+    if (value === true) {
+        return {
+            actions: {
+                translate: {
+                    faceCamera: true,
+                    scaleWithDistance: true,
+                    pushPull: true,
+                    minDistance: CARD_MIN_DISTANCE,
+                    maxDistance: CARD_MAX_DISTANCE,
+                },
+                scale: true,
+                resize: true,
+            },
+            handle: { action: 'translate' },
+        };
+    }
+    const actions = value.actions ? { ...value.actions } : undefined;
+    if (actions?.translate === true) {
+        actions.translate = { faceCamera: true };
+    }
+    else if (actions?.translate && typeof actions.translate === 'object') {
+        actions.translate = {
+            ...actions.translate,
+            faceCamera: actions.translate.faceCamera ?? true,
+        };
+    }
+    if (actions?.rotate && typeof actions.rotate === 'object') {
+        actions.rotate = {
+            ...actions.rotate,
+            axis: actions.rotate.axis && typeof actions.rotate.axis === 'object'
+                ? { ...actions.rotate.axis }
+                : actions.rotate.axis,
+        };
+    }
+    if (actions?.scale && typeof actions.scale === 'object') {
+        actions.scale = {
+            ...actions.scale,
+            minScale: actions.scale.minScale && typeof actions.scale.minScale === 'object'
+                ? { ...actions.scale.minScale }
+                : actions.scale.minScale,
+            maxScale: actions.scale.maxScale && typeof actions.scale.maxScale === 'object'
+                ? { ...actions.scale.maxScale }
+                : actions.scale.maxScale,
+        };
+    }
+    if (actions?.resize && typeof actions.resize === 'object') {
+        actions.resize = {
+            ...actions.resize,
+            minSize: actions.resize.minSize ? { ...actions.resize.minSize } : undefined,
+            maxSize: actions.resize.maxSize ? { ...actions.resize.maxSize } : undefined,
+        };
+    }
+    return {
+        ...value,
+        actions,
+        handle: value.handle ? { ...value.handle } : undefined,
+    };
+}
+function validateSize(size) {
+    if (!size)
+        throw new Error('UICard requires a size.');
+    validateFixedSize(size.width);
+    validateHeight(size.height);
+}
+function validateFixedSize(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        throw new Error('UICard fixed size values must be finite and nonnegative.');
+    }
+}
+function validateHeight(value) {
+    if (value === 'auto')
+        return;
+    validateFixedSize(value);
+}
+function validatePixelSize(pixelSize) {
+    if (!Number.isFinite(pixelSize) || pixelSize <= 0) {
+        throw new Error('UICard pixelSize must be positive and finite.');
+    }
+}
+function validateAnchor(value, allowed, property) {
+    if (!allowed.includes(value)) {
+        throw new Error(`UICard ${property} has an invalid value.`);
+    }
+}
+
+const DEFAULT_MIN_SIZE = 0.1;
+// Meters. Sizes closer than this count as unchanged, both for reusing a
+// content measurement and for leaving an automatic height alone.
+const SIZE_EPSILON = 1e-4;
+const CARD_ANCHORS = {
+    left: 0,
+    bottom: 0,
+    center: 0.5,
+    right: 1,
+    top: 1,
+};
+/** Captures and proposes corner Resize data for `UICard` owners. */
+class ResizeDriver {
+    constructor() {
+        this.action = ManipulationAction.Resize;
+        this.sessionCorners = new WeakMap();
+    }
+    capture(session) {
+        const card = asCard(session.owner);
+        const options = session.config.resize;
+        if (!card || !options)
+            return undefined;
+        const anchor = options.anchor ?? 'center';
+        if (anchor !== 'center' && anchor !== 'opposite')
+            return undefined;
+        const minSize = resolveLimit(options.minSize, DEFAULT_MIN_SIZE);
+        const maxSize = resolveLimit(options.maxSize, Infinity);
+        if (!minSize ||
+            !maxSize ||
+            minSize.width > maxSize.width ||
+            minSize.height > maxSize.height) {
+            return undefined;
+        }
+        // Without an explicit minimum width, never go narrower than the content.
+        if (options.minSize?.width === undefined) {
+            const content = measureUICardMinContentWidth(card);
+            if (content !== undefined) {
+                minSize.width = Math.min(Math.max(minSize.width, content), maxSize.width);
+            }
+        }
+        const { width } = card.size;
+        // Automatic heights become fixed once resized, like Quest and Android XR
+        // panels. Before the first layout there is no height to start from.
+        const height = card.size.height === 'auto'
+            ? (getResolvedUICardSize(card)?.height ?? 'auto')
+            : card.size.height;
+        if (!(width > 0) || (height !== 'auto' && !(height > 0))) {
+            return undefined;
+        }
+        const matrixWorld = card.matrixWorld.clone();
+        const inverseMatrixWorld = matrixWorld.clone().invert();
+        if (!isFiniteMatrix(inverseMatrixWorld))
+            return undefined;
+        const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 0, 1).transformDirection(matrixWorld), new THREE.Vector3().setFromMatrixPosition(matrixWorld));
+        const baseline = { plane, inverseMatrixWorld };
+        // Use the current pointer for the new delta baseline, and keep the corner
+        // chosen when the session first started.
+        const pointer = pointerOnPlane(session.primary.snapshot, baseline) ??
+            session.primary.capture.point.clone().applyMatrix4(inverseMatrixWorld);
+        const cardAnchor = new THREE.Vector2(CARD_ANCHORS[card.anchorX], CARD_ANCHORS[card.anchorY]);
+        const centerX = (CARD_ANCHORS.center - cardAnchor.x) * width;
+        const centerY = height === 'auto'
+            ? pointer.y
+            : (CARD_ANCHORS.center - cardAnchor.y) * height;
+        let corner = this.sessionCorners.get(session)?.clone();
+        if (!corner) {
+            corner = new THREE.Vector2(pointer.x >= centerX ? 1 : 0, pointer.y >= centerY ? 1 : 0);
+            this.sessionCorners.set(session, corner.clone());
+        }
+        return {
+            action: this.action,
+            width,
+            height,
+            matrixWorld,
+            inverseMatrixWorld,
+            plane,
+            pointer,
+            corner,
+            cardAnchor,
+            autoHeight: card.size.height === 'auto',
+            options: {
+                anchor,
+                minSize,
+                maxSize,
+                fitContent: options.minSize?.height === undefined,
+                preserveAspectRatio: options.preserveAspectRatio === true,
+            },
+        };
+    }
+    propose(session, baseline) {
+        const card = asCard(session.owner);
+        const pointer = pointerOnPlane(session.primary.snapshot, baseline);
+        if (!card || !pointer)
+            return undefined;
+        const { corner, cardAnchor, options } = baseline;
+        const fixed = options.anchor === 'center'
+            ? new THREE.Vector2(CARD_ANCHORS.center, CARD_ANCHORS.center)
+            : new THREE.Vector2(1 - corner.x, 1 - corner.y);
+        let width = resizeAxis(baseline.width, pointer.x - baseline.pointer.x, corner.x, fixed.x, options.minSize.width, options.maxSize.width);
+        let height = baseline.height === 'auto'
+            ? 'auto'
+            : resizeAxis(baseline.height, pointer.y - baseline.pointer.y, corner.y, fixed.y, options.minSize.height, options.maxSize.height);
+        const locked = options.preserveAspectRatio && baseline.height !== 'auto';
+        if (locked && height !== 'auto') {
+            // Follow whichever axis the pointer changed more, relative to its size.
+            const widthRatio = width / baseline.width;
+            const heightRatio = height / baseline.height;
+            const ratio = lockedRatio(Math.abs(Math.log(widthRatio)) >= Math.abs(Math.log(heightRatio))
+                ? widthRatio
+                : heightRatio, baseline);
+            width = baseline.width * ratio;
+            height = baseline.height * ratio;
+        }
+        if (height !== 'auto' && options.fitContent) {
+            const content = contentHeight(card, baseline, width);
+            const floor = content === undefined
+                ? undefined
+                : Math.min(content, options.maxSize.height);
+            if (floor !== undefined && height < floor) {
+                if (locked) {
+                    const ratio = lockedContentRatio(card, baseline, width / baseline.width, floor);
+                    width = baseline.width * ratio;
+                    height = baseline.height * ratio;
+                }
+                else {
+                    height = floor;
+                }
+            }
+        }
+        // Move the card origin so the fixed point keeps its baseline world position.
+        const offset = new THREE.Vector3((fixed.x - cardAnchor.x) * (baseline.width - width), height === 'auto' || baseline.height === 'auto'
+            ? 0
+            : (fixed.y - cardAnchor.y) * (baseline.height - height), 0);
+        const worldPosition = offset.applyMatrix4(baseline.matrixWorld);
+        const parent = session.owner.parent;
+        parent?.updateWorldMatrix(true, false);
+        const position = worldPositionToLocal(worldPosition, parent?.matrixWorld);
+        if (!Number.isFinite(width) || !isFiniteVector(position))
+            return undefined;
+        if (height !== 'auto' && !Number.isFinite(height))
+            return undefined;
+        // An automatic height stays automatic until the size really changes, so a
+        // corner press without a drag does not freeze it.
+        const unchanged = baseline.autoHeight &&
+            Math.abs(width - baseline.width) < SIZE_EPSILON &&
+            (height === 'auto' ||
+                Math.abs(height - baseline.height) < SIZE_EPSILON);
+        const proposedHeight = unchanged ? 'auto' : height;
+        return {
+            action: this.action,
+            width,
+            height: proposedHeight,
+            position,
+            apply: () => {
+                if (unchanged)
+                    return;
+                if (card.size.width !== width)
+                    card.size.width = width;
+                if (proposedHeight !== 'auto' && card.size.height !== proposedHeight) {
+                    card.size.height = proposedHeight;
+                }
+                session.owner.position.copy(position);
+            },
+        };
+    }
+}
+/** Measures the content height at `width`, reusing the last measurement. */
+function contentHeight(card, baseline, width) {
+    const cached = baseline.contentFloor;
+    if (cached && Math.abs(cached.width - width) < SIZE_EPSILON) {
+        return cached.height;
+    }
+    const height = measureUICardContentHeight(card, width);
+    baseline.contentFloor = { width, height };
+    return height;
+}
+/**
+ * Finds the smallest aspect-locked ratio between `lower` and the `floor` ratio
+ * at which the card height still fits its content at that width.
+ */
+function lockedContentRatio(card, baseline, lower, floor) {
+    const baseHeight = baseline.height;
+    const maxHeight = baseline.options.maxSize.height;
+    let high = lockedRatio(floor / baseHeight, baseline);
+    let low = Math.min(lower, high);
+    const fitsAt = (ratio) => {
+        const measured = contentHeight(card, baseline, baseline.width * ratio);
+        const needed = measured === undefined ? 0 : Math.min(measured, maxHeight);
+        return baseHeight * ratio >= needed - SIZE_EPSILON;
+    };
+    if (!fitsAt(high))
+        return high;
+    while ((high - low) * baseline.width > SIZE_EPSILON) {
+        const middle = (low + high) / 2;
+        if (fitsAt(middle))
+            high = middle;
+        else
+            low = middle;
+    }
+    return high;
+}
+/** Clamps a uniform resize ratio so both axes stay within their limits. */
+function lockedRatio(ratio, baseline) {
+    const height = baseline.height;
+    const { minSize, maxSize } = baseline.options;
+    const lower = Math.min(1, Math.max(minSize.width / baseline.width, minSize.height / height));
+    const upper = Math.max(1, Math.min(maxSize.width / baseline.width, maxSize.height / height));
+    return THREE.MathUtils.clamp(ratio, lower, upper);
+}
+function asCard(owner) {
+    return isUIElement(owner) && getUIElementKind(owner) === 'card'
+        ? owner
+        : undefined;
+}
+function resizeAxis(size, delta, corner, fixed, minimum, maximum) {
+    const direction = corner === 1 ? 1 : -1;
+    const next = size + (direction * delta) / Math.abs(corner - fixed);
+    return THREE.MathUtils.clamp(next, Math.min(minimum, size), Math.max(maximum, size));
+}
+function pointerOnPlane(snapshot, baseline) {
+    const world = snapshot.ray
+        ? snapshot.ray.intersectPlane(baseline.plane, new THREE.Vector3())
+        : baseline.plane.projectPoint(snapshot.position, new THREE.Vector3());
+    if (!world || !isFiniteVector(world))
+        return undefined;
+    return world.applyMatrix4(baseline.inverseMatrixWorld);
+}
+function resolveLimit(value, fallback) {
+    const width = value?.width ?? fallback;
+    const height = value?.height ?? fallback;
+    if (!isLimit(width) || !isLimit(height))
+        return undefined;
+    return { width, height };
+}
+function isLimit(value) {
+    return typeof value === 'number' && !Number.isNaN(value) && value >= 0;
+}
+function isFiniteMatrix(matrix) {
+    return matrix.elements.every(Number.isFinite);
+}
+
 /** Captures and proposes Rotate data. It does not own sessions or events. */
 class RotateDriver {
     constructor() {
@@ -7992,11 +9007,34 @@ class RotateDriver {
                     baseline.options.sensitivity;
         }
         else {
-            const localDelta = snapshot.position
-                .clone()
-                .sub(baseline.sourcePosition)
-                .applyQuaternion(baseline.sourceOrientationInverse);
-            angle = localDelta.x * baseline.options.sensitivity;
+            // Wrist rotation drives X and Z axes (pitch and roll).
+            // For Y-axis (turntable) and arbitrary custom axes, retain translation-driven sliding.
+            const isX = Math.abs(Math.abs(baseline.axis.x) - 1) < 1e-4;
+            const isZ = Math.abs(Math.abs(baseline.axis.z) - 1) < 1e-4;
+            if (isX || isZ) {
+                const worldAxis = baseline.options.space === 'local'
+                    ? baseline.axis.clone().applyQuaternion(baseline.worldQuaternion)
+                    : baseline.axis;
+                const deltaRotation = snapshot.orientation
+                    .clone()
+                    .multiply(baseline.sourceOrientationInverse);
+                let twistDot = deltaRotation.x * worldAxis.x +
+                    deltaRotation.y * worldAxis.y +
+                    deltaRotation.z * worldAxis.z;
+                let twistW = deltaRotation.w;
+                if (twistW < 0) {
+                    twistDot = -twistDot;
+                    twistW = -twistW;
+                }
+                angle = 2 * Math.atan2(twistDot, twistW) * baseline.options.sensitivity;
+            }
+            else {
+                const localDelta = snapshot.position
+                    .clone()
+                    .sub(baseline.sourcePosition)
+                    .applyQuaternion(baseline.sourceOrientationInverse);
+                angle = localDelta.x * baseline.options.sensitivity;
+            }
         }
         const offset = new THREE.Quaternion().setFromAxisAngle(baseline.axis, angle);
         let quaternion;
@@ -8075,6 +9113,18 @@ class ScaleDriver {
     }
 }
 
+// Thumbstick deflection ignored so resting sticks and drift don't push/pull.
+const PUSH_PULL_DEADZONE = 0.15;
+// xr-standard gamepad mapping: thumbstick Y, where forward is negative.
+const XR_STANDARD_THUMBSTICK_Y_AXIS = 3;
+// Exponential rate: full deflection multiplies the distance by e^1.5 per second.
+const DEFAULT_PUSH_PULL_SPEED = 1.5;
+// Meters. Keeps the grab point in front of the controller when pulling.
+const MIN_RAY_DEPTH = 0.05;
+// Android XR keeps panel size consistent up to 1.75 m, then scales at 0.5 m
+// per meter so farther panels look smaller.
+const CONSTANT_SIZE_DISTANCE = 1.75;
+const FAR_SCALE_RATE = 0.5;
 /** Captures and proposes Translate data. It does not own sessions or events. */
 class TranslateDriver {
     constructor(camera, timer) {
@@ -8085,7 +9135,7 @@ class TranslateDriver {
     capture(session) {
         const snapshot = session.primary.snapshot;
         const options = session.config.translate ?? {};
-        if (options.faceCamera &&
+        if ((options.faceCamera &&
             ((options.mode !== undefined &&
                 options.mode !== 'capsule' &&
                 options.mode !== 'cylindrical' &&
@@ -8094,14 +9144,37 @@ class TranslateDriver {
                     (!Number.isFinite(options.capsuleHalfHeight) ||
                         options.capsuleHalfHeight < 0)) ||
                 (options.smoothing !== undefined &&
-                    (!Number.isFinite(options.smoothing) || options.smoothing < 0)))) {
+                    (!Number.isFinite(options.smoothing) || options.smoothing < 0)))) ||
+            (!!options.pushPull && !resolvePushPull(options.pushPull)) ||
+            !validDistanceLimits(options)) {
             return undefined;
         }
+        const worldPosition = session.owner.getWorldPosition(new THREE.Vector3());
+        const viewerDistance = this.camera
+            ?.getWorldPosition(new THREE.Vector3())
+            .distanceTo(worldPosition);
+        const cameraDistance = options.scaleWithDistance
+            ? viewerDistance
+            : undefined;
+        const hasLimits = options.minDistance !== undefined || options.maxDistance !== undefined;
         const baseline = {
             action: this.action,
-            worldPosition: session.owner.getWorldPosition(new THREE.Vector3()),
+            worldPosition,
             sourcePosition: snapshot.position.clone(),
             options: { ...options },
+            scale: session.owner.scale.clone(),
+            cameraDistance: cameraDistance !== undefined &&
+                isPositiveFinite(cameraDistance) &&
+                isPositiveVector(session.owner.scale)
+                ? cameraDistance
+                : undefined,
+            distanceLimits: hasLimits && viewerDistance !== undefined
+                ? {
+                    min: Math.min(options.minDistance ?? 0, viewerDistance),
+                    max: Math.max(options.maxDistance ?? Infinity, viewerDistance),
+                }
+                : undefined,
+            scaleOptions: cloneScaleOptions(session.config.scale),
         };
         if (snapshot.ray) {
             baseline.rayDepth = snapshot.ray.direction.dot(session.primary.capture.point.clone().sub(snapshot.ray.origin));
@@ -8113,9 +9186,11 @@ class TranslateDriver {
     }
     propose(session, baseline) {
         const snapshot = session.primary.snapshot;
+        const viewer = this.camera?.getWorldPosition(new THREE.Vector3());
         let delta;
         let point;
         if (snapshot.ray && baseline.rayDepth !== undefined && baseline.rayPoint) {
+            baseline.rayDepth = this.pushPull(session, baseline, snapshot.ray, baseline.rayDepth, viewer);
             point = snapshot.ray.at(baseline.rayDepth, new THREE.Vector3());
             delta = point.clone().sub(baseline.rayPoint);
         }
@@ -8124,13 +9199,17 @@ class TranslateDriver {
             point = session.primary.capture.point.clone().add(delta);
         }
         const worldPosition = baseline.worldPosition.clone().add(delta);
+        const correction = this.limitDistance(baseline, worldPosition, viewer);
+        delta.add(correction);
+        point.add(correction);
         const parent = session.owner.parent;
         parent?.updateWorldMatrix(true, false);
         const localPosition = worldPositionToLocal(worldPosition, parent?.matrixWorld);
         const localQuaternion = baseline.options.faceCamera
-            ? faceCameraQuaternion(worldPosition, this.camera?.getWorldPosition(new THREE.Vector3()), parent?.getWorldQuaternion(new THREE.Quaternion()), baseline.options.mode, baseline.options.capsuleHalfHeight ??
+            ? faceCameraQuaternion(worldPosition, viewer, parent?.getWorldQuaternion(new THREE.Quaternion()), baseline.options.mode, baseline.options.capsuleHalfHeight ??
                 DEFAULT_FACE_CAMERA_CAPSULE_HALF_HEIGHT)
             : undefined;
+        const scale = this.scaleWithDistance(baseline, worldPosition, viewer);
         const rotationAlpha = this.timer
             ? faceCameraSlerpAlpha(baseline.options.smoothing ?? DEFAULT_FACE_CAMERA_SMOOTHING, this.timer.getDelta())
             : 1;
@@ -8146,10 +9225,14 @@ class TranslateDriver {
             delta,
             position: localPosition,
             worldPosition,
+            scale,
             apply: () => {
                 if (!isFiniteVector(localPosition))
                     return;
                 session.owner.position.copy(localPosition);
+                if (baseline.cameraDistance !== undefined) {
+                    session.owner.scale.copy(scale);
+                }
                 if (localQuaternion) {
                     const speed = delta.length();
                     const effectiveAlpha = Math.min(1, rotationAlpha + speed * 3.0);
@@ -8158,6 +9241,98 @@ class TranslateDriver {
             },
         };
     }
+    /**
+     * Moves `worldPosition` back within the distance limits from the viewer and
+     * returns the correction that was applied.
+     */
+    limitDistance(baseline, worldPosition, viewer) {
+        const correction = new THREE.Vector3();
+        const limits = baseline.distanceLimits;
+        if (!limits || !viewer)
+            return correction;
+        const offset = worldPosition.clone().sub(viewer);
+        const distance = offset.length();
+        if (!isPositiveFinite(distance))
+            return correction;
+        const clamped = THREE.MathUtils.clamp(distance, limits.min, limits.max);
+        if (clamped === distance)
+            return correction;
+        correction.copy(offset).multiplyScalar(clamped / distance - 1);
+        worldPosition.add(correction);
+        return correction;
+    }
+    /**
+     * Moves the grab point along the ray with the thumbstick's forward axis,
+     * keeping the owner within the distance limits from the viewer.
+     */
+    pushPull(session, baseline, ray, depth, viewer) {
+        const speed = resolvePushPull(baseline.options.pushPull);
+        // Only XR controllers: on a desktop gamepad the same axis is the right
+        // stick, which the simulator uses to look up and down.
+        const gamepad = session.primary.snapshot.controller.gamepad;
+        const stick = gamepad?.mapping === 'xr-standard'
+            ? gamepad.axes[XR_STANDARD_THUMBSTICK_Y_AXIS]
+            : undefined;
+        if (!speed ||
+            !this.timer ||
+            stick === undefined ||
+            !Number.isFinite(stick) ||
+            Math.abs(stick) < PUSH_PULL_DEADZONE) {
+            return depth;
+        }
+        // propose() can run more than once per frame; step only once.
+        const time = this.timer.getElapsed();
+        if (baseline.pushPullTime === time)
+            return depth;
+        baseline.pushPullTime = time;
+        const next = Math.max(Math.min(MIN_RAY_DEPTH, depth), depth * Math.exp(-stick * speed * this.timer.getDelta()));
+        const limits = baseline.distanceLimits;
+        if (!limits || !viewer)
+            return next;
+        const distanceAt = (value) => ray
+            .at(value, new THREE.Vector3())
+            .sub(baseline.rayPoint)
+            .add(baseline.worldPosition)
+            .distanceTo(viewer);
+        const current = distanceAt(depth);
+        const candidate = distanceAt(next);
+        // Only block steps that move farther outside the limits, so an owner that
+        // starts outside them never snaps, and pulling back responds immediately.
+        if (candidate > current && candidate > limits.max)
+            return depth;
+        if (candidate < current && candidate < limits.min)
+            return depth;
+        return next;
+    }
+    scaleWithDistance(baseline, worldPosition, viewer) {
+        const scale = baseline.scale.clone();
+        if (baseline.cameraDistance === undefined || !viewer)
+            return scale;
+        const distance = viewer.distanceTo(worldPosition);
+        const factor = clampScaleFactor(sizeDistance(distance) / sizeDistance(baseline.cameraDistance), baseline.scale, baseline.scaleOptions);
+        return isPositiveFinite(factor) ? scale.multiplyScalar(factor) : scale;
+    }
+}
+function sizeDistance(distance) {
+    return distance <= CONSTANT_SIZE_DISTANCE
+        ? distance
+        : CONSTANT_SIZE_DISTANCE +
+            FAR_SCALE_RATE * (distance - CONSTANT_SIZE_DISTANCE);
+}
+/** Returns the push/pull speed, or undefined when disabled or invalid. */
+function resolvePushPull(value) {
+    if (!value)
+        return undefined;
+    const speed = (value === true ? undefined : value.speed) ??
+        DEFAULT_PUSH_PULL_SPEED;
+    return isPositiveFinite(speed) ? speed : undefined;
+}
+function validDistanceLimits({ minDistance, maxDistance }) {
+    if (minDistance !== undefined && !(minDistance >= 0))
+        return false;
+    if (maxDistance !== undefined && !(maxDistance > 0))
+        return false;
+    return (minDistance ?? 0) <= (maxDistance ?? Infinity);
 }
 
 /**
@@ -8172,6 +9347,7 @@ class ManipulationManager {
         this.roles = new Map();
         this.rotateDriver = new RotateDriver();
         this.scaleDriver = new ScaleDriver();
+        this.resizeDriver = new ResizeDriver();
         this.translateDriver = new TranslateDriver(camera, timer);
     }
     resolve(path) {
@@ -8396,6 +9572,7 @@ class ManipulationManager {
         const session = this.roles.get(source);
         if (!session)
             return false;
+        const updated = Boolean(finalSnapshot);
         if (finalSnapshot) {
             if (session.primary.snapshot.controller === source) {
                 session.primary.snapshot.copyFrom(finalSnapshot);
@@ -8406,11 +9583,11 @@ class ManipulationManager {
             this.updateSession(session);
         }
         if (session.primary.snapshot.controller === source) {
-            this.finishSession(session, 'end', true);
+            this.finishSession(session, 'end', true, updated);
             return true;
         }
         if (session.auxiliary?.controller === source) {
-            this.finishAuxiliary(session, source, 'end');
+            this.finishAuxiliary(session, source, 'end', updated);
             return true;
         }
         return false;
@@ -8513,11 +9690,13 @@ class ManipulationManager {
         }
         return true;
     }
-    finishPhase(session, phase) {
+    finishPhase(session, phase, reuseLastProposal = false) {
         const active = session.phase;
         if (!active)
             return;
-        const proposal = this.propose(session) ?? active.lastProposal;
+        const proposal = reuseLastProposal
+            ? (active.lastProposal ?? this.propose(session))
+            : (this.propose(session) ?? active.lastProposal);
         session.phase = undefined;
         this.dispatchPhase(session, active, phase, proposal);
     }
@@ -8538,19 +9717,21 @@ class ManipulationManager {
             throw error;
         }
     }
-    finishSession(session, phase, suppressAuxiliary) {
+    finishSession(session, phase, suppressAuxiliary, reuseLastProposal = false) {
         const active = session.phase;
         const proposal = active
-            ? (this.propose(session) ?? active.lastProposal)
+            ? reuseLastProposal
+                ? (active.lastProposal ?? this.propose(session))
+                : (this.propose(session) ?? active.lastProposal)
             : undefined;
         this.removeSession(session, suppressAuxiliary);
         if (active)
             this.dispatchPhase(session, active, phase, proposal);
     }
-    finishAuxiliary(session, source, phase) {
+    finishAuxiliary(session, source, phase, reuseLastProposal = false) {
         let phaseFinished = false;
         try {
-            this.finishPhase(session, phase);
+            this.finishPhase(session, phase, reuseLastProposal);
             phaseFinished = true;
         }
         finally {
@@ -8584,6 +9765,9 @@ class ManipulationManager {
         if (action === ManipulationAction.Rotate) {
             return this.rotateDriver.capture(session);
         }
+        if (action === ManipulationAction.Resize) {
+            return this.resizeDriver.capture(session);
+        }
         return this.scaleDriver.capture(session, auxiliary);
     }
     propose(session) {
@@ -8595,6 +9779,9 @@ class ManipulationManager {
         }
         if (baseline.action === ManipulationAction.Rotate) {
             return this.rotateDriver.propose(session, baseline);
+        }
+        if (baseline.action === ManipulationAction.Resize) {
+            return this.resizeDriver.propose(session, baseline);
         }
         return this.scaleDriver.propose(session, baseline);
     }
@@ -8649,6 +9836,7 @@ function createEvent(session, currentTarget, phase, proposal, preventState, prop
             delta: proposal.delta.clone(),
             position: proposal.position.clone(),
             worldPosition: proposal.worldPosition.clone(),
+            scale: proposal.scale.clone(),
         }, preventState);
     }
     if (proposal.action === ManipulationAction.Rotate) {
@@ -8657,6 +9845,15 @@ function createEvent(session, currentTarget, phase, proposal, preventState, prop
             action: proposal.action,
             angle: proposal.angle,
             quaternion: proposal.quaternion.clone(),
+        }, preventState);
+    }
+    if (proposal.action === ManipulationAction.Resize) {
+        return withDefaultPrevented({
+            ...common,
+            action: proposal.action,
+            width: proposal.width,
+            height: proposal.height,
+            position: proposal.position.clone(),
         }, preventState);
     }
     return withDefaultPrevented({
@@ -8676,11 +9873,12 @@ function withDefaultPrevented(event, state) {
 }
 
 const DEFAULT_LONG_SELECT_DURATION = 0.75;
+const SCROLL_DRAG_THRESHOLD = 6;
+const WHEEL_SCALE_SPEED = 0.001;
 const NOOP_PROPAGATION = () => { };
 /** Owns all logical target, hover, capture, completion, and cancellation state. */
 class Interaction {
     constructor(dependencies) {
-        this.registry = new HitRegistry();
         this.gazeDwell = new GazeDwell();
         this.sourceStates = new Map();
         this.frameSnapshots = [];
@@ -8692,8 +9890,10 @@ class Interaction {
         this.touches = new Map();
         this.suppressedUntilRelease = new Set();
         this.scaleIntents = new Map();
+        this.wheelIntents = new Map();
         this.frameSources = new Set();
         this.nextFrameSources = new Set();
+        this.registry = new HitRegistry(dependencies.camera);
         this.callbacks = dependencies.callbacks;
         this.scene = dependencies.scene;
         this.manipulation = new ManipulationManager((script, event) => this.callbacks.invokeManipulation(script, event), (controller) => this.suppressedUntilRelease.add(controller), dependencies.camera, dependencies.timer);
@@ -8736,6 +9936,10 @@ class Interaction {
                     isSemanticControlDisabled(capture.semanticControl));
                 if (reason)
                     this.cancelCapture(controller, reason);
+                else if (capture.scroll &&
+                    isSemanticControlDisabled(capture.scroll.owner)) {
+                    this.cancelCapture(controller, 'disabled');
+                }
             }
         }
         const snapshots = this.frameSnapshots;
@@ -8756,6 +9960,10 @@ class Interaction {
             this.applyScaleIntent(controller, factor);
         }
         this.scaleIntents.clear();
+        for (const [controller, delta] of this.wheelIntents) {
+            this.applyWheelIntent(controller, delta);
+        }
+        this.wheelIntents.clear();
         if (snapshots.length > 0) {
             try {
                 this.manipulation.update(snapshots);
@@ -8777,6 +9985,7 @@ class Interaction {
                 continue;
             try {
                 if (capture.kind === 'target') {
+                    this.updateScrollCapture(capture, snapshot);
                     this.updateLongSelect(capture, snapshot, deltaSeconds);
                     this.updateSemantic(capture, snapshot);
                 }
@@ -8798,9 +10007,14 @@ class Interaction {
         this.nextFrameSources.clear();
         this.exclusiveControls.clear();
         this.scaleIntents.clear();
+        this.wheelIntents.clear();
     }
-    registerHitSurface(physical, logical) {
-        return this.registry.register(physical, logical);
+    registerHitSurface(physical, logical, options) {
+        return this.registry.register(physical, logical, options);
+    }
+    /** Installs the UI runtime's focus policy without owning a second input path. */
+    setSelectionFocusHandler(handler) {
+        this.focusHandler = handler;
     }
     /** Refreshes bounded direct-touch candidates found by the lifecycle pass. */
     syncTouchCandidates(candidates) {
@@ -8842,6 +10056,7 @@ class Interaction {
         this.gazeDwell.remove(controller);
         this.suppressedUntilRelease.delete(controller);
         this.scaleIntents.delete(controller);
+        this.wheelIntents.delete(controller);
     }
     getSourceSnapshot(controller) {
         return this.sourceStates.get(controller);
@@ -8859,7 +10074,9 @@ class Interaction {
     isSelectingAt(object) {
         for (const capture of this.captures.values()) {
             if (capture.kind === 'target' &&
-                objectIsDescendantOf(capture.selection.surface, object)) {
+                objectIsDescendantOf(capture.scroll?.active
+                    ? capture.scroll.owner
+                    : capture.selection.surface, object)) {
                 return true;
             }
         }
@@ -8929,6 +10146,35 @@ class Interaction {
         this.scaleIntents.set(controller, (this.scaleIntents.get(controller) ?? 1) * factor);
         return true;
     }
+    /** Routes a normalized wheel delta using the next frame's resolved target. */
+    queueWheelIntent(controller, delta) {
+        if (!Number.isFinite(delta) || delta === 0)
+            return false;
+        this.wheelIntents.set(controller, (this.wheelIntents.get(controller) ?? 0) + delta);
+        return true;
+    }
+    applyWheelIntent(controller, delta) {
+        const resolved = this.resolvedRays.get(controller);
+        let owned = false;
+        for (const object of resolved?.objectPath ?? []) {
+            if (object.xb?.interactionEnabled === false)
+                break;
+            const control = getSemanticControl(object);
+            if (!control?.scroll || control.isDisabled())
+                continue;
+            owned = true;
+            if (this.exclusiveControls.has(object))
+                return;
+            let moved = false;
+            this.callbacks.invokeSemantic(object, () => {
+                moved = control.scroll.scrollBy(delta);
+            });
+            if (moved)
+                return;
+        }
+        if (!owned)
+            this.applyScaleIntent(controller, Math.exp(-delta * WHEEL_SCALE_SPEED));
+    }
     applyScaleIntent(controller, factor) {
         const snapshot = this.sourceStates.get(controller);
         const resolved = this.resolvedRays.get(controller);
@@ -8996,7 +10242,8 @@ class Interaction {
             input.sourceType === 'gaze' ||
             input.selected ||
             previousSelected ||
-            input.released === true;
+            input.released === true ||
+            this.wheelIntents.has(input.controller);
         if (!shouldRaycast || !this.scene) {
             intersections.length = 0;
             return intersections;
@@ -9025,6 +10272,7 @@ class Interaction {
             return;
         }
         if (!resolved?.target) {
+            this.focusHandler?.();
             const capture = { kind: 'none' };
             this.installCapture(controller, capture);
             this.runCaptureTransition(controller, () => {
@@ -9043,7 +10291,7 @@ class Interaction {
         const wantsManipulation = !semantic && resolved.manipulation !== undefined;
         if (semantic) {
             action = 'semantic';
-            if (semantic.kind === 'slider' &&
+            if (isContinuousControl(semantic) &&
                 resolved.semanticControl &&
                 this.exclusiveControls.has(resolved.semanticControl)) {
                 action = 'none';
@@ -9054,8 +10302,9 @@ class Interaction {
         }
         if (gaze && semantic?.kind !== 'button')
             action = 'none';
-        const sliderProjector = action === 'semantic' && semantic?.kind === 'slider'
-            ? createPlanarSurfaceProjector(this.registry.resolve(resolved.hitObject).physical)
+        const physicalSurface = this.registry.resolve(resolved.hitObject).physical;
+        const sliderProjector = action === 'semantic' && isContinuousControl(semantic)
+            ? createPlanarSurfaceProjector(physicalSurface)
             : undefined;
         const capture = {
             kind: 'target',
@@ -9065,7 +10314,8 @@ class Interaction {
             semantic,
             semanticControl: resolved.semanticControl,
             sliderProjector,
-            exclusiveControl: action === 'semantic' && semantic?.kind === 'slider'
+            physicalSurface,
+            exclusiveControl: action === 'semantic' && isContinuousControl(semantic)
                 ? resolved.semanticControl
                 : undefined,
             longSelectDuration: 0,
@@ -9073,16 +10323,30 @@ class Interaction {
             lastStablePoint: resolved.intersection.point.clone(),
             touch,
         };
+        if (!gaze && action !== 'none') {
+            capture.scroll = this.createScrollCapture(resolved);
+            if (touch && capture.scroll) {
+                this.directTouch.setCaptureRegion(controller, capture.scroll.physical);
+            }
+        }
         this.installCapture(controller, capture);
         this.runCaptureTransition(controller, () => {
+            this.focusHandler?.(resolved.surface);
+            if (capture.scroll?.scrollbar) {
+                this.activateScrollCapture(capture, snapshot.controller);
+                if (capture.scroll?.active) {
+                    const { state, scrollbar } = capture.scroll;
+                    this.callbacks.invokeSemantic(capture.scroll.owner, () => state.scrollBy(scrollbar.offset - state.getOffset()));
+                }
+            }
             const event = this.createSelectEvent(controller, capture);
             dispatchInteractionPath(this.callbacks, selection.scriptPath, 'onObjectSelectStart', event);
             if (action === 'manipulate' &&
                 !this.manipulation.tryStart(selection, snapshot)) {
                 capture.action = 'none';
             }
-            if (action === 'semantic') {
-                this.invokeSemantic(capture, () => semantic?.begin?.(semanticInput(snapshot, resolved, sliderProjector)));
+            if (capture.action === 'semantic') {
+                this.invokeSemantic(capture, () => semantic?.begin?.(semanticInput(snapshot, resolved, sliderProjector, physicalSurface)));
             }
             this.callbacks.invokeGlobal('onSelectStart', event);
         });
@@ -9102,19 +10366,25 @@ class Interaction {
         }
         else if (capture.kind === 'target') {
             const released = this.resolvedRays.get(controller);
-            const sameTarget = (releasedTarget ?? released?.target) === capture.selection.target;
+            const sameTarget = (releasedTarget ?? released?.target) === capture.selection.target &&
+                (!capture.touch ||
+                    !capture.scroll ||
+                    capture.scroll.active ||
+                    this.registry
+                        .resolve(capture.physicalSurface)
+                        .containsPoint?.((finalSnapshot ?? snapshot).position) !== false);
             if (capture.action === 'manipulate') {
                 completed = this.runManipulationTransition(() => this.manipulation.end(controller, finalSnapshot ?? snapshot));
             }
             else if (capture.action === 'semantic') {
-                const slider = capture.semantic?.kind === 'slider';
+                const continuous = isContinuousControl(capture.semantic);
                 completed =
                     !capture.longSelectFired &&
                         !isSemanticControlDisabled(capture.semanticControl) &&
-                        (slider || sameTarget);
+                        (continuous || sameTarget);
                 if (completed) {
                     this.invokeSemantic(capture, () => {
-                        if (slider)
+                        if (continuous)
                             capture.semantic?.complete?.();
                         else
                             capture.semantic?.activate();
@@ -9128,11 +10398,14 @@ class Interaction {
                 completed =
                     capture.action === 'select' && !capture.longSelectFired && sameTarget;
             }
-            endReason = completed
-                ? 'released'
-                : sameTarget
-                    ? reason
-                    : 'released-outside';
+            endReason =
+                capture.action === 'scroll'
+                    ? 'pointer-cancel'
+                    : completed
+                        ? 'released'
+                        : sameTarget
+                            ? reason
+                            : 'released-outside';
             const endEvent = {
                 ...this.createSelectEvent(controller, capture),
                 completed,
@@ -9161,7 +10434,9 @@ class Interaction {
             reason,
         };
         if (capture.kind === 'target') {
-            this.invokeSemantic(capture, () => capture.semantic?.cancel?.());
+            if (capture.action !== 'scroll') {
+                this.invokeSemantic(capture, () => capture.semantic?.cancel?.());
+            }
             dispatchInteractionPath(this.callbacks, capture.selection.scriptPath, 'onObjectSelectEnd', event);
         }
         this.callbacks.invokeGlobal('onSelectEnd', event);
@@ -9323,12 +10598,15 @@ class Interaction {
         };
     }
     updateSemantic(capture, snapshot) {
-        if (capture.action !== 'semantic' || capture.semantic?.kind !== 'slider') {
+        if (capture.action !== 'semantic' ||
+            !isContinuousControl(capture.semantic)) {
             return;
         }
         const projection = snapshot.ray
             ? capture.sliderProjector?.(snapshot.ray)
-            : undefined;
+            : capture.physicalSurface
+                ? projectPointOnSurface(capture.physicalSurface, snapshot.position)
+                : undefined;
         if (projection) {
             this.invokeSemantic(capture, () => capture.semantic?.update?.({
                 source: snapshot.source,
@@ -9343,10 +10621,83 @@ class Interaction {
             this.invokeSemantic(capture, () => capture.semantic?.update?.(semanticInput(snapshot, resolved)));
         }
     }
+    createScrollCapture(resolved) {
+        for (const owner of resolved.objectPath) {
+            if (owner.xb?.interactionEnabled === false)
+                break;
+            const control = getSemanticControl(owner);
+            if (control?.isDisabled())
+                continue;
+            if (isContinuousControl(control) && !control?.scroll)
+                return undefined;
+            if (!control?.scroll)
+                continue;
+            const scrollbar = control.scroll.scrollbarHit?.(resolved.intersection.point);
+            if (control.kind === 'input' && !scrollbar)
+                return undefined;
+            if (control.kind !== 'scroll' && !scrollbar)
+                continue;
+            const physical = this.registry.find(owner)?.physical ?? owner;
+            const start = control.scroll.projectPoint(resolved.intersection.point);
+            if (!start)
+                return undefined;
+            return {
+                owner,
+                physical,
+                state: control.scroll,
+                projector: createPlanarSurfaceProjector(physical),
+                start,
+                lastY: start.y,
+                active: false,
+                scrollbar,
+            };
+        }
+        return undefined;
+    }
+    activateScrollCapture(capture, controller) {
+        const scroll = capture.scroll;
+        if (!scroll || scroll.active)
+            return;
+        const owner = this.exclusiveControls.get(scroll.owner);
+        if (owner && owner !== controller) {
+            capture.action = 'none';
+            capture.scroll = undefined;
+            this.invokeSemantic(capture, () => capture.semantic?.cancel?.());
+            return;
+        }
+        scroll.active = true;
+        capture.action = 'scroll';
+        capture.exclusiveControl = scroll.owner;
+        this.exclusiveControls.set(scroll.owner, controller);
+        this.invokeSemantic(capture, () => capture.semantic?.cancel?.());
+    }
+    updateScrollCapture(capture, snapshot) {
+        const scroll = capture.scroll;
+        if (!scroll || capture.longSelectFired)
+            return;
+        const point = snapshot.ray
+            ? (scroll.projector?.(snapshot.ray)?.point ??
+                this.resolvedRays.get(snapshot.controller)?.intersection.point)
+            : snapshot.position;
+        const projected = point && scroll.state.projectPoint(point);
+        if (!projected)
+            return;
+        if (!scroll.active) {
+            if (Math.abs(projected.y - scroll.start.y) < SCROLL_DRAG_THRESHOLD)
+                return;
+            this.activateScrollCapture(capture, snapshot.controller);
+            if (!scroll.active)
+                return;
+        }
+        const delta = (projected.y - scroll.lastY) * (scroll.scrollbar?.scale ?? -1);
+        scroll.lastY = projected.y;
+        this.callbacks.invokeSemantic(scroll.owner, () => scroll.state.scrollBy(delta));
+    }
     updateLongSelect(capture, snapshot, deltaSeconds) {
         if (capture.longSelectFired ||
             capture.action === 'manipulate' ||
-            capture.semantic?.kind === 'slider' ||
+            capture.action === 'scroll' ||
+            isContinuousControl(capture.semantic) ||
             snapshot.sourceType === 'gaze' ||
             !capture.selection.scriptPath.some((script) => this.callbacks.hasTargetHook(script, 'onObjectLongSelect'))) {
             return;
@@ -9494,6 +10845,7 @@ class Interaction {
         if (!capture)
             return undefined;
         this.captures.delete(controller);
+        this.directTouch.setCaptureRegion(controller);
         if (capture.kind === 'target' &&
             capture.exclusiveControl &&
             this.exclusiveControls.get(capture.exclusiveControl) === controller) {
@@ -9548,13 +10900,20 @@ class Interaction {
         this.callbacks.invokeSemantic(capture.semanticControl, callback);
     }
 }
-function semanticInput(snapshot, resolved, projector) {
-    const projection = snapshot.ray ? projector?.(snapshot.ray) : undefined;
+function semanticInput(snapshot, resolved, projector, physicalSurface) {
+    const projection = snapshot.ray
+        ? projector?.(snapshot.ray)
+        : physicalSurface
+            ? projectPointOnSurface(physicalSurface, snapshot.position)
+            : undefined;
     return {
         source: snapshot.source,
         point: projection?.point ?? resolved.intersection.point.clone(),
         uv: projection?.uv ?? resolved.intersection.uv?.clone(),
     };
+}
+function isContinuousControl(control) {
+    return control?.kind === 'slider' || control?.kind === 'input';
 }
 function clonePublicIntersection(intersection, surface) {
     return {
@@ -9575,6 +10934,131 @@ function selectionBelongsTo(selection, object) {
         selection.scriptPath.includes(object));
 }
 
+const DEFAULT_VIEWPORT_HEIGHT = 240;
+const states$1 = new WeakMap();
+/** A vertical viewport for ordinary retained UI children. Offsets use UI units. */
+class UIScrollView extends UIElement {
+    constructor({ ariaLabel = 'Scroll view', scrollTop = 0, onScroll, style, ...options } = {}) {
+        validateOffset(scrollTop);
+        if (!ariaLabel)
+            throw new Error('UIScrollView requires an accessible name.');
+        super('scroll', {
+            ...options,
+            style: { width: '100%', height: DEFAULT_VIEWPORT_HEIGHT, ...style },
+        });
+        this.name = 'UIScrollView';
+        this._clientHeight = 0;
+        this._scrollHeight = 0;
+        this.measured = false;
+        this.ariaLabel = ariaLabel;
+        this._scrollTop = Math.max(0, scrollTop);
+        this.onScroll = onScroll;
+        states$1.set(this, {
+            updateLayout: (height, contentHeight) => {
+                this._clientHeight = height;
+                this._scrollHeight = contentHeight;
+                this.measured = true;
+                this.scrollTo(this._scrollTop);
+            },
+            clearLayout: () => {
+                this.measured = false;
+                this._clientHeight = 0;
+                this._scrollHeight = 0;
+            },
+        });
+        registerSemanticControl(this, {
+            kind: 'scroll',
+            isDisabled: () => !this.ready,
+            activate: () => { },
+            scroll: {
+                getOffset: () => this.scrollTop,
+                getViewportHeight: () => this.clientHeight,
+                projectPoint: (point) => states$1.get(this)?.binding?.projectPoint(point),
+                scrollBy: (delta) => this.scrollBy(delta),
+                scrollbarHit: (point) => states$1.get(this)?.binding?.scrollbarHit?.(point),
+            },
+        });
+    }
+    get ready() {
+        return this.measured && states$1.get(this)?.binding !== undefined;
+    }
+    get scrollTop() {
+        return this._scrollTop;
+    }
+    set scrollTop(offset) {
+        this.scrollTo(offset);
+    }
+    get clientHeight() {
+        return this._clientHeight;
+    }
+    get scrollHeight() {
+        return this._scrollHeight;
+    }
+    get maxScrollTop() {
+        return Math.max(0, this.scrollHeight - this.clientHeight);
+    }
+    /** Sets a clamped offset. Before layout, retains the requested initial offset. */
+    scrollTo(offset) {
+        validateOffset(offset);
+        const next = this.measured
+            ? Math.min(this.maxScrollTop, Math.max(0, offset))
+            : Math.max(0, offset);
+        states$1.get(this)?.binding?.applyOffset(next);
+        if (next === this._scrollTop)
+            return;
+        this._scrollTop = next;
+        this.markUIDirty();
+        this.onScroll?.(next);
+    }
+    /** Returns whether a measured viewport actually moved. */
+    scrollBy(delta) {
+        validateOffset(delta);
+        if (!this.ready)
+            return false;
+        const previous = this.scrollTop;
+        this.scrollTo(previous + delta);
+        return previous !== this.scrollTop;
+    }
+    /** Minimally reveals a descendant after its mounted layout is ready. */
+    reveal(child) {
+        let parent = child.parent;
+        while (parent && parent !== this)
+            parent = parent.parent;
+        if (parent !== this) {
+            throw new Error('UIScrollView.reveal requires a descendant UI element.');
+        }
+        const binding = states$1.get(this)?.binding;
+        if (!this.ready || !binding) {
+            throw new Error('UIScrollView.reveal requires a mounted layout.');
+        }
+        binding.reveal(child);
+    }
+}
+function bindScrollView(view, binding) {
+    const state = states$1.get(view);
+    state.binding = binding;
+    return () => {
+        if (state.binding !== binding)
+            return;
+        state.binding = undefined;
+        state.clearLayout();
+    };
+}
+function updateScrollViewLayout(view, height, contentHeight) {
+    if (!Number.isFinite(height) ||
+        !Number.isFinite(contentHeight) ||
+        height < 0 ||
+        contentHeight < 0) {
+        throw new Error('UIScrollView requires finite, nonnegative layout extents.');
+    }
+    states$1.get(view).updateLayout(height, Math.max(height, contentHeight));
+}
+function validateOffset(offset) {
+    if (!Number.isFinite(offset)) {
+        throw new Error('UIScrollView offsets must be finite.');
+    }
+}
+
 const CONTEXT_NUMBER_SCALE = 10_000;
 function roundContextNumber(value) {
     const rounded = Math.round(value * CONTEXT_NUMBER_SCALE) / CONTEXT_NUMBER_SCALE;
@@ -9592,15 +11076,246 @@ class XRSystems extends THREE.Group {
     }
 }
 
+function disposeMaterial(material, except = new Set()) {
+    if (!material) {
+        return;
+    }
+    const materials = Array.isArray(material) ? material : [material];
+    for (const item of materials) {
+        if (!except.has(item)) {
+            item.dispose();
+        }
+    }
+}
+function disposeMeshResources(mesh) {
+    disposeRenderableResources(mesh);
+}
+function disposeRenderableResources(object) {
+    const renderable = object;
+    renderable.geometry?.dispose?.();
+    disposeMaterial(renderable.material);
+}
+function hasRenderableResources(object) {
+    const renderable = object;
+    return !!(renderable.geometry || renderable.material);
+}
+function disposeObjectTree(object) {
+    for (const child of [...object.children]) {
+        disposeObjectTree(child);
+        object.remove(child);
+    }
+    if (hasRenderableResources(object)) {
+        disposeRenderableResources(object);
+    }
+    const disposable = object;
+    disposable.dispose?.();
+}
+function disposeObjectChildren(object) {
+    for (const child of [...object.children]) {
+        disposeObjectTree(child);
+        object.remove(child);
+    }
+}
+
+/**
+ * Creates a PlaneGeometry with UVs remapped to the active depth sensor region.
+ */
+function createDepthPlaneGeometry(segments, minU, maxU, minV, maxV) {
+    const geometry = new THREE.PlaneGeometry(1, 1, segments, segments);
+    const uvs = geometry.attributes.uv.array;
+    const rangeU = maxU - minU;
+    const rangeV = maxV - minV;
+    for (let i = 0; i < uvs.length; i += 2) {
+        uvs[i] = minU + uvs[i] * rangeU;
+        uvs[i + 1] = minV + uvs[i + 1] * rangeV;
+    }
+    return geometry;
+}
+/**
+ * Computes smooth vertex normals directly on a regular (cols x rows) grid
+ * using central differences, avoiding Three.js's indexed triangle accumulation.
+ */
+function computeGridVertexNormals(geometry, cols, rows) {
+    const posAttr = geometry.attributes.position;
+    const normAttr = geometry.attributes.normal;
+    if (!normAttr || posAttr.count !== cols * rows) {
+        geometry.computeVertexNormals();
+        return;
+    }
+    const pos = posAttr.array;
+    const norm = normAttr.array;
+    for (let row = 0; row < rows; ++row) {
+        const rowUp = row > 0 ? row - 1 : 0;
+        const rowDown = row < rows - 1 ? row + 1 : rows - 1;
+        const rowOffset = row * cols;
+        const upOffset = rowUp * cols;
+        const downOffset = rowDown * cols;
+        for (let col = 0; col < cols; ++col) {
+            const colLeft = col > 0 ? col - 1 : 0;
+            const colRight = col < cols - 1 ? col + 1 : cols - 1;
+            const iLeft = (rowOffset + colLeft) * 3;
+            const iRight = (rowOffset + colRight) * 3;
+            const iUp = (upOffset + col) * 3;
+            const iDown = (downOffset + col) * 3;
+            const txX = pos[iRight] - pos[iLeft];
+            const txY = pos[iRight + 1] - pos[iLeft + 1];
+            const txZ = pos[iRight + 2] - pos[iLeft + 2];
+            const tyX = pos[iUp] - pos[iDown];
+            const tyY = pos[iUp + 1] - pos[iDown + 1];
+            const tyZ = pos[iUp + 2] - pos[iDown + 2];
+            const nx = txY * tyZ - txZ * tyY;
+            const ny = txZ * tyX - txX * tyZ;
+            const nz = txX * tyY - txY * tyX;
+            const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+            const iOut = (rowOffset + col) * 3;
+            if (len > 0) {
+                const invLen = 1.0 / len;
+                norm[iOut] = nx * invLen;
+                norm[iOut + 1] = ny * invLen;
+                norm[iOut + 2] = nz * invLen;
+            }
+            else {
+                norm[iOut] = 0;
+                norm[iOut + 1] = 0;
+                norm[iOut + 2] = 1;
+            }
+        }
+    }
+    normAttr.needsUpdate = true;
+}
+/**
+ * Caches per-vertex camera unprojection rays and performs vectorized depth-mesh
+ * vertex position updates.
+ */
+class DepthGeometryUpdater {
+    constructor() {
+        this.geometryRayCache = new WeakMap();
+        this.scratchVertexPosition = new THREE.Vector3();
+    }
+    getOrComputeUnprojectionRays(geometry, projectionMatrixInverse) {
+        const vertexCount = geometry.attributes.position.count;
+        const projElements = projectionMatrixInverse.elements;
+        let cached = this.geometryRayCache.get(geometry);
+        if (cached && cached.rayXY.length === 2 * vertexCount) {
+            let unchanged = true;
+            for (let k = 0; k < 16; ++k) {
+                if (cached.projInvElements[k] !== projElements[k]) {
+                    unchanged = false;
+                    break;
+                }
+            }
+            if (unchanged) {
+                return cached.rayXY;
+            }
+        }
+        else {
+            cached = {
+                rayXY: new Float64Array(2 * vertexCount),
+                projInvElements: new Float64Array(16),
+            };
+            this.geometryRayCache.set(geometry, cached);
+        }
+        cached.projInvElements.set(projElements);
+        const rayXY = cached.rayXY;
+        const uvArray = geometry.attributes.uv.array;
+        const vertexPosition = this.scratchVertexPosition;
+        for (let i = 0; i < vertexCount; ++i) {
+            const u = uvArray[2 * i];
+            const v = uvArray[2 * i + 1];
+            vertexPosition
+                .set(2.0 * (u - 0.5), 2.0 * (v - 0.5), -1)
+                .applyMatrix4(projectionMatrixInverse);
+            const invNegZ = -1 / vertexPosition.z;
+            rayXY[2 * i] = vertexPosition.x * invNegZ;
+            rayXY[2 * i + 1] = vertexPosition.y * invNegZ;
+        }
+        return rayXY;
+    }
+    updateGeometryPositions(params) {
+        const { depthData, geometry, depthDataFormat, projectionMatrixInverse, patchHoles, patchHolesUpper, minDepthPrev, maxDepthPrev, } = params;
+        let { minDepth, maxDepth } = params;
+        const width = depthData.width;
+        const height = depthData.height;
+        const maxX = width - 1;
+        const maxY = height - 1;
+        const rawValueToMeters = depthData.rawValueToMeters;
+        const depthArray = depthDataFormat === 'float32'
+            ? new Float32Array(depthData.data)
+            : new Uint16Array(depthData.data);
+        const uvArray = geometry.attributes.uv.array;
+        const posArray = geometry.attributes.position.array;
+        const vertexCount = geometry.attributes.position.count;
+        const rayXY = this.getOrComputeUnprojectionRays(geometry, projectionMatrixInverse);
+        const transformMatrix = depthData.normDepthBufferFromNormView?.matrix;
+        const hasTransform = Boolean(transformMatrix);
+        let m0 = 1, m1 = 0, m3 = 0, m4 = 0, m5 = 1, m7 = 0, m12 = 0, m13 = 0, m15 = 1;
+        let isAffineTransform = true;
+        if (transformMatrix) {
+            m0 = transformMatrix[0];
+            m1 = transformMatrix[1];
+            m3 = transformMatrix[3];
+            m4 = transformMatrix[4];
+            m5 = transformMatrix[5];
+            m7 = transformMatrix[7];
+            m12 = transformMatrix[12];
+            m13 = transformMatrix[13];
+            m15 = transformMatrix[15];
+            isAffineTransform = m3 === 0 && m7 === 0 && m15 === 1;
+        }
+        for (let i = 0; i < vertexCount; ++i) {
+            const uvIdx = 2 * i;
+            const u = uvArray[uvIdx];
+            const v = uvArray[uvIdx + 1];
+            const vInv = 1.0 - v;
+            let sampleU = u;
+            let sampleV = vInv;
+            if (hasTransform) {
+                sampleU = m0 * u + m4 * vInv + m12;
+                sampleV = m1 * u + m5 * vInv + m13;
+                if (!isAffineTransform) {
+                    const invW = 1.0 / (m3 * u + m7 * vInv + m15);
+                    sampleU *= invW;
+                    sampleV *= invW;
+                }
+            }
+            const depthX = Math.round(clamp$1(sampleU * maxX, 0, maxX));
+            const depthY = Math.round(clamp$1(sampleV * maxY, 0, maxY));
+            const rawDepth = depthArray[depthY * width + depthX];
+            let depth = rawValueToMeters * rawDepth;
+            if (depth > 0) {
+                if (depth < minDepth) {
+                    minDepth = depth;
+                }
+                else if (depth > maxDepth) {
+                    maxDepth = depth;
+                }
+            }
+            if (depth === 0 && patchHoles) {
+                depth = maxDepthPrev;
+            }
+            if (patchHolesUpper && v > 0.9) {
+                depth = minDepthPrev;
+            }
+            const posIdx = 3 * i;
+            posArray[posIdx] = depth * rayXY[uvIdx];
+            posArray[posIdx + 1] = depth * rayXY[uvIdx + 1];
+            posArray[posIdx + 2] = -depth;
+        }
+        return { minDepth, maxDepth };
+    }
+}
+
 const DepthMeshTexturedShader = {
     vertexShader: /* glsl */ `
 varying vec3 vNormal;
 varying vec3 vViewPosition;
+varying vec3 vObjectPosition;
 varying vec2 vUv;
 
 void main() {
   vUv = uv;
   vNormal = normal;
+  vObjectPosition = position;
 
   // Computes the view position.
   vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
@@ -9621,6 +11336,7 @@ uniform float uRawValueToMeters;
 
 varying vec3 vNormal;
 varying vec3 vViewPosition;
+varying vec3 vObjectPosition;
 varying vec2 vUv;
 
 const highp float kMaxDepthInMeters = 8.0;
@@ -9631,6 +11347,7 @@ uniform float uDebug;
 uniform float uOpacity;
 uniform bool uUsingFloatDepth;
 uniform bool uIsTextureArray;
+uniform bool uUseDerivativeNormals;
 uniform mat4 uNormDepthBufferFromNormView;
 
 float saturate(in float x) {
@@ -9676,6 +11393,9 @@ vec3 DepthGetColorVisualization(in float x) {
 
 void main() {
   vec3 lightDirection = normalize(uLightDirection);
+  vec3 surfaceNormal = uUseDerivativeNormals
+    ? normalize(cross(dFdx(vObjectPosition), dFdy(vObjectPosition)))
+    : normalize(vNormal);
 
   // Compute UV coordinates relative to resolution
   // vec2 uv = gl_FragCoord.xy / uResolution;
@@ -9683,17 +11403,17 @@ void main() {
 
   // Ambient, diffuse, and specular terms
   vec3 ambient = 0.1 * uColor;
-  float diff = max(dot(vNormal, lightDirection), 0.0);
+  float diff = max(dot(surfaceNormal, lightDirection), 0.0);
   vec3 diffuse = diff * uColor;
 
   vec3 viewDir = normalize(vViewPosition);
-  vec3 reflectDir = reflect(-lightDirection, vNormal);
+  vec3 reflectDir = reflect(-lightDirection, surfaceNormal);
   float spec = pow(max(dot(viewDir, reflectDir), 0.0), 16.0);
   vec3 specular = vec3(0.5) * spec; // Adjust specular color/strength
 
   // Combine Phong lighting
   vec3 finalColor = ambient + diffuse + specular;
-  // finalColor = vec3(vNormal);
+  // finalColor = vec3(surfaceNormal);
 
   // Output color
   gl_FragColor = uOpacity * vec4(finalColor, 1.0);
@@ -9714,25 +11434,17 @@ void main() {
 };
 
 class DepthMesh extends MeshScript {
-    static { this.dependencies = {
-        renderer: THREE.WebGLRenderer,
-    }; }
     static { this.isDepthMesh = true; }
     constructor(depthOptions, width, height, depthTextures) {
         const options = depthOptions.depthMesh;
         const depthResolution = options.depthFullResolution;
         const ignoreEdgePixels = options.ignoreEdgePixels;
         const activeRes = Math.max(2, depthResolution - 2 * ignoreEdgePixels);
-        const geometry = new THREE.PlaneGeometry(1, 1, activeRes - 1, activeRes - 1);
         const minU = ignoreEdgePixels / (depthResolution - 1);
         const maxU = (depthResolution - 1 - ignoreEdgePixels) / (depthResolution - 1);
         const minV = ignoreEdgePixels / (depthResolution - 1);
         const maxV = (depthResolution - 1 - ignoreEdgePixels) / (depthResolution - 1);
-        const uvs = geometry.attributes.uv.array;
-        for (let i = 0; i < uvs.length; i += 2) {
-            uvs[i] = minU + uvs[i] * (maxU - minU);
-            uvs[i + 1] = minV + uvs[i + 1] * (maxV - minV);
-        }
+        const geometry = createDepthPlaneGeometry(activeRes - 1, minU, maxU, minV, maxV);
         let material;
         let uniforms;
         if (options.useDepthTexture || options.showDebugTexture) {
@@ -9750,6 +11462,9 @@ class DepthMesh extends MeshScript {
                 uLightDirection: { value: new THREE.Vector3(1.0, 1.0, 1.0).normalize() },
                 uUsingFloatDepth: {
                     value: depthOptions.dataFormatPreference[0] === 'float32',
+                },
+                uUseDerivativeNormals: {
+                    value: !options.updateVertexNormals,
                 },
                 uNormDepthBufferFromNormView: { value: new THREE.Matrix4() },
             };
@@ -9780,6 +11495,9 @@ class DepthMesh extends MeshScript {
         this.projectionMatrixInverse = new THREE.Matrix4();
         this.lastColliderUpdateTime = 0;
         this.colliderId = 0;
+        this.disposed = false;
+        this.geometryUpdater = new DepthGeometryUpdater();
+        this.gridResolution = activeRes;
         this.visible = true;
         this.xb = { pointerEvents: 'none', reticleMode: 'surface' };
         this.options = options;
@@ -9793,21 +11511,37 @@ class DepthMesh extends MeshScript {
         }
         // Create a downsampled geometry for raycasts and physics.
         if (options.useDownsampledGeometry) {
-            this.downsampledGeometry = new THREE.PlaneGeometry(1, 1, 39, 39);
-            const dsUvs = this.downsampledGeometry.attributes.uv.array;
-            for (let i = 0; i < dsUvs.length; i += 2) {
-                dsUvs[i] = minU + dsUvs[i] * (maxU - minU);
-                dsUvs[i + 1] = minV + dsUvs[i + 1] * (maxV - minV);
-            }
+            this.downsampledGeometry = createDepthPlaneGeometry(39, minU, maxU, minV, maxV);
             this.downsampledMesh = new THREE.Mesh(this.downsampledGeometry, material);
             this.downsampledMesh.visible = false;
         }
     }
+    get depthTextureUniforms() {
+        return this.depthTextureMaterialUniforms;
+    }
     /**
-     * Initialize the depth mesh.
+     * Sets a custom material (such as a WebGPU NodeMaterial) and registers a
+     * callback to synchronize uniforms on depth updates.
+     *
+     * @param material - The material to apply to the depth mesh.
+     * @param onUpdate - Optional callback invoked whenever depth uniforms change.
      */
-    init({ renderer }) {
-        this.renderer = renderer;
+    setCustomMaterial(material, onUpdate) {
+        disposeMaterial(this.material);
+        material.visible =
+            this.options.showDebugTexture || this.options.renderShadow;
+        if (this.depthTextureMaterialUniforms) {
+            material.uniforms =
+                this.depthTextureMaterialUniforms;
+        }
+        this.material = material;
+        if (this.downsampledMesh) {
+            this.downsampledMesh.material = material;
+        }
+        this.customMaterialUpdateCallback = onUpdate;
+        this.onBeforeRender = () => {
+            this.customMaterialUpdateCallback?.();
+        };
     }
     /**
      * Updates the depth data and geometry positions based on the provided camera
@@ -9836,6 +11570,8 @@ class DepthMesh extends MeshScript {
         if (depthTextureLeft && this.depthTextureMaterialUniforms) {
             this.depthTextureMaterialUniforms.uUsingFloatDepth.value =
                 depthDataFormat === 'float32';
+            this.depthTextureMaterialUniforms.uUseDerivativeNormals.value =
+                !this.options.updateVertexNormals;
             if (depthData.normDepthBufferFromNormView) {
                 this.depthTextureMaterialUniforms.uNormDepthBufferFromNormView.value.fromArray(depthData.normDepthBufferFromNormView.matrix);
             }
@@ -9859,9 +11595,9 @@ class DepthMesh extends MeshScript {
                 ? this.depthTextures.depthData[0].rawValueToMeters
                 : 1.0;
         }
+        this.customMaterialUpdateCallback?.();
         if (this.options.updateVertexNormals) {
-            this.geometry.computeVertexNormals();
-            this.downsampledGeometry?.computeVertexNormals();
+            computeGridVertexNormals(this.geometry, this.gridResolution, this.gridResolution);
         }
         this.updateColliderIfNeeded();
     }
@@ -9885,61 +11621,20 @@ class DepthMesh extends MeshScript {
      * Internal method to update the geometry of the depth mesh.
      */
     updateGeometry(depthData, geometry, depthDataFormat) {
-        const width = depthData.width;
-        const height = depthData.height;
-        const depthArray = depthDataFormat === 'float32'
-            ? new Float32Array(depthData.data)
-            : new Uint16Array(depthData.data);
-        const vertexPosition = new THREE.Vector3();
-        const normViewCoord = new THREE.Vector3();
-        const normDepthBufferFromNormView = depthData.normDepthBufferFromNormView
-            ? new THREE.Matrix4().fromArray(depthData.normDepthBufferFromNormView.matrix)
-            : new THREE.Matrix4().identity();
-        for (let i = 0; i < geometry.attributes.position.count; ++i) {
-            const u = geometry.attributes.uv.array[2 * i];
-            const v = geometry.attributes.uv.array[2 * i + 1];
-            let sampleU = u;
-            let sampleV = v;
-            if (depthData.normDepthBufferFromNormView) {
-                normViewCoord.set(u, 1.0 - v, 0);
-                normViewCoord.applyMatrix4(normDepthBufferFromNormView);
-                sampleU = normViewCoord.x;
-                sampleV = normViewCoord.y;
-            }
-            else {
-                sampleV = 1.0 - v;
-            }
-            // Grabs the nearest for now.
-            const depthX = Math.round(clamp$1(sampleU * (width - 1), 0, width - 1));
-            const depthY = Math.round(clamp$1(sampleV * (height - 1), 0, height - 1));
-            const rawDepth = depthArray[depthY * width + depthX];
-            let depth = depthData.rawValueToMeters * rawDepth;
-            // Finds global min/max.
-            if (depth > 0) {
-                if (depth < this.minDepth) {
-                    this.minDepth = depth;
-                }
-                else if (depth > this.maxDepth) {
-                    this.maxDepth = depth;
-                }
-            }
-            // This is a wrong algorithm to patch holes but working amazingly well.
-            // Per-row maximum may work better but haven't tried here.
-            // A proper local maximum takes another pass.
-            if (depth == 0 && this.options.patchHoles) {
-                depth = this.maxDepthPrev;
-            }
-            if (this.options.patchHolesUpper && v > 0.9) {
-                depth = this.minDepthPrev;
-            }
-            vertexPosition.set(2.0 * (u - 0.5), 2.0 * (v - 0.5), -1);
-            // This relates to camera.near
-            vertexPosition.applyMatrix4(this.projectionMatrixInverse);
-            vertexPosition.multiplyScalar(-depth / vertexPosition.z);
-            geometry.attributes.position.array[3 * i + 0] = vertexPosition.x;
-            geometry.attributes.position.array[3 * i + 1] = vertexPosition.y;
-            geometry.attributes.position.array[3 * i + 2] = vertexPosition.z;
-        }
+        const bounds = this.geometryUpdater.updateGeometryPositions({
+            depthData,
+            geometry,
+            depthDataFormat,
+            projectionMatrixInverse: this.projectionMatrixInverse,
+            patchHoles: this.options.patchHoles,
+            patchHolesUpper: this.options.patchHolesUpper,
+            minDepthPrev: this.minDepthPrev,
+            maxDepthPrev: this.maxDepthPrev,
+            minDepth: this.minDepth,
+            maxDepth: this.maxDepth,
+        });
+        this.minDepth = bounds.minDepth;
+        this.maxDepth = bounds.maxDepth;
     }
     /**
      * Optimizes collider updates to run periodically based on the specified FPS.
@@ -10033,201 +11728,47 @@ class DepthMesh extends MeshScript {
         }
         return undefined;
     }
-}
-
-function validateUIAppearance(value) {
-    if (value !== 'surface' && value !== 'none') {
-        throw new Error(`Invalid UI appearance "${String(value)}".`);
-    }
-}
-
-/** The only world-transform root in a spatial UI tree. */
-class UICard extends UIElement {
-    constructor({ size, pixelSize = 0.001, anchorX = 'center', anchorY = 'center', appearance = 'surface', manipulation, edge = false, ...options }) {
-        validateSize(size);
-        validatePixelSize(pixelSize);
-        validateAnchor(anchorX, ['left', 'center', 'right'], 'anchorX');
-        validateAnchor(anchorY, ['bottom', 'center', 'top'], 'anchorY');
-        validateUIAppearance(appearance);
-        super('card', options);
-        this.name = 'UICard';
-        this.edgeTarget = {
-            translateFromSurface: false,
-        };
-        this.edgeEnabled = false;
-        this.pixelSize = pixelSize;
-        this.anchorX = anchorX;
-        this.anchorY = anchorY;
-        this.appearance = appearance;
-        this.sizeTarget = { ...size };
-        this.sizeProxy = new Proxy(this.sizeTarget, {
-            set: (target, property, value) => {
-                if (property === 'width') {
-                    validateFixedSize(value);
-                }
-                else if (property === 'height') {
-                    validateHeight(value);
-                }
-                else {
-                    throw new Error(`Unknown UICard size property "${String(property)}".`);
-                }
-                Reflect.set(target, property, value);
-                resolvedSizes.delete(this);
-                this.markUIDirty();
-                return true;
-            },
-        });
-        this.edgeProxy = new Proxy(this.edgeTarget, {
-            set: (target, property, value) => {
-                if (property !== 'translateFromSurface' || typeof value !== 'boolean') {
-                    throw new Error(`Unknown or invalid UICard edge option "${String(property)}".`);
-                }
-                const previous = Reflect.get(target, property);
-                Reflect.set(target, property, value);
-                try {
-                    this.validateEdge();
-                }
-                catch (error) {
-                    Reflect.set(target, property, previous);
-                    throw error;
-                }
-                this.markUIDirty();
-                return true;
-            },
-        });
-        this.manipulation = manipulation;
-        this.edge = edge;
-    }
-    get size() {
-        return this.sizeProxy;
-    }
-    set size(value) {
-        validateSize(value);
-        this.sizeProxy.width = value.width;
-        this.sizeProxy.height = value.height;
-    }
-    get manipulation() {
-        return this.xb?.manipulation;
-    }
-    set manipulation(value) {
-        const normalized = normalizeCardManipulation(value);
-        this.validateEdge(this.edgeEnabled, normalized);
-        this.xb ??= {};
-        this.xb.manipulation = normalized;
-        this.markUIDirty();
-    }
-    get edge() {
-        return this.edgeEnabled ? this.edgeProxy : false;
-    }
-    set edge(value) {
-        const enabled = value !== false;
-        const options = value && value !== true ? value : {};
-        const next = {
-            translateFromSurface: options.translateFromSurface ?? false,
-        };
-        this.validateEdge(enabled, this.xb?.manipulation);
-        this.edgeEnabled = enabled;
-        this.edgeTarget.translateFromSurface = next.translateFromSurface;
-        this.markUIDirty();
-    }
-    validateEdge(enabled = this.edgeEnabled, manipulation = this.xb
-        ?.manipulation) {
-        if (!enabled)
+    /** Called by Depth at terminal teardown, not on Script disconnection. */
+    disposeResources() {
+        if (this.disposed)
             return;
-        const config = normalizeManipulationConfig(manipulation);
-        if (!config?.translate) {
-            throw new Error('UICard edge requires Translate manipulation.');
-        }
-    }
-}
-function getUICardEdgeOptions(card) {
-    return card.edge || undefined;
-}
-const resolvedSizes = new WeakMap();
-/** Returns the current physical card size after layout resolves. */
-function getResolvedUICardSize(card) {
-    if (card.size.height !== 'auto') {
-        return { width: card.size.width, height: card.size.height };
-    }
-    return resolvedSizes.get(card);
-}
-/** Stores a backend-calculated physical size for an automatic-height card. */
-function setResolvedUICardSize(card, size) {
-    if (card.size.height !== 'auto')
-        return;
-    resolvedSizes.set(card, size);
-}
-function normalizeCardManipulation(value) {
-    if (value === undefined || value === false)
-        return value;
-    if (value === true) {
-        return {
-            actions: {
-                translate: { faceCamera: true },
-                scale: true,
+        this.disposed = true;
+        const world = this.blendedWorld;
+        const body = this.rigidBody;
+        this.blendedWorld = undefined;
+        this.rigidBody = undefined;
+        this.RAPIER = undefined;
+        this.collider = undefined;
+        this.colliders.length = 0;
+        let firstError;
+        const cleanups = [
+            () => {
+                // Removing the body also removes its single or dual colliders.
+                if (body)
+                    world.removeRigidBody(body);
             },
-            handle: { action: 'translate' },
-        };
-    }
-    const actions = value.actions ? { ...value.actions } : undefined;
-    if (actions?.translate === true) {
-        actions.translate = { faceCamera: true };
-    }
-    else if (actions?.translate && typeof actions.translate === 'object') {
-        actions.translate = {
-            ...actions.translate,
-            faceCamera: actions.translate.faceCamera ?? true,
-        };
-    }
-    if (actions?.rotate && typeof actions.rotate === 'object') {
-        actions.rotate = {
-            ...actions.rotate,
-            axis: actions.rotate.axis && typeof actions.rotate.axis === 'object'
-                ? { ...actions.rotate.axis }
-                : actions.rotate.axis,
-        };
-    }
-    if (actions?.scale && typeof actions.scale === 'object') {
-        actions.scale = {
-            ...actions.scale,
-            minScale: actions.scale.minScale && typeof actions.scale.minScale === 'object'
-                ? { ...actions.scale.minScale }
-                : actions.scale.minScale,
-            maxScale: actions.scale.maxScale && typeof actions.scale.maxScale === 'object'
-                ? { ...actions.scale.maxScale }
-                : actions.scale.maxScale,
-        };
-    }
-    return {
-        ...value,
-        actions,
-        handle: value.handle ? { ...value.handle } : undefined,
-    };
-}
-function validateSize(size) {
-    if (!size)
-        throw new Error('UICard requires a size.');
-    validateFixedSize(size.width);
-    validateHeight(size.height);
-}
-function validateFixedSize(value) {
-    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
-        throw new Error('UICard fixed size values must be finite and nonnegative.');
-    }
-}
-function validateHeight(value) {
-    if (value === 'auto')
-        return;
-    validateFixedSize(value);
-}
-function validatePixelSize(pixelSize) {
-    if (!Number.isFinite(pixelSize) || pixelSize <= 0) {
-        throw new Error('UICard pixelSize must be positive and finite.');
-    }
-}
-function validateAnchor(value, allowed, property) {
-    if (!allowed.includes(value)) {
-        throw new Error(`UICard ${property} has an invalid value.`);
+            () => this.geometry.dispose(),
+            () => this.downsampledGeometry?.dispose(),
+            () => disposeMaterial(this.material),
+        ];
+        for (const cleanup of cleanups) {
+            try {
+                cleanup();
+            }
+            catch (error) {
+                firstError ??= error;
+            }
+        }
+        this.downsampledMesh?.removeFromParent();
+        this.downsampledMesh = undefined;
+        this.downsampledGeometry = undefined;
+        if (this.depthTextureMaterialUniforms) {
+            this.depthTextureMaterialUniforms.uDepthTexture.value = null;
+            this.depthTextureMaterialUniforms.uDepthTextureArray.value = null;
+        }
+        this.depthTextures = undefined;
+        if (firstError !== undefined)
+            throw firstError;
     }
 }
 
@@ -10284,6 +11825,9 @@ function isDescendantOf$2(object, ancestor) {
     return false;
 }
 function getObjectBounds(object, target) {
+    const clipped = getUIPresentationBounds(object, target ?? new THREE.Box3());
+    if (clipped !== undefined)
+        return clipped;
     const presentation = getUIPresentationObject(object);
     if (presentation) {
         const presentationBounds = getThreeObjectBounds(presentation, target);
@@ -10428,6 +11972,7 @@ function describeSemanticObject(object, interaction) {
         pointerEvents: object.xb?.pointerEvents ?? 'auto',
         interactionEnabled: object.xb?.interactionEnabled ?? true,
         ...inferValue(object),
+        ...inferEditingState(object),
     };
 }
 function hasSemanticAncestor(object) {
@@ -10462,6 +12007,10 @@ function inferRole(object) {
             return 'button';
         if (kind === 'slider')
             return 'slider';
+        if (kind === 'input')
+            return 'textbox';
+        if (kind === 'scroll')
+            return 'region';
         if (kind === 'text')
             return 'text';
         if (kind === 'image' || kind === 'icon')
@@ -10501,11 +12050,19 @@ function inferTraits(object, disabled) {
         traits.add('manipulable');
     if (isUIElement(object) &&
         (getUIElementKind(object) === 'button' ||
-            getUIElementKind(object) === 'slider') &&
+            getUIElementKind(object) === 'slider' ||
+            getUIElementKind(object) === 'input') &&
         object.xb?.interactionEnabled !== false &&
         !disabled) {
         traits.add('selectable');
     }
+    if (getSemanticControl(object)?.scroll)
+        traits.add('scrollable');
+    if (isUIElement(object) &&
+        getUIElementKind(object) === 'input' &&
+        !object.readOnly &&
+        !disabled)
+        traits.add('editable');
     return traits.size ? [...traits] : undefined;
 }
 function mergeTraits(inferred, explicit) {
@@ -10520,7 +12077,29 @@ function inferValue(object) {
     return { value: slider.value, min: slider.min, max: slider.max };
 }
 function inferDisabled(object) {
-    return object.disabled;
+    return (getSemanticControl(object)?.isDisabled() ??
+        object.disabled);
+}
+function inferEditingState(object) {
+    const description = {};
+    if (isUIElement(object) && getUIElementKind(object) === 'input') {
+        const input = object;
+        description.focused = input.focused;
+        description.readOnly = input.readOnly;
+        description.multiline = input.multiline;
+    }
+    const scroll = getSemanticControl(object)?.scroll;
+    if (scroll) {
+        description.scroll = {
+            offset: roundContextNumber(scroll.getOffset()),
+            viewportHeight: roundContextNumber(scroll.getViewportHeight()),
+        };
+        if (object instanceof UIScrollView) {
+            description.scroll.maximum = roundContextNumber(object.maxScrollTop);
+            description.scroll.contentHeight = roundContextNumber(object.scrollHeight);
+        }
+    }
+    return description;
 }
 function isLayoutOnlyContainer(object, role) {
     const className = object.constructor.name;
@@ -10530,7 +12109,8 @@ function isLayoutOnlyContainer(object, role) {
     return !object.name && (className === 'Object3D' || className === 'Group');
 }
 function createSemanticNode(object, id, semantic, parentId) {
-    object.updateMatrixWorld(true);
+    // buildSemanticTree refreshes the whole scene before traversal, so this only
+    // needs the ancestor walk that getWorldPosition already does.
     object.getWorldPosition(tempPosition$1);
     const node = {
         id,
@@ -10561,6 +12141,14 @@ function createSemanticNode(object, id, semantic, parentId) {
         node.selected = semantic.selected;
     if (semantic.hovered !== undefined)
         node.hovered = semantic.hovered;
+    if (semantic.focused !== undefined)
+        node.focused = semantic.focused;
+    if (semantic.readOnly !== undefined)
+        node.readOnly = semantic.readOnly;
+    if (semantic.multiline !== undefined)
+        node.multiline = semantic.multiline;
+    if (semantic.scroll !== undefined)
+        node.scroll = semantic.scroll;
     if (semantic.value !== undefined)
         node.value = semantic.value;
     if (semantic.min !== undefined)
@@ -10769,6 +12357,9 @@ function createSemanticViewData({ camera, node, object, raycastTargets, occlusio
     if (!node.visible || !isObjectVisible(object)) {
         return createNotRenderedViewData();
     }
+    if (getUIPresentationBounds(object, tempBoundsBox) === null) {
+        return createNotRenderedViewData();
+    }
     const box = getObjectBounds(object, tempBoundsBox);
     const center = box?.getCenter(tempCenter) ?? object.getWorldPosition(tempCenter);
     const projected = projectWorldPoint(center, camera);
@@ -10829,6 +12420,7 @@ function isObjectInLineOfSight({ camera, object, targetPoint, raycastTargets, oc
     if (targetDistance <= 0) {
         return true;
     }
+    raycaster.camera = camera;
     raycaster.set(tempCameraPosition, tempDirection.normalize());
     raycaster.near = 0;
     raycaster.far = targetDistance;
@@ -11767,6 +13359,7 @@ var WebXRSessionEventType;
     WebXRSessionEventType["READY"] = "ready";
     WebXRSessionEventType["SESSION_START"] = "sessionstart";
     WebXRSessionEventType["SESSION_END"] = "sessionend";
+    WebXRSessionEventType["SESSION_ERROR"] = "sessionerror";
 })(WebXRSessionEventType || (WebXRSessionEventType = {}));
 /**
  * Manages the WebXR session lifecycle by extending THREE.EventDispatcher
@@ -11792,6 +13385,12 @@ class WebXRSessionManager extends THREE.EventDispatcher {
             }
             catch (error) {
                 session.removeEventListener('end', this.onSessionEndedInternal);
+                try {
+                    await session.end();
+                }
+                catch (cleanupError) {
+                    throw new AggregateError([error, cleanupError], 'XR renderer setup failed and the session could not be closed.');
+                }
                 throw error;
             }
             if (this.disposed) {
@@ -11870,7 +13469,7 @@ class WebXRSessionManager extends THREE.EventDispatcher {
         }
     }
     /**
-     * Ends the WebXR session.
+     * Requests and initializes a WebXR session.
      */
     startSession() {
         if (this.disposed) {
@@ -11891,12 +13490,18 @@ class WebXRSessionManager extends THREE.EventDispatcher {
         this.waitingForXRSession = true;
         navigator
             .xr.requestSession(this.mode, this.sessionOptions)
+            .then(this.onSessionStartedInternal)
             .finally(() => {
             this.waitingForXRSession = false;
         })
-            .then(this.onSessionStartedInternal)
             .catch((err) => {
             console.error('Error requesting session', err, 'mode:', this.mode, 'sesionOptions:', this.sessionOptions);
+            if (!this.disposed) {
+                this.dispatchEvent({
+                    type: WebXRSessionEventType.SESSION_ERROR,
+                    error: err,
+                });
+            }
         });
     }
     /**
@@ -11958,11 +13563,14 @@ class XRButton {
         this.domElement = document.createElement('div');
         this.simulatorButtonElement = document.createElement('button');
         this.xrButtonElement = document.createElement('button');
+        this.errorElement = document.createElement('p');
         this.disposed = false;
+        this.startingSimulator = false;
         this.onUnsupported = () => this.showXRNotSupported();
         this.onReady = () => this.onSessionReady();
         this.onSessionStart = () => this.onSessionStarted();
         this.onSessionEnd = () => this.onSessionEnded();
+        this.onSessionError = (event) => this.showError(event.error);
         this.domElement.id = XRBUTTON_WRAPPER_ID;
         this.createXRAppTitle();
         this.createXRAppDescription();
@@ -11970,17 +13578,57 @@ class XRButton {
         if (showEnterSimulatorButton) {
             this.createSimulatorButton();
         }
+        this.createErrorElement();
         this.sessionManager.addEventListener(WebXRSessionEventType.UNSUPPORTED, this.onUnsupported);
         this.sessionManager.addEventListener(WebXRSessionEventType.READY, this.onReady);
         this.sessionManager.addEventListener(WebXRSessionEventType.SESSION_START, this.onSessionStart);
         this.sessionManager.addEventListener(WebXRSessionEventType.SESSION_END, this.onSessionEnd);
+        this.sessionManager.addEventListener(WebXRSessionEventType.SESSION_ERROR, this.onSessionError);
+    }
+    createErrorElement() {
+        this.errorElement.className = 'XRButtonError';
+        this.errorElement.setAttribute('role', 'alert');
+        this.errorElement.style.maxWidth = 'min(90vw, 40rem)';
+        this.errorElement.hidden = true;
+        this.domElement.appendChild(this.errorElement);
+    }
+    showError(error, mode = 'XR') {
+        if (this.disposed)
+            return;
+        const detail = error instanceof Error
+            ? `${error.name}: ${error.message}`
+            : String(error);
+        this.errorElement.textContent = `${mode} could not start. ${detail}`;
+        this.errorElement.hidden = false;
+        if (mode === 'Simulator')
+            return;
+        this.xrButtonElement.textContent = this.sessionManager.currentSession
+            ? this.endText
+            : this.startText;
+        this.xrButtonElement.disabled = this.startingSimulator;
+        this.simulatorButtonElement.disabled =
+            this.startingSimulator || !!this.sessionManager.currentSession;
     }
     createSimulatorButton() {
         this.simulatorButtonElement.classList.add(XRBUTTON_CLASS);
         this.simulatorButtonElement.innerText = this.startSimulatorText;
-        this.simulatorButtonElement.onclick = () => {
-            this.domElement.remove();
-            this.startSimulator();
+        this.simulatorButtonElement.onclick = async () => {
+            if (this.disposed || this.simulatorButtonElement.disabled)
+                return;
+            this.setSimulatorStarting(true);
+            this.errorElement.textContent = '';
+            this.errorElement.hidden = true;
+            try {
+                await this.startSimulator();
+                if (!this.disposed)
+                    this.domElement.remove();
+            }
+            catch (error) {
+                if (this.disposed)
+                    return;
+                this.setSimulatorStarting(false);
+                this.showError(error, 'Simulator');
+            }
         };
         this.domElement.appendChild(this.simulatorButtonElement);
     }
@@ -12007,14 +13655,24 @@ class XRButton {
         this.domElement.appendChild(this.xrButtonElement);
     }
     onSessionReady() {
+        this.errorElement.textContent = '';
+        this.errorElement.hidden = true;
         const button = this.xrButtonElement;
         button.style.display = '';
         button.innerHTML = this.startText;
-        button.disabled = false;
+        button.disabled = this.startingSimulator;
+        this.simulatorButtonElement.disabled = this.startingSimulator;
         const allowsVideoFallback = this.sessionManager
             .getSessionOptions()
             ?.optionalFeatures?.includes('camera-access');
         button.onclick = () => {
+            if (this.disposed || button.disabled)
+                return;
+            this.errorElement.textContent = '';
+            this.errorElement.hidden = true;
+            button.textContent = 'ENTERING XR...';
+            button.disabled = true;
+            this.simulatorButtonElement.disabled = true;
             this.permissionsManager
                 .checkAndRequestPermissions(this.permissions, {
                 allowVideoFallback: allowsVideoFallback,
@@ -12026,10 +13684,10 @@ class XRButton {
                     this.sessionManager.startSession();
                 }
                 else {
-                    this.xrButtonElement.textContent =
-                        'Error:' + result.error + '\nPlease try again.';
+                    this.showError(new Error(result.error || 'Browser permission was not granted.'));
                 }
-            });
+            })
+                .catch((error) => this.showError(error));
         };
     }
     showXRNotSupported() {
@@ -12037,13 +13695,26 @@ class XRButton {
         this.xrButtonElement.disabled = true;
     }
     async onSessionStarted() {
+        this.errorElement.textContent = '';
+        this.errorElement.hidden = true;
         this.xrButtonElement.innerHTML = this.endText;
+        this.xrButtonElement.disabled = this.startingSimulator;
+        this.simulatorButtonElement.disabled = true;
         this.xrButtonElement.onclick = () => {
             void this.sessionManager.endSession();
         };
     }
     onSessionEnded() {
         this.onSessionReady();
+    }
+    setSimulatorStarting(starting) {
+        if (this.disposed)
+            return;
+        this.startingSimulator = starting;
+        this.simulatorButtonElement.disabled =
+            starting || !!this.sessionManager.currentSession;
+        this.xrButtonElement.disabled =
+            starting || this.sessionManager.isXRSupported() !== true;
     }
     dispose() {
         if (this.disposed)
@@ -12053,6 +13724,7 @@ class XRButton {
         this.sessionManager.removeEventListener(WebXRSessionEventType.READY, this.onReady);
         this.sessionManager.removeEventListener(WebXRSessionEventType.SESSION_START, this.onSessionStart);
         this.sessionManager.removeEventListener(WebXRSessionEventType.SESSION_END, this.onSessionEnd);
+        this.sessionManager.removeEventListener(WebXRSessionEventType.SESSION_ERROR, this.onSessionError);
         this.simulatorButtonElement.onclick = null;
         this.xrButtonElement.onclick = null;
         this.domElement.remove();
@@ -12077,6 +13749,9 @@ class XREffects {
         this.renderTargets = [];
         this.dimensions = new THREE.Vector2();
     }
+    setRenderTarget(target) {
+        this.renderer.setRenderTarget(target);
+    }
     /**
      * Adds a pass to the effect pipeline.
      */
@@ -12100,7 +13775,8 @@ class XREffects {
                 this.renderTargets[i]?.depthTexture?.dispose();
                 this.renderTargets[i]?.dispose();
                 this.renderTargets[i] = defaultTarget.clone();
-                this.renderTargets[i].depthTexture = new THREE.DepthTexture(dimensions.x, dimensions.y);
+                const hasStencil = this.renderTargets[i].stencilBuffer;
+                this.renderTargets[i].depthTexture = new THREE.DepthTexture(dimensions.x, dimensions.y, hasStencil ? THREE.UnsignedInt248Type : THREE.UnsignedIntType, undefined, undefined, undefined, undefined, undefined, undefined, hasStencil ? THREE.DepthStencilFormat : THREE.DepthFormat);
             }
         }
         for (let i = neededRenderTargets; i < this.renderTargets.length; i++) {
@@ -12127,25 +13803,37 @@ class XREffects {
         }
     }
     renderXr() {
+        assertWebGLRenderer(this.renderer, 'XREffects.renderXr');
         const defaultTarget = this.renderer.getRenderTarget();
         const renderer = this.renderer;
         const xrEnabled = renderer.xr.enabled;
         const xrIsPresenting = renderer.xr.isPresenting;
+        const prevAutoClearColor = renderer.autoClearColor;
         const renderTargets = this.renderTargets;
         renderer.xr.cameraAutoUpdate = false;
         renderer.xr.enabled = false;
         const deltaTime = this.timer.getDelta();
         const numCameras = renderer.xr.getCamera().cameras.length;
         if (numCameras > 0) {
-            for (let camIndex = 0; camIndex < numCameras; ++camIndex) {
-                const cam = renderer.xr.getCamera().cameras[camIndex];
-                renderer.setViewport(cam.viewport);
-                renderer.setRenderTarget(renderTargets[camIndex]);
-                renderer.clear();
-                renderer.xr.isPresenting = true;
-                renderer.render(this.scene, cam);
+            const prevMatrixWorldAutoUpdate = this.scene.matrixWorldAutoUpdate;
+            if (prevMatrixWorldAutoUpdate) {
+                this.scene.updateMatrixWorld();
             }
-            renderer.setRenderTarget(defaultTarget);
+            this.scene.matrixWorldAutoUpdate = false;
+            try {
+                for (let camIndex = 0; camIndex < numCameras; ++camIndex) {
+                    const cam = renderer.xr.getCamera().cameras[camIndex];
+                    renderer.setViewport(cam.viewport);
+                    this.setRenderTarget(renderTargets[camIndex]);
+                    renderer.clear();
+                    renderer.xr.isPresenting = true;
+                    renderer.render(this.scene, cam);
+                }
+            }
+            finally {
+                this.scene.matrixWorldAutoUpdate = prevMatrixWorldAutoUpdate;
+            }
+            this.setRenderTarget(defaultTarget);
             renderer.clear();
             renderer.xr.isPresenting = false;
             renderer.autoClearColor = false;
@@ -12166,6 +13854,7 @@ class XREffects {
                     /*viewId=*/ eye);
                 }
             }
+            renderer.autoClearColor = prevAutoClearColor;
             renderer.xr.enabled = xrEnabled;
             renderer.xr.isPresenting = xrIsPresenting;
         }
@@ -12174,23 +13863,21 @@ class XREffects {
         const defaultTarget = this.renderer.getRenderTarget();
         const renderer = this.renderer;
         const xrEnabled = renderer.xr.enabled;
-        const xrIsPresenting = renderer.xr.isPresenting;
+        const prevAutoClearColor = renderer.autoClearColor;
         renderer.xr.cameraAutoUpdate = false;
         renderer.xr.enabled = false;
         const deltaTime = this.timer.getDelta();
         if (this.passes.length === 0) {
-            renderer.setRenderTarget(defaultTarget);
+            this.setRenderTarget(defaultTarget);
             renderer.render(this.scene, camera);
             renderer.xr.enabled = xrEnabled;
-            renderer.xr.isPresenting = xrIsPresenting;
             return;
         }
-        renderer.setRenderTarget(this.renderTargets[0]);
+        this.setRenderTarget(this.renderTargets[0]);
         renderer.clear();
         renderer.render(this.scene, camera);
-        renderer.setRenderTarget(defaultTarget);
+        this.setRenderTarget(defaultTarget);
         renderer.clear();
-        renderer.xr.isPresenting = false;
         renderer.autoClearColor = false;
         for (let i = 0; i < this.passes.length - 1; ++i) {
             const lastRenderTargetIndex = i % 2;
@@ -12205,8 +13892,8 @@ class XREffects {
             /*maskActive=*/ false, 
             /*viewId=*/ 0);
         }
+        renderer.autoClearColor = prevAutoClearColor;
         renderer.xr.enabled = xrEnabled;
-        renderer.xr.isPresenting = xrIsPresenting;
     }
     dispose() {
         let firstError;
@@ -12410,6 +14097,8 @@ class DepthTextures {
         this.depthData[viewId] = depthData;
     }
     updateNativeTexture(depthData, renderer, viewId) {
+        assertWebGLRenderer(renderer, 'DepthTextures.updateNativeTexture');
+        this.renderer = renderer;
         if (this.nativeTextures.length < viewId + 1) {
             this.nativeTextures[viewId] = new THREE.ExternalTexture(depthData.texture);
         }
@@ -12427,14 +14116,43 @@ class DepthTextures {
         }
         return this.nativeTextures[viewId];
     }
+    dispose() {
+        let firstError;
+        for (const texture of this.dataTextures.splice(0)) {
+            try {
+                texture.dispose();
+            }
+            catch (error) {
+                firstError ??= error;
+            }
+        }
+        for (const texture of this.nativeTextures.splice(0)) {
+            // WebXR owns the native handle; only release our wrapper and metadata.
+            texture.sourceTexture = null;
+            this.renderer?.properties.remove(texture);
+        }
+        this.renderer = undefined;
+        this.float32Arrays.length = 0;
+        this.uint8Arrays.length = 0;
+        this.depthData.length = 0;
+        if (firstError !== undefined)
+            throw firstError;
+    }
 }
 
 class GPUDepthConverter {
     constructor(renderer) {
         this.renderer = renderer;
+        this.savedViewport = new THREE.Vector4();
+        this.savedScissor = new THREE.Vector4();
+        this.logicalViewport = new THREE.Vector4();
+        this.restoredViewport = new THREE.Vector4();
     }
     /**
      * Converts unsigned short GPU depth from Quest 3 to float32 CPU depth.
+     * Restores renderer-managed target and raster state, not arbitrary raw-GL
+     * bindings. An independently overridden canvas viewport is restored in GL,
+     * but its renderer cache cannot be restored without changing logical defaults.
      */
     convertGPUToCPU(depthData) {
         if (!this.depthTarget) {
@@ -12447,8 +14165,6 @@ class GPUDepthConverter {
                 depthBuffer: false,
             });
             this.depthTexture = new THREE.ExternalTexture(depthData.texture);
-            const textureProperties = this.renderer.properties.get(this.depthTexture);
-            textureProperties.__webglTexture = depthData.texture;
             this.gpuPixels = new Float32Array(depthData.width * depthData.height);
             const depthShader = new THREE.ShaderMaterial({
                 vertexShader: `
@@ -12485,24 +14201,101 @@ class GPUDepthConverter {
                 depthWrite: false,
                 side: THREE.DoubleSide,
             });
-            const depthMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), depthShader);
+            this.depthMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), depthShader);
             this.depthScene = new THREE.Scene();
-            this.depthScene.add(depthMesh);
+            this.depthScene.add(this.depthMesh);
             this.depthCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
         }
+        else if (this.depthTarget.width !== depthData.width ||
+            this.depthTarget.height !== depthData.height) {
+            this.depthTarget.setSize(depthData.width, depthData.height);
+            this.gpuPixels = new Float32Array(depthData.width * depthData.height);
+        }
+        this.depthTexture.sourceTexture = depthData.texture;
         const originalRenderTarget = this.renderer.getRenderTarget();
-        this.renderer.xr.enabled = false;
-        this.renderer.setRenderTarget(this.depthTarget);
-        this.renderer.render(this.depthScene, this.depthCamera);
-        this.renderer.readRenderTargetPixels(this.depthTarget, 0, 0, depthData.width, depthData.height, this.gpuPixels, 0);
-        this.renderer.xr.enabled = true;
-        this.renderer.setRenderTarget(originalRenderTarget);
+        const activeCubeFace = this.renderer.getActiveCubeFace();
+        const activeMipmapLevel = this.renderer.getActiveMipmapLevel();
+        this.renderer.getCurrentViewport(this.savedViewport);
+        this.renderer.getViewport(this.logicalViewport);
+        const gl = this.renderer.getContext();
+        // The renderer's scissor getters expose logical defaults, not live state.
+        this.savedScissor.fromArray(gl.getParameter(gl.SCISSOR_BOX));
+        const scissorTest = gl.isEnabled(gl.SCISSOR_TEST);
+        const xrEnabled = this.renderer.xr.enabled;
+        try {
+            this.renderer.xr.enabled = false;
+            this.renderer.setRenderTarget(this.depthTarget);
+            this.renderer.render(this.depthScene, this.depthCamera);
+            this.renderer.readRenderTargetPixels(this.depthTarget, 0, 0, depthData.width, depthData.height, this.gpuPixels, 0);
+        }
+        finally {
+            this.renderer.xr.enabled = xrEnabled;
+            if (originalRenderTarget) {
+                const { viewport, scissor, scissorTest: targetScissorTest, } = originalRenderTarget;
+                // setViewport/setScissor would overwrite renderer-wide logical defaults.
+                // Rebind with physical pixels, then restore the target's stored defaults.
+                originalRenderTarget.viewport = this.savedViewport;
+                originalRenderTarget.scissor = this.savedScissor;
+                originalRenderTarget.scissorTest = scissorTest;
+                try {
+                    this.renderer.setRenderTarget(originalRenderTarget, activeCubeFace, activeMipmapLevel);
+                }
+                finally {
+                    originalRenderTarget.viewport = viewport;
+                    originalRenderTarget.scissor = scissor;
+                    originalRenderTarget.scissorTest = targetScissorTest;
+                }
+            }
+            else {
+                this.renderer.setRenderTarget(null, activeCubeFace, activeMipmapLevel);
+                this.renderer.getCurrentViewport(this.restoredViewport);
+                if (!this.restoredViewport.equals(this.savedViewport)) {
+                    // setRenderTarget floors, but setViewport rounds at fractional DPR.
+                    this.renderer.setViewport(this.logicalViewport);
+                }
+                this.renderer.state.viewport(this.savedViewport);
+                this.renderer.state.scissor(this.savedScissor);
+                this.renderer.state.setScissorTest(scissorTest);
+            }
+        }
         return {
             width: depthData.width,
             height: depthData.height,
             data: this.gpuPixels.buffer,
             rawValueToMeters: depthData.rawValueToMeters,
         };
+    }
+    /**
+     * Releases conversion resources without deleting the UA-owned depth texture.
+     * The first cleanup error is rethrown after all releases are attempted.
+     * A later conversion lazily recreates the resources.
+     */
+    dispose() {
+        const { depthTarget, depthMesh, depthTexture, depthScene } = this;
+        if (!depthTarget)
+            return;
+        this.depthTarget = undefined;
+        this.gpuPixels = new Float32Array(0);
+        depthTexture.sourceTexture = null;
+        let firstError;
+        const cleanups = [
+            () => depthTarget.dispose(),
+            () => depthMesh.geometry.dispose(),
+            () => depthMesh.material.dispose(),
+            () => this.renderer.properties.remove(depthTexture),
+            () => depthTexture.dispose(),
+            () => depthScene.clear(),
+        ];
+        for (const cleanup of cleanups) {
+            try {
+                cleanup();
+            }
+            catch (error) {
+                firstError ??= error;
+            }
+        }
+        if (firstError !== undefined)
+            throw firstError;
     }
 }
 
@@ -12727,7 +14520,12 @@ class OcclusionMapMeshMaterial extends THREE.MeshBasicMaterial {
             ].join('\n'))
                 .replace('#include <fog_vertex>', [
                 '#include <fog_vertex>',
-                'vec4 world_position = modelMatrix * vec4( position, 1.0 );',
+                // `transformed` is the post-<skinning_vertex> / <morphtarget_vertex>
+                // position (identical to `position` for rigid meshes), so skinned
+                // and morphed meshes -- animated avatars -- write their POSED depth
+                // and sample the occlusion map at their posed location, not at
+                // the bind pose.
+                'vec4 world_position = modelMatrix * vec4( transformed, 1.0 );',
                 'vec4 depth_view_position = uDepthViewMatrix * world_position;',
                 'vVirtualDepth = -depth_view_position.z;',
                 'vec4 depth_clip_position = uDepthProjectionMatrix * depth_view_position;',
@@ -12817,6 +14615,7 @@ class OcclusionPass extends Pass {
         this.lastOcclusionMapSize = new THREE.Vector2(0, 0);
         this.lastKawaseBlurSize = new THREE.Vector2(0, 0);
         this.renderDimensions = new THREE.Vector2();
+        this.disposed = false;
         this.occlusionMeshMaterial = new OcclusionMapMeshMaterial(camera, useFloatDepth);
         this.occlusionMapUniforms = {
             uDepthTexture: { value: null },
@@ -12891,7 +14690,15 @@ class OcclusionPass extends Pass {
         if (depthProjectionMatrix) {
             this.depthProjectionMatrices[viewId] = depthProjectionMatrix;
         }
-        depthTexture.needsUpdate = true;
+        // CPU depth arrives in a DataTexture whose bytes were rewritten in place,
+        // so it must be re-uploaded. GPU-optimized depth (Quest) is an
+        // ExternalTexture wrapping the native WebGLTexture: it has no image to
+        // upload, and bumping its version makes three's setTexture2DArray (which,
+        // unlike setTexture2D, does not skip external textures) call
+        // uploadTexture -> resizeImage(null) and crash.
+        if (!(depthTexture instanceof THREE.ExternalTexture)) {
+            depthTexture.needsUpdate = true;
+        }
     }
     /**
      * Render the occlusion map.
@@ -12901,6 +14708,7 @@ class OcclusionPass extends Pass {
      * @param viewId - The view to render.
      */
     render(renderer, writeBuffer, readBuffer, viewId = 0) {
+        assertWebGLRenderer(renderer, 'OcclusionPass');
         const originalRenderTarget = renderer.getRenderTarget();
         const dimensions = this.renderDimensions;
         if (readBuffer == null) {
@@ -13033,11 +14841,47 @@ class OcclusionPass extends Pass {
         }
     }
     dispose() {
-        this.occlusionMeshMaterial.dispose();
-        this.occlusionMapTexture.dispose();
-        for (let i = 0; i < this.kawaseBlurQuads.length; i++) {
-            this.kawaseBlurQuads[i].dispose();
+        if (this.disposed)
+            return;
+        this.disposed = true;
+        const quads = [
+            this.occlusionMapQuad,
+            ...this.kawaseBlurQuads,
+            this.occlusionQuad,
+        ];
+        const resources = [
+            this.occlusionMeshMaterial,
+            this.occlusionMapTexture,
+            ...this.kawaseBlurTargets,
+            ...quads.flatMap((quad) => [quad.material, quad]),
+        ];
+        let firstError;
+        for (const resource of resources) {
+            try {
+                resource.dispose();
+            }
+            catch (error) {
+                firstError ??= error;
+            }
         }
+        this.kawaseBlurTargets.length = 0;
+        this.kawaseBlurQuads.length = 0;
+        this.depthTextures.length = 0;
+        this.depthNear.length = 0;
+        this.depthViewMatrices.length = 0;
+        this.depthProjectionMatrices.length = 0;
+        for (const uniforms of [
+            this.occlusionMeshMaterial.uniforms,
+            this.occlusionMapUniforms,
+        ]) {
+            uniforms.uDepthTexture.value = null;
+            uniforms.uDepthTextureArray.value = null;
+        }
+        this.occlusionMapUniforms.tDiffuse.value = null;
+        this.occlusionMapUniforms.tDepth.value = null;
+        this.occlusionUniforms.tDiffuse.value = null;
+        if (firstError !== undefined)
+            throw firstError;
     }
     updateOcclusionMapUniforms(uniforms, renderer) {
         const camera = renderer.xr.getCamera().cameras[0] || this.camera;
@@ -13045,6 +14889,94 @@ class OcclusionPass extends Pass {
         uniforms.uOcclusionClipFromWorld.value
             .copy(camera.projectionMatrix)
             .multiply(camera.matrixWorldInverse);
+    }
+}
+
+class OcclusionUtils {
+    static { this.pendingMaterials = []; }
+    /**
+     * Registers or clears the WebGPU TSL material occlusion handler.
+     * Called internally by `Depth.init()` when `WebGPURenderer` is active.
+     */
+    static setWebGPUMaterialHandler(handler) {
+        this.webgpuMaterialHandler = handler;
+        if (handler && this.pendingMaterials.length > 0) {
+            const pending = this.pendingMaterials.splice(0);
+            for (const { material, onShaderReady } of pending) {
+                const shader = handler(material);
+                onShaderReady?.(shader);
+            }
+        }
+        else if (!handler) {
+            this.pendingMaterials.length = 0;
+        }
+    }
+    /**
+     * Configures a material for depth occlusion across both `WebGLRenderer` and
+     * `WebGPURenderer`, invoking `onShaderReady` with the uniform handle to
+     * register in `Depth.occludableShaders`.
+     */
+    static addOcclusionToMaterial(material, onShaderReady) {
+        material.transparent = true;
+        if (this.webgpuMaterialHandler) {
+            const shader = this.webgpuMaterialHandler(material);
+            onShaderReady?.(shader);
+            return;
+        }
+        this.pendingMaterials.push({ material, onShaderReady });
+        const previous = material.onBeforeCompile;
+        material.onBeforeCompile = (shader, renderer) => {
+            previous.call(material, shader, renderer);
+            OcclusionUtils.addOcclusionToShader(shader);
+            onShaderReady?.(shader);
+        };
+        material.needsUpdate = true;
+    }
+    /**
+     * Creates a simple material used for rendering objects into the occlusion
+     * map. This material is intended to be used with `renderer.overrideMaterial`.
+     * @returns A new instance of THREE.MeshBasicMaterial.
+     */
+    static createOcclusionMapOverrideMaterial() {
+        return new THREE.MeshBasicMaterial();
+    }
+    /**
+     * Modifies a material's shader in-place to incorporate distance-based
+     * alpha occlusion. This is designed to be used with a material's
+     * `onBeforeCompile` property. This only works with built-in three.js
+     * materials.
+     * @param shader - The shader object provided by onBeforeCompile.
+     */
+    static addOcclusionToShader(shader) {
+        shader.uniforms.occlusionEnabled = { value: true };
+        shader.uniforms.tOcclusionMap = { value: null };
+        shader.uniforms.uOcclusionClipFromWorld = { value: new THREE.Matrix4() };
+        shader.defines = { USE_UV: true, DISTANCE: true };
+        shader.vertexShader = shader.vertexShader
+            .replace('#include <common>', [
+            'uniform mat4 uOcclusionClipFromWorld;',
+            'varying vec4 vOcclusionScreenCoord;',
+            '#include <common>',
+        ].join('\n'))
+            .replace('#include <fog_vertex>', [
+            '#include <fog_vertex>',
+            'vOcclusionScreenCoord = uOcclusionClipFromWorld * worldPosition;',
+        ].join('\n'));
+        shader.fragmentShader = shader.fragmentShader
+            .replace('uniform vec3 diffuse;', [
+            'uniform vec3 diffuse;',
+            'uniform bool occlusionEnabled;',
+            'uniform sampler2D tOcclusionMap;',
+            'varying vec4 vOcclusionScreenCoord;',
+        ].join('\n'))
+            .replace('vec4 diffuseColor = vec4( diffuse, opacity );', [
+            'vec4 diffuseColor = vec4( diffuse, opacity );',
+            'vec2 occlusion_coordinates = 0.5 + 0.5 * vOcclusionScreenCoord.xy / vOcclusionScreenCoord.w;',
+            'vec2 occlusion_sample = texture2D(tOcclusionMap, occlusion_coordinates.xy).rg;',
+            'occlusion_sample = occlusion_sample / max(0.0001, occlusion_sample.g);',
+            'float occlusion_value = clamp(occlusion_sample.r, 0.0, 1.0);',
+            'diffuseColor.a *= occlusionEnabled ? occlusion_value : 1.0;',
+        ].join('\n'));
     }
 }
 
@@ -13067,6 +14999,7 @@ class Depth {
      * with Depth in WebXR.
      */
     constructor() {
+        this.disposed = false;
         this.enabled = false;
         this.view = [];
         this.cpuDepthData = [];
@@ -13101,14 +15034,39 @@ class Depth {
      * Initialize Depth manager.
      */
     init(camera, options, renderer, registry, scene) {
+        if (this.disposed) {
+            throw new Error('Depth cannot initialize after disposal.');
+        }
         this.camera = camera;
         this.options = options;
         this.renderer = renderer;
+        this.registry = registry;
         this.enabled = options.enabled;
-        this.gpuDepthConverter = new GPUDepthConverter(renderer);
+        const isWebGPU = isWebGPURenderer(renderer);
+        this.gpuDepthConverter = isWebGPU
+            ? undefined
+            : new GPUDepthConverter(renderer);
         if (this.options.depthTexture.enabled) {
             this.depthTextures = new DepthTextures(options);
             registry.register(this.depthTextures);
+        }
+        const asyncTasks = [];
+        if (this.options.occlusion.enabled) {
+            if (isWebGPU) {
+                asyncTasks.push(Promise.all([
+                    import('./WebGPUOcclusionPass.js'),
+                    import('./WebGPUOcclusionUtils.js'),
+                ]).then(([{ WebGPUOcclusionPass }, { addWebGPUOcclusionToMaterial }]) => {
+                    if (!this.disposed) {
+                        OcclusionUtils.setWebGPUMaterialHandler(addWebGPUOcclusionToMaterial);
+                        this.occlusionPass = new WebGPUOcclusionPass(scene, camera);
+                    }
+                }));
+            }
+            else {
+                OcclusionUtils.setWebGPUMaterialHandler(undefined);
+                this.occlusionPass = new OcclusionPass(scene, camera);
+            }
         }
         if (this.options.depthMesh.enabled) {
             this.depthMesh = new DepthMesh(options, this.width, this.height, this.depthTextures);
@@ -13117,32 +15075,60 @@ class Depth {
                 this.renderer.shadowMap.enabled = true;
                 this.renderer.shadowMap.type = THREE.PCFShadowMap;
             }
-            scene.add(this.depthMesh);
+            if (isWebGPU &&
+                (this.options.depthMesh.useDepthTexture ||
+                    this.options.depthMesh.showDebugTexture)) {
+                asyncTasks.push(import('./DepthMeshWebGPUMaterial.js').then(({ applyWebGPUDepthMeshMaterial }) => {
+                    if (!this.disposed && this.depthMesh) {
+                        applyWebGPUDepthMeshMaterial(this.depthMesh);
+                        scene.add(this.depthMesh);
+                    }
+                }));
+            }
+            else {
+                scene.add(this.depthMesh);
+            }
         }
-        if (this.options.occlusion.enabled) {
-            this.occlusionPass = new OcclusionPass(scene, camera);
+        if (asyncTasks.length > 0) {
+            return Promise.all(asyncTasks).then(() => { });
         }
+    }
+    /**
+     * Converts bottom-origin view UVs into normalized depth buffer coordinates.
+     *
+     * {@link https://immersive-web.github.io/depth-sensing/#obtain-depth-at-coordinates | The WebXR algorithm}
+     * takes top-origin normalized view coordinates, applies
+     * `normDepthBufferFromNormView`, then scales the result straight into the
+     * buffer. Flipping V after the transform instead samples a different pixel
+     * for any transform that does not commute with that flip, and disagrees
+     * with {@link DepthMesh}, which flips first.
+     * @param u - Normalized horizontal coordinate, origin at bottom left.
+     * @param v - Normalized vertical coordinate, origin at bottom left.
+     * @param target - Vector that receives the result.
+     * @returns The normalized depth buffer coordinates.
+     */
+    normDepthBufferCoords(u, v, target) {
+        target.set(u, 1.0 - v, 0);
+        if (this.normDepthBufferFromNormViewMatrices.length > 0) {
+            target.applyMatrix4(this.normDepthBufferFromNormViewMatrices[0]);
+        }
+        return target;
     }
     /**
      * Retrieves the depth at normalized coordinates (u, v).
      * Note: The UV coordinates are with respect to the user's view, not the depth camera view.
-     * @param u - Normalized horizontal coordinate.
-     * @param v - Normalized vertical coordinate.
+     * @param u - Normalized horizontal coordinate, origin at the bottom left of
+     * the view, growing right.
+     * @param v - Normalized vertical coordinate, origin at the bottom left of
+     * the view, growing up.
      * @returns Depth value at the specified coordinates.
      */
     getDepth(u, v) {
         if (!this.depthArray[0])
             return 0.0;
-        // When matchDepthView is false, transform from view-space UVs to
-        // depth buffer UVs using normDepthBufferFromNormView.
-        if (this.normDepthBufferFromNormViewMatrices.length > 0) {
-            normViewCoord.set(u, v, 0);
-            normViewCoord.applyMatrix4(this.normDepthBufferFromNormViewMatrices[0]);
-            u = normViewCoord.x;
-            v = normViewCoord.y;
-        }
-        const depthX = Math.round(clamp$1(u * this.width, 0, this.width - 1));
-        const depthY = Math.round(clamp$1((1.0 - v) * this.height, 0, this.height - 1));
+        const coords = this.normDepthBufferCoords(u, v, normViewCoord);
+        const depthX = Math.round(clamp$1(coords.x * this.width, 0, this.width - 1));
+        const depthY = Math.round(clamp$1(coords.y * this.height, 0, this.height - 1));
         const rawDepth = this.depthArray[0][depthY * this.width + depthX];
         return this.rawValueToMeters * rawDepth;
     }
@@ -13174,26 +15160,24 @@ class Depth {
     /**
      * Retrieves the depth at normalized coordinates (u, v).
      * Note: The UV coordinates are with respect to the user's view, not the depth camera view.
-     * @param u - Normalized horizontal coordinate.
-     * @param v - Normalized vertical coordinate.
+     * @param u - Normalized horizontal coordinate, origin at the bottom left of
+     * the view, growing right.
+     * @param v - Normalized vertical coordinate, origin at the bottom left of
+     * the view, growing up.
      * @returns Vertex at (u, v)
      */
     getVertex(u, v) {
         if (!this.depthArray[0])
             return null;
-        // When matchDepthView is false, transform from view-space UVs to
-        // depth buffer UVs using normDepthBufferFromNormView.
-        if (this.normDepthBufferFromNormViewMatrices.length > 0) {
-            normViewCoord.set(u, v, 0);
-            normViewCoord.applyMatrix4(this.normDepthBufferFromNormViewMatrices[0]);
-            u = normViewCoord.x;
-            v = normViewCoord.y;
-        }
-        const depthX = Math.round(clamp$1(u * this.width, 0, this.width - 1));
-        const depthY = Math.round(clamp$1((1.0 - v) * this.height, 0, this.height - 1));
+        const coords = this.normDepthBufferCoords(u, v, normViewCoord);
+        const depthX = Math.round(clamp$1(coords.x * this.width, 0, this.width - 1));
+        const depthY = Math.round(clamp$1(coords.y * this.height, 0, this.height - 1));
         const rawDepth = this.depthArray[0][depthY * this.width + depthX];
         const depth = this.rawValueToMeters * rawDepth;
-        const vertexPosition = new THREE.Vector3(2.0 * (u - 0.5), 2.0 * (v - 0.5), -1);
+        // depthProjectionInverseMatrices belongs to the depth camera, so the clip
+        // space point has to come from the depth buffer coordinates. Buffer V
+        // grows downward while clip Y grows upward, hence the flip back here.
+        const vertexPosition = new THREE.Vector3(2.0 * (coords.x - 0.5), 2.0 * (0.5 - coords.y), -1);
         vertexPosition.applyMatrix4(this.depthProjectionInverseMatrices[0]);
         vertexPosition.multiplyScalar(-depth / vertexPosition.z);
         return vertexPosition;
@@ -13257,6 +15241,7 @@ class Depth {
         }
     }
     updateGPUDepthData(depthData, viewId) {
+        assertWebGLRenderer(this.renderer, 'WebXR GPU depth');
         this.gpuDepthData[viewId] = depthData;
         this.updateDepthMatrices(depthData, viewId);
         // Reading the depth target back is a synchronous GPU stall, and in stereo
@@ -13273,7 +15258,8 @@ class Depth {
         if (cpuDepth) {
             this.cpuDepthData[viewId] = cpuDepth;
             this.depthDataFormat = 'float32';
-            if (this.depthArray[viewId] instanceof Float32Array) {
+            if (this.depthArray[viewId] instanceof Float32Array &&
+                this.depthArray[viewId].byteLength === cpuDepth.data.byteLength) {
                 this.depthArray[viewId].set(new Float32Array(cpuDepth.data));
             }
             else {
@@ -13318,7 +15304,7 @@ class Depth {
         return this.depthTextures?.get(viewId);
     }
     update(frame) {
-        if (!this.options.enabled)
+        if (this.disposed || !this.options.enabled)
             return;
         if (frame) {
             this.updateLocalDepth(frame);
@@ -13352,7 +15338,7 @@ class Depth {
                     const view = pose.views[viewId];
                     this.view[viewId] = view;
                     if (session.depthUsage === 'gpu-optimized') {
-                        const depthData = binding.getDepthInformation(view);
+                        const depthData = binding?.getDepthInformation(view);
                         if (!depthData) {
                             return;
                         }
@@ -13373,15 +15359,17 @@ class Depth {
         }
     }
     renderOcclusionPass() {
+        if (!this.occlusionPass)
+            return;
         const leftDepthTexture = this.getTexture(0);
         if (leftDepthTexture) {
             this.occlusionPass.setDepthTexture(leftDepthTexture, this.rawValueToMeters, 0, this.gpuDepthData[0]
                 ?.depthNear, this.depthViewMatrices[0], this.depthProjectionMatrices[0]);
         }
-        const xrIsPresenting = this.renderer.xr.isPresenting;
-        this.renderer.xr.isPresenting = false;
+        const currentXREnabled = this.renderer.xr.enabled;
+        this.renderer.xr.enabled = false;
         this.occlusionPass.render(this.renderer, undefined, undefined, 0);
-        this.renderer.xr.isPresenting = xrIsPresenting;
+        this.renderer.xr.enabled = currentXREnabled;
         for (const shader of this.occludableShaders) {
             this.occlusionPass.updateOcclusionMapUniforms(shader.uniforms, this.renderer);
         }
@@ -13413,6 +15401,67 @@ class Depth {
             this.depthMesh.updateFullResolutionGeometry(this.cpuDepthData[0], this.depthDataFormat);
         }
     }
+    /** Releases depth resources at terminal Core teardown, not on XR exit. */
+    dispose() {
+        if (this.disposed)
+            return;
+        this.disposed = true;
+        this.enabled = false;
+        if (Depth.instance === this) {
+            Depth.instance = undefined;
+        }
+        const mesh = this.depthMesh;
+        const textures = this.depthTextures;
+        const pass = this.occlusionPass;
+        this.depthMesh = undefined;
+        this.depthTextures = undefined;
+        this.occlusionPass = undefined;
+        let firstError;
+        const cleanups = [
+            () => this.gpuDepthConverter?.dispose(),
+            () => {
+                if (mesh && this.registry?.get(DepthMesh) === mesh) {
+                    this.registry.unregister(DepthMesh);
+                }
+            },
+            () => mesh?.removeFromParent(),
+            () => mesh?.disposeResources(),
+            () => {
+                if (textures && this.registry?.get(DepthTextures) === textures) {
+                    this.registry.unregister(DepthTextures);
+                }
+            },
+            () => textures?.dispose(),
+            () => pass?.dispose(),
+        ];
+        for (const cleanup of cleanups) {
+            try {
+                cleanup();
+            }
+            catch (error) {
+                firstError ??= error;
+            }
+        }
+        this.gpuDepthConverter = undefined;
+        this.registry = undefined;
+        this.view.length = 0;
+        this.cpuDepthData.length = 0;
+        this.gpuDepthData.length = 0;
+        this.depthArray.length = 0;
+        this.depthDataFormat = undefined;
+        this.depthProjectionMatrices.length = 0;
+        this.depthProjectionInverseMatrices.length = 0;
+        this.depthViewMatrices.length = 0;
+        this.depthViewProjectionMatrices.length = 0;
+        this.depthCameraPositions.length = 0;
+        this.depthCameraRotations.length = 0;
+        this.normDepthBufferFromNormViewMatrices.length = 0;
+        this.depthClients.clear();
+        this.occludableShaders.clear();
+        OcclusionUtils.setWebGPUMaterialHandler(undefined);
+        if (firstError !== undefined)
+            throw firstError;
+    }
 }
 
 /**
@@ -13426,9 +15475,7 @@ class Depth {
  */
 const ReticleShader = {
     uniforms: {
-        uColor: { value: new THREE.Color().setHex(0xffffff) },
-        uPressed: { value: 0.0 },
-    },
+        uColor: { value: new THREE.Color().setHex(0xffffff) }},
     vertexShader: /* glsl */ `
   varying vec2 vTexCoord;
 
@@ -13516,23 +15563,23 @@ const RETICLE_RENDER_ORDER = 2_000_000_000;
 class Reticle extends THREE.Mesh {
     /**
      * Creates an instance of Reticle.
-     * @param rotationSmoothing - A factor between 0.0 (no smoothing) and
-     * 1.0 (no movement) to smoothly animate orientation changes.
-     * @param offset - A small z-axis offset to prevent z-fighting.
-     * @param size - The radius of the reticle's circle geometry.
+     * @param innerRadius - Inner radius of the reticle ring geometry.
+     * @param outerRadius - Outer radius of the reticle ring geometry.
      * @param depthTest - Determines if the reticle should be occluded by other
      * objects. Defaults to `false` to ensure it is always visible.
      */
-    constructor(rotationSmoothing = 0.8, offset = 0.001, size = 0.019, depthTest = false) {
-        const geometry = new THREE.CircleGeometry(size, 32);
-        geometry.applyMatrix4(new THREE.Matrix4().makeTranslation(0, 0, offset));
-        super(geometry, new THREE.ShaderMaterial({
-            uniforms: THREE.UniformsUtils.clone(ReticleShader.uniforms),
+    constructor(innerRadius = 0, outerRadius = 0.019, depthTest = false) {
+        const uniforms = {
+            uColor: { value: new THREE.Color(0xffffff) },
+            uPressed: { value: 0.0 },
+        };
+        super(new THREE.RingGeometry(innerRadius, outerRadius, 32), new THREE.ShaderMaterial({
+            uniforms,
             vertexShader: ReticleShader.vertexShader,
             fragmentShader: ReticleShader.fragmentShader,
-            depthTest: depthTest,
-            depthWrite: false,
             transparent: true,
+            depthTest,
+            depthWrite: false,
         }));
         /** Text description of the PanelMesh */
         this.name = 'Reticle';
@@ -13546,20 +15593,32 @@ class Reticle extends THREE.Mesh {
         this.newRotation = new THREE.Quaternion();
         this.objectRotation = new THREE.Quaternion();
         this.normalVector = new THREE.Vector3();
-        this.rotationSmoothing = rotationSmoothing;
-        this.offset = offset;
-        this.hoverRing = new THREE.Mesh(new THREE.RingGeometry(size, size * 1.15, 32), new THREE.MeshBasicMaterial({
+        this.uniforms = uniforms;
+        this.depthTestEnabled = depthTest;
+        this.rotationSmoothing = 0.8;
+        this.offset = 0.001;
+        this.hoverRing = new THREE.Mesh(new THREE.RingGeometry(outerRadius, outerRadius * 1.15, 32), new THREE.MeshBasicMaterial({
             color: getHoverRingColor(this.getColor()),
             depthTest,
             depthWrite: false,
             transparent: true,
             opacity: HOVER_RING_OPACITY,
         }));
-        this.hoverRing.position.z = offset;
+        this.hoverRing.position.z = this.offset;
         this.hoverRing.renderOrder = this.renderOrder;
         this.hoverRing.visible = false;
         this.hoverRing.raycast = () => { };
         this.add(this.hoverRing);
+    }
+    /**
+     * Replaces the reticle's primary material (e.g. with a WebGPU NodeMaterial)
+     * and registers a callback to synchronize uniform changes.
+     */
+    setCustomMaterial(material, syncUniforms) {
+        this.material.dispose();
+        this.material = material;
+        this.syncUniforms = syncUniforms;
+        this.syncUniforms?.();
     }
     /**
      * Orients the reticle to be flush with a surface, based on the surface
@@ -13595,15 +15654,16 @@ class Reticle extends THREE.Mesh {
      * @param color - The color to apply.
      */
     setColor(color) {
-        this.material.uniforms.uColor.value.set(color);
-        this.hoverRing.material.color.copy(getHoverRingColor(this.material.uniforms.uColor.value));
+        this.uniforms.uColor.value.set(color);
+        this.hoverRing.material.color.copy(getHoverRingColor(this.uniforms.uColor.value));
+        this.syncUniforms?.();
     }
     /**
      * Gets the current color of the reticle.
      * @returns The current color from the shader uniform.
      */
     getColor() {
-        return this.material.uniforms.uColor.value;
+        return this.uniforms.uColor.value;
     }
     /**
      * Sets the visual state of the reticle to "pressed" or "unpressed".
@@ -13611,7 +15671,8 @@ class Reticle extends THREE.Mesh {
      * @param pressed - True to show the pressed state, false otherwise.
      */
     setPressed(pressed) {
-        this.material.uniforms.uPressed.value = pressed ? 1.0 : 0.0;
+        this.uniforms.uPressed.value = pressed ? 1.0 : 0.0;
+        this.syncUniforms?.();
         this.scale.setScalar(pressed ? 0.7 : 1.0);
     }
     /**
@@ -13620,7 +15681,8 @@ class Reticle extends THREE.Mesh {
      * pressed).
      */
     setPressedAmount(pressedAmount) {
-        this.material.uniforms.uPressed.value = pressedAmount;
+        this.uniforms.uPressed.value = pressedAmount;
+        this.syncUniforms?.();
         this.scale.setScalar(lerp(1.0, 0.7, pressedAmount));
     }
     /**
@@ -13639,6 +15701,7 @@ class Reticle extends THREE.Mesh {
         this.hoverRing.material.dispose();
         this.intersection = undefined;
         this.targetObject = undefined;
+        super.dispose();
     }
     /**
      * Overrides the default raycast method to make the reticle ignored by
@@ -14459,6 +16522,27 @@ class Input {
             }
             controller.reticle.visible = false;
             this.reticles.add(controller.reticle);
+            if (this.reticleConfigurer && controller.reticle) {
+                this.reticleConfigurer(controller.reticle);
+            }
+        }
+    }
+    /**
+     * Sets a configuration callback for reticles (such as upgrading to WebGPU materials)
+     * and immediately applies it to all existing reticles.
+     */
+    setReticleConfigurer(configurer) {
+        this.reticleConfigurer = configurer;
+        const configured = new Set();
+        for (const reticle of this.ownedReticles) {
+            configurer(reticle);
+            configured.add(reticle);
+        }
+        for (const controller of this.controllers) {
+            if (controller.reticle && !configured.has(controller.reticle)) {
+                configurer(controller.reticle);
+                configured.add(controller.reticle);
+            }
         }
     }
     /**
@@ -14687,8 +16771,11 @@ class Input {
         this.directTouchInputs.length = 0;
         for (let handIndex = 0; handIndex < NUM_HANDS; handIndex++) {
             const controller = this.controllers[handIndex];
-            const indexTip = this.hands[handIndex]?.joints?.['index-finger-tip'];
-            if (!controller || !indexTip)
+            const hand = this.hands[handIndex];
+            const indexTip = hand?.joints?.['index-finger-tip'];
+            // Three.js retains joint poses after tracking is lost. A stale touch
+            // would keep suppressing the controller's ray and reticle.
+            if (!controller || !hand?.visible || !indexTip?.visible)
                 continue;
             let input = this.directTouchSlots[handIndex];
             if (!input) {
@@ -14702,7 +16789,7 @@ class Input {
                 this.directTouchSlots[handIndex] = input;
             }
             input.controller = controller;
-            input.hand = this.hands[handIndex]?.joints?.wrist;
+            input.hand = hand.joints?.wrist;
             indexTip.getWorldPosition(input.point);
             controller.getWorldQuaternion(input.orientation);
             input.selected = controller.userData.selected === true;
@@ -14724,6 +16811,9 @@ class Input {
         if (controller.reticle) {
             controller.reticle.visible = false;
             this.reticles.add(controller.reticle);
+            if (this.reticleConfigurer) {
+                this.reticleConfigurer(controller.reticle);
+            }
         }
         this.pinchFilter.setupController(controller, this.listeners.keys());
     }
@@ -15122,6 +17212,8 @@ const UI_THEME_STYLE_ROLES = new Set([
     'text',
     'button',
     'slider',
+    'scroll',
+    'input',
     'image',
     'icon',
 ]);
@@ -15519,14 +17611,22 @@ class UIRenderer {
         this.connectedRoots = new Set();
         this.viewport = { width: 0, height: 0 };
         this.backendState = { kind: 'idle' };
-        this.presentationStateFor = (element, cursorPoints) => ({
-            hovered: this.interaction.isPointingAt(element),
-            active: this.interaction.isSelectingAt(element),
-            disabled: getSemanticControl(element)?.isDisabled() ?? false,
-            cursorPointCount: cursorPoints
+        this.presentationState = {
+            hovered: false,
+            active: false,
+            disabled: false,
+            cursorPointCount: 0,
+        };
+        this.presentationStateFor = (element, cursorPoints) => {
+            const state = this.presentationState;
+            state.hovered = this.interaction.isPointingAt(element);
+            state.active = this.interaction.isSelectingAt(element);
+            state.disabled = getSemanticControl(element)?.isDisabled() ?? false;
+            state.cursorPointCount = cursorPoints
                 ? this.interaction.writeCursorPointsAt(element, cursorPoints[0], cursorPoints[1])
-                : 0,
-        });
+                : 0;
+            return state;
+        };
         /** Reports issues from the latest completed mounted layout. */
         this.validate = (root) => {
             if (this.backendState.kind !== 'ready') {
@@ -15559,6 +17659,11 @@ class UIRenderer {
         };
         this.privateRoot.name = 'XR Blocks private UI';
         this.privateRoot.userData.xrblocksPrivate = true;
+        this.interaction.setSelectionFocusHandler((target) => {
+            if (this.backendState.kind === 'ready') {
+                this.backendState.backend.handlePointerTarget?.(target);
+            }
+        });
     }
     /** Mounts UI roots already connected when Core initializes. */
     async initialize(scene, renderer) {
@@ -15651,6 +17756,7 @@ class UIRenderer {
         this.unmount(root);
     }
     dispose() {
+        this.interaction.setSelectionFocusHandler();
         const backendState = this.backendState;
         this.backendState = { kind: 'disposed' };
         for (const root of [...this.mounts.keys()])
@@ -15689,7 +17795,9 @@ class UIRenderer {
                 throw STALE_UI_LOAD;
             }
             try {
-                backend.configureRenderer?.(this.renderer);
+                if (this.renderer instanceof THREE.WebGLRenderer) {
+                    backend.configureRenderer?.(this.renderer);
+                }
             }
             catch (error) {
                 backend.dispose();
@@ -15723,6 +17831,7 @@ class UIRenderer {
             return;
         record.connected = false;
         record.mount.object.visible = false;
+        record.mount.setActive?.(false);
         this.interaction.cancelObject(root, 'removed');
         for (const unregister of record.unregisterHits)
             unregister();
@@ -15741,6 +17850,9 @@ class UIRenderer {
     reconcileMounts(deltaSeconds, camera) {
         this.viewport.width = window.innerWidth;
         this.viewport.height = window.innerHeight;
+        // A field may have moved out of any root, including a disconnected one.
+        for (const record of this.mounts.values())
+            record.mount.prepareCommit?.();
         for (const record of this.mounts.values()) {
             if (!record.connected)
                 continue;
@@ -15750,6 +17862,7 @@ class UIRenderer {
             }
             record.visible = visible;
             record.mount.object.visible = visible;
+            record.mount.setActive?.(visible);
             syncRootTransform(record.root, record.mount.object, camera);
             const mappings = record.mount.commit(ui.theme, this.viewport, record.order);
             if (mappings) {
@@ -15767,7 +17880,7 @@ class UIRenderer {
     registerHit(mapping, overlay) {
         mapping.physical.userData.xrblocksHitOrder = mapping.physical.renderOrder;
         mapping.physical.userData.xrblocksOverlay = overlay;
-        return this.interaction.registerHitSurface(mapping.physical, mapping.logical);
+        return this.interaction.registerHitSurface(mapping.physical, mapping.logical, mapping.options);
     }
     collectConnectedRoots() {
         collectUIRoots(this.roots);
@@ -15824,9 +17937,10 @@ function syncRootTransform(root, renderRoot, camera) {
     root.updateWorldMatrix(true, false);
     renderRoot.matrix.copy(root.matrixWorld);
     renderRoot.matrixAutoUpdate = false;
+    renderRoot.matrixWorldNeedsUpdate = true;
 }
 async function defaultLoader() {
-    return import('./UIKitBackend.js');
+    return import('./UIKitBackend.js').then(function (n) { return n.U; });
 }
 
 const DEBUGGING = false;
@@ -17438,47 +19552,6 @@ function placeObjectAtIntersectionFacingTarget(obj, intersection, target) {
     return obj;
 }
 
-function disposeMaterial(material, except = new Set()) {
-    if (!material) {
-        return;
-    }
-    const materials = Array.isArray(material) ? material : [material];
-    for (const item of materials) {
-        if (!except.has(item)) {
-            item.dispose();
-        }
-    }
-}
-function disposeMeshResources(mesh) {
-    disposeRenderableResources(mesh);
-}
-function disposeRenderableResources(object) {
-    const renderable = object;
-    renderable.geometry?.dispose?.();
-    disposeMaterial(renderable.material);
-}
-function hasRenderableResources(object) {
-    const renderable = object;
-    return !!(renderable.geometry || renderable.material);
-}
-function disposeObjectTree(object) {
-    for (const child of [...object.children]) {
-        disposeObjectTree(child);
-        object.remove(child);
-    }
-    if (hasRenderableResources(object)) {
-        disposeRenderableResources(object);
-    }
-    const disposable = object;
-    disposable.dispose?.();
-}
-function disposeObjectChildren(object) {
-    for (const child of [...object.children]) {
-        disposeObjectTree(child);
-        object.remove(child);
-    }
-}
-
 /**
  * Represents a single detected object in the XR environment and holds metadata
  * about the object's properties. Note: 3D object position is stored in the
@@ -17504,7 +19577,7 @@ class DetectedObject extends THREE.Object3D {
     }
 }
 
-const DEBUG_FONT_URL = 'https://cdn.jsdelivr.net/npm/three@0.184.0/examples/fonts/helvetiker_regular.typeface.json';
+const DEBUG_FONT_URL = 'https://cdn.jsdelivr.net/npm/three@0.186.0/examples/fonts/helvetiker_regular.typeface.json';
 let cachedFontPromise = null;
 function loadDebugFont() {
     if (!cachedFontPromise) {
@@ -17524,11 +19597,11 @@ let BaseDetectorBackend$1 = class BaseDetectorBackend {
     constructor(context) {
         this.context = context;
     }
-    async run(depthMeshSnapshot, cameraParametersSnapshot) {
+    async run(depthMeshSnapshot, cameraParametersSnapshot, snapshotOverride) {
         if (!(await this.isAvailable())) {
             return [];
         }
-        const snapshot = await this.getSnapshot();
+        const snapshot = snapshotOverride ?? (await this.getSnapshot());
         if (!snapshot)
             return [];
         let normalizedDetections = [];
@@ -17684,7 +19757,7 @@ class GeminiDetectorBackend extends BaseDetectorBackend$1 {
         const geminiOptions = this.context.options.objects.backendConfig.gemini;
         return {
             // Keep detection fast by asking for as little reasoning as possible.
-            // gemini-3.7-flash doesn't support MINIMAL, only LOW.
+            // gemini-3.8-flash doesn't support MINIMAL, only LOW.
             thinkingConfig: {
                 thinkingLevel: 'LOW',
             },
@@ -17870,6 +19943,7 @@ class ObjectDetector extends Script {
         this._detectorBackends = new Map();
         this.activeClients = new Set();
         this.currentDetectionPromise = null;
+        this.pendingDetectionPromise = null;
         this.lastContinuousDetectionStartedAtMs = -Infinity;
         this.disposed = false;
         /**
@@ -17945,7 +20019,9 @@ class ObjectDetector extends Script {
      * ensures the continuous object detection is running.
      */
     update() {
-        if (this.activeClients.size === 0 || this.currentDetectionPromise) {
+        if (this.activeClients.size === 0 ||
+            this.currentDetectionPromise ||
+            this.pendingDetectionPromise) {
             return;
         }
         const pollingIntervalMs = this.options.objects.pollingIntervalMs;
@@ -17957,7 +20033,7 @@ class ObjectDetector extends Script {
         this.runContinuousDetection();
     }
     runContinuousDetection() {
-        if (this.currentDetectionPromise) {
+        if (this.currentDetectionPromise || this.pendingDetectionPromise) {
             return;
         }
         this.lastContinuousDetectionStartedAtMs = performance.now();
@@ -17980,64 +20056,115 @@ class ObjectDetector extends Script {
      * - If continuous detection is not started, performs a one-off detection and
      *   returns the result. If a one-off detection is already in progress, returns
      *   the promise for that ongoing detection.
+     * - Supplying a snapshot or backend queues a separate one-off run after
+     *   pending detections, without changing the continuous detector's options.
+     *   Supplied snapshots retain the camera pose and depth at submission time.
+     *   Simulator ground truth, when installed, still takes precedence.
      *
+     * @param options - Optional inputs for this run only.
      * @returns A promise that resolves with an
      * array of detected `DetectedObject` instances.
+     * @throws If an explicit backend or snapshot is invalid, or the detector
+     * is disposed before a queued request starts.
      */
-    runDetection() {
+    runDetection(options = {}) {
+        if (this.disposed) {
+            return Promise.reject(new Error('ObjectDetector has been disposed.'));
+        }
+        if (options.backend !== undefined || options.snapshot !== undefined) {
+            return this.runDetectionWithOverrides(options);
+        }
         if (this.currentDetectionPromise) {
             return this.currentDetectionPromise;
+        }
+        if (this.pendingDetectionPromise) {
+            return this.pendingDetectionPromise;
         }
         if (this.activeClients.size > 0) {
             this.runContinuousDetection();
             return this.currentDetectionPromise;
         }
-        this.currentDetectionPromise = this.runDetectionInternal().finally(() => {
-            this.currentDetectionPromise = null;
+        return this.runOneOffDetection();
+    }
+    async runDetectionWithOverrides(options) {
+        const backend = options.backend ?? this.options.objects.backendConfig.activeBackend;
+        if (backend !== 'gemini' && backend !== 'mediapipe') {
+            throw new Error(`ObjectDetector backend '${backend}' is not supported.`);
+        }
+        const snapshot = options.snapshot === undefined ? undefined : { ...options.snapshot };
+        const requiredField = backend === 'gemini' ? 'base64' : 'imageData';
+        if (snapshot && !snapshot[requiredField]) {
+            throw new Error(`ObjectDetector snapshot for '${backend}' must include ${requiredField}.`);
+        }
+        const frame = snapshot && !this.simulatorSource
+            ? this.captureDetectionFrame()
+            : undefined;
+        const run = () => this.runOneOffDetection({ backend, snapshot }, frame);
+        const previous = this.pendingDetectionPromise ?? this.currentDetectionPromise;
+        // A failed request rejects its own caller, but must not block later runs.
+        const pending = (previous ? previous.then(run, run) : run()).finally(() => {
+            if (this.pendingDetectionPromise === pending) {
+                this.pendingDetectionPromise = null;
+            }
         });
-        return this.currentDetectionPromise;
+        this.pendingDetectionPromise = pending;
+        return pending;
+    }
+    runOneOffDetection(options = {}, frame) {
+        const current = this.runDetectionInternal(options, frame).finally(() => {
+            if (this.currentDetectionPromise === current) {
+                this.currentDetectionPromise = null;
+            }
+        });
+        this.currentDetectionPromise = current;
+        return current;
     }
     /** Installs or removes the desktop simulator's ground-truth detector. */
     setSimulatorSource(source) {
         this.simulatorSource = source;
         return this;
     }
-    async runDetectionInternal() {
-        this.clearDetectedObjects(); // Clear previous scene results before starting a new detection.
-        if (this.simulatorSource) {
-            const detectedObjects = this.simulatorSource.detect().map((input) => {
-                const object = new DetectedObject(input.label, null, input.boundingBox, input.data ?? {});
-                object.position.copy(input.position);
-                return object;
-            });
-            for (const object of detectedObjects) {
-                this._detectedObjects.set(object.uuid, object);
-                this.add(object);
+    async runDetectionInternal(options = {}, frame) {
+        let detectionFrame = frame;
+        try {
+            if (this.disposed) {
+                throw new Error('ObjectDetector has been disposed.');
             }
-            return detectedObjects;
-        }
-        const cameraParametersSnapshot = getCameraParametersSnapshot(this.camera, this.renderer.xr.getCamera(), this.deviceCamera, this.targetDevice);
-        if (!cameraParametersSnapshot) {
-            // Device camera not ready yet (warming up); skip until it is available.
-            return [];
-        }
-        const context = this.getDetectorContext();
-        const activeBackend = this.options.objects.backendConfig.activeBackend;
-        const detectorBackendPromise = this.getOrCreateDetectorBackend(activeBackend, context);
-        let detectorBackend;
-        try {
-            detectorBackend = await detectorBackendPromise;
-        }
-        catch (error) {
-            console.warn(`Failed to load or initialize ObjectDetector backend '${activeBackend}':`, error);
-            return [];
-        }
-        if (this.disposed) {
-            return [];
-        }
-        const depthMeshSnapshot = this.getDepthMeshSnapshot();
-        try {
-            const detectedObjects = await detectorBackend.run(depthMeshSnapshot, cameraParametersSnapshot);
+            this.clearDetectedObjects(); // Clear previous scene results before starting a new detection.
+            if (this.simulatorSource) {
+                const detectedObjects = this.simulatorSource.detect().map((input) => {
+                    const object = new DetectedObject(input.label, null, input.boundingBox, input.data ?? {});
+                    object.position.copy(input.position);
+                    return object;
+                });
+                for (const object of detectedObjects) {
+                    this._detectedObjects.set(object.uuid, object);
+                    this.add(object);
+                }
+                return detectedObjects;
+            }
+            if (detectionFrame === undefined) {
+                detectionFrame = this.captureDetectionFrame();
+            }
+            if (!detectionFrame) {
+                // Device camera not ready yet (warming up); skip until it is available.
+                return [];
+            }
+            const context = this.getDetectorContext();
+            const activeBackend = options.backend ?? this.options.objects.backendConfig.activeBackend;
+            const detectorBackendPromise = this.getOrCreateDetectorBackend(activeBackend, context);
+            let detectorBackend;
+            try {
+                detectorBackend = await detectorBackendPromise;
+            }
+            catch (error) {
+                console.warn(`Failed to load or initialize ObjectDetector backend '${activeBackend}':`, error);
+                return [];
+            }
+            if (this.disposed) {
+                return [];
+            }
+            const detectedObjects = await detectorBackend.run(detectionFrame.depthMeshSnapshot, detectionFrame.cameraParametersSnapshot, options.snapshot);
             if (this.disposed) {
                 return [];
             }
@@ -18048,8 +20175,19 @@ class ObjectDetector extends Script {
             return detectedObjects;
         }
         finally {
-            this.disposeDepthMeshSnapshot(depthMeshSnapshot);
+            if (detectionFrame) {
+                this.disposeDepthMeshSnapshot(detectionFrame.depthMeshSnapshot);
+            }
         }
+    }
+    captureDetectionFrame() {
+        const cameraParametersSnapshot = getCameraParametersSnapshot(this.camera, this.renderer.xr.getCamera(), this.deviceCamera, this.targetDevice);
+        return cameraParametersSnapshot
+            ? {
+                cameraParametersSnapshot,
+                depthMeshSnapshot: this.getDepthMeshSnapshot(),
+            }
+            : null;
     }
     getDetectorContext() {
         return {
@@ -19458,6 +21596,7 @@ class DetectedMesh extends THREE.Mesh {
         }
         this.rigidBody = undefined;
         this.geometry.dispose();
+        super.dispose();
     }
 }
 
@@ -20280,6 +22419,13 @@ async function placeOnHorizontalSurface(objectToPlace, camera, scene, planes, me
         let placed = false;
         const origPosition = objectToPlace.position.clone();
         const origQuaternion = objectToPlace.quaternion.clone();
+        // Scratch box reused while evaluating the first candidate. Obstacle bounds
+        // only get cached once a candidate has been rejected, so the common
+        // first-candidate success never pays for the cache. The cache lives inside
+        // the frame loop so it is rebuilt after yielding, picking up obstacles that
+        // moved in the meantime.
+        const obstacleBox = new THREE.Box3();
+        let obstacleBounds;
         for (const cand of candidates) {
             // Verify timeout inside the validation loop to abort quickly if running slow
             if (timer.getElapsed() - startElapsed >= timeoutSeconds) {
@@ -20315,14 +22461,22 @@ async function placeOnHorizontalSurface(objectToPlace, camera, scene, planes, me
             // Shrink and shift collision box slightly to avoid grounding collisions with the table mesh
             const collisionBox = objectBox.clone();
             let collision = false;
-            const obstacleBox = new THREE.Box3();
             for (const obstacle of collidableObjects) {
                 if (obstacle === cand.plane) {
                     continue;
                 }
-                obstacle.updateMatrixWorld(true);
-                obstacleBox.setFromObject(obstacle);
-                if (collisionBox.intersectsBox(obstacleBox)) {
+                let bounds = obstacleBounds?.get(obstacle);
+                if (!bounds) {
+                    obstacle.updateMatrixWorld(true);
+                    bounds = obstacleBox.setFromObject(obstacle);
+                    // Ancestor bounds include the moving object, so they change from one
+                    // candidate to the next and must not be cached.
+                    if (obstacleBounds && !isDescendantOf(objectToPlace, obstacle)) {
+                        bounds = bounds.clone();
+                        obstacleBounds.set(obstacle, bounds);
+                    }
+                }
+                if (collisionBox.intersectsBox(bounds)) {
                     collision = true;
                     break;
                 }
@@ -20331,6 +22485,9 @@ async function placeOnHorizontalSurface(objectToPlace, camera, scene, planes, me
                 placed = true;
                 break; // Successful placement!
             }
+            // Start caching only once a candidate has been rejected, since more
+            // candidates will now be tested against the same obstacles.
+            obstacleBounds ??= new Map();
         }
         if (placed) {
             return true;
@@ -22320,7 +24477,7 @@ class Segmenter extends Script {
  * Manages all interactions with the real-world environment perceived by the XR
  * device. This class abstracts the complexity of various perception APIs
  * (Depth, Planes, Meshes, etc.) and provides a simple, event-driven interface
- * for developers to use `this.world.depth.mesh`, `this.world.planes`.
+ * for developers to use `this.world.planes` and `this.world.meshes`.
  */
 class World extends Script {
     constructor() {
@@ -22399,7 +24556,9 @@ class World extends Script {
         this.resolveInitialized();
     }
     /**
-     * Places an object at the reticle.
+     * Unimplemented placeholder. Does not place or anchor the object.
+     *
+     * @throws Always throws an error because this method is not implemented.
      */
     anchorObjectAtReticle(_object, _reticle) {
         throw new Error('Method not implemented');
@@ -22427,7 +24586,7 @@ class World extends Script {
      * (currently planes) and places a 3D object at the intersection point,
      * oriented to face the user.
      *
-     * See /templates/3_spatial_placement/ for a complete placement example.
+     * See /templates/03_spatial_placement/ for a complete placement example.
      *
      * @param objectToPlace - The object to position in the
      * world.
@@ -22819,7 +24978,7 @@ class PermissionsManager {
 
 const EPSILON$1 = 1e-9;
 function loadSimulatorModule() {
-    return import('./Simulator.js');
+    return import('./Simulator.js').then(function (n) { return n.S; });
 }
 /**
  * Core is the central engine of the XR Blocks framework, acting as a
@@ -22832,8 +24991,8 @@ class Core {
         return this._renderer?.xr.getFrame();
     }
     /**
-     * The WebGL renderer, created during {@link Core.init}. Reading it before
-     * `init()` has run returns `undefined` and logs a one-time warning.
+     * The WebGL or WebGPU renderer, created during {@link Core.init}. Reading it
+     * before `init()` has run returns `undefined` and logs a one-time warning.
      */
     get renderer() {
         if (!this._renderer) {
@@ -22995,10 +25154,9 @@ class Core {
             if (this.lighting) {
                 this.lighting.update();
             }
-            // XREffects renders each eye manually with XR camera auto-update disabled.
-            // Keep the public camera at the current headset pose so view-space UI and
-            // scripts do not use the stale pose from before the XR session started.
-            if (this.effects && this.renderer.xr.isPresenting) {
+            // Rendering updates this camera too late for first-frame UI placement.
+            // Scripts and input need the current headset pose before they run.
+            if (this.renderer.xr.isPresenting) {
                 this.renderer.xr.updateCamera(this.camera);
             }
             this.input.sampleSources();
@@ -23016,13 +25174,12 @@ class Core {
             const frameCamera = this.getFrameCamera();
             this.uiRenderer.reconcile(deltaSeconds, frameCamera);
             this.interaction.syncTouchCandidates(this.scriptsManager.directTouchCandidates);
-            this.scene.updateMatrixWorld(true);
+            this.scene.updateMatrixWorld();
             this.interaction.update(this.input.getFrame(), deltaSeconds);
             this.uiRenderer.present();
             this.renderSimulatorAndScene();
-            this.screenshotSynthesizer.onAfterRender(this.renderer, this.renderSceneCallback, this.deviceCamera);
-            if (this.simulatorRunning) {
-                this.simulator?.renderSimulatorScene();
+            if (this.renderer instanceof THREE.WebGLRenderer) {
+                this.screenshotSynthesizer.onAfterRender(this.renderer, this.renderSceneCallback, this.deviceCamera);
             }
         };
         /**
@@ -23042,13 +25199,11 @@ class Core {
                 return this.simulator;
             if (this.startingSimulator)
                 return this.startingSimulator;
+            this.xrButton?.setSimulatorStarting(true);
             this.startingSimulator = (async () => {
-                this.xrButton?.dispose();
-                this.xrButton = undefined;
                 const { Simulator } = await this.simulatorLoader();
                 this.assertLifecycleActive('load the simulator runtime');
-                const simulator = new Simulator(this.renderSceneCallback);
-                simulator.effects = this.effects;
+                const simulator = new Simulator(this.renderSceneCallback, this.renderer);
                 try {
                     // Keep the simulator connected to the script lifecycle while its async
                     // initialization runs. Otherwise the frame loop treats it as removed
@@ -23059,6 +25214,8 @@ class Core {
                     this.simulator = simulator;
                     this.registry.register(simulator);
                     this.onSimulatorStarted();
+                    this.xrButton?.dispose();
+                    this.xrButton = undefined;
                     return simulator;
                 }
                 catch (error) {
@@ -23077,6 +25234,7 @@ class Core {
             }
             finally {
                 this.startingSimulator = undefined;
+                this.xrButton?.setSimulatorStarting(false);
             }
         };
         /**
@@ -23086,6 +25244,7 @@ class Core {
         this.onXRSessionEnded = () => {
             if (!this.isLifecycleActive())
                 return;
+            this.deviceCamera?.onXRSessionEnded();
             this.scriptsManager.onXRSessionEnded();
         };
         /**
@@ -23182,6 +25341,7 @@ class Core {
             () => this.interaction.clear(),
             () => this.uiRenderer.dispose(),
             () => this.input.dispose(),
+            () => this.depth.dispose(),
             () => {
                 const camera = this.deviceCamera;
                 this.deviceCamera = undefined;
@@ -23296,21 +25456,44 @@ class Core {
         /*far=*/ options.camera.far));
         this.registry.register(this.camera, THREE.Camera);
         this.registry.register(this.camera, THREE.PerspectiveCamera);
-        this.renderer = new THREE.WebGLRenderer({
-            canvas: options.canvas,
-            antialias: options.antialias,
-            stencil: options.stencil,
-            alpha: true,
-            logarithmicDepthBuffer: options.logarithmicDepthBuffer,
-        });
+        if (options.rendererBackend === 'webgpu') {
+            const { WebGPURenderer } = await import('three/webgpu');
+            this.assertInitializing();
+            this.renderer = new WebGPURenderer({
+                canvas: options.canvas,
+                antialias: options.antialias,
+                stencil: options.stencil,
+                alpha: true,
+                forceWebGL: options.webgpuOptions?.forceWebGL,
+            });
+            await this.renderer.init();
+            this.assertInitializing();
+        }
+        else {
+            this.renderer = new THREE.WebGLRenderer({
+                canvas: options.canvas,
+                antialias: options.antialias,
+                stencil: options.stencil,
+                alpha: true,
+                logarithmicDepthBuffer: options.logarithmicDepthBuffer,
+            });
+        }
+        if (isWebGPURenderer(this.renderer)) {
+            const { applyWebGPUReticleMaterial } = await import('./ReticleWebGPUMaterial.js');
+            this.assertInitializing();
+            this.input.setReticleConfigurer(applyWebGPUReticleMaterial);
+        }
         this.renderer.setPixelRatio(window.devicePixelRatio);
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.xr.enabled = true;
         // disable built-in occlusion
-        this.renderer.xr.getDepthSensingMesh = function () {
-            return null;
-        };
+        if ('getDepthSensingMesh' in this.renderer.xr) {
+            this.renderer.xr.getDepthSensingMesh = function () {
+                return null;
+            };
+        }
         this.registry.register(this.renderer);
+        this.registry.register(new RendererHolder(this.renderer));
         this.renderer.xr.setReferenceSpaceType(options.referenceSpaceType);
         // For desktop simulator:
         window.addEventListener('resize', this.onWindowResize);
@@ -23369,7 +25552,8 @@ class Core {
                 depthTypeRequest: options.depth.depthTypeRequest,
                 matchDepthView: options.depth.matchDepthView,
             };
-            this.depth.init(this.camera, options.depth, this.renderer, this.registry, this.scene);
+            await this.depth.init(this.camera, options.depth, this.renderer, this.registry, this.scene);
+            this.assertInitializing();
             if (this.depth.depthMesh) {
                 this.depth.depthMesh.xb = {
                     ...this.depth.depthMesh.xb,
@@ -23379,7 +25563,7 @@ class Core {
             }
         }
         if (options.hands.enabled) {
-            webXRRequiredFeatures.push('hand-tracking');
+            webXROptionalFeatures.push('hand-tracking');
             this.user.hands = new Hands(this.input.hands);
             if (options.gestures.enabled) {
                 this.poseEstimation = options.gestures.poseEstimator;
@@ -23398,11 +25582,18 @@ class Core {
         if (options.world.meshes.enabled) {
             webXROptionalFeatures.push('mesh-detection');
         }
+        // Composition layers are optional too: without the feature the layer
+        // classes simply never appear and each layer falls back to being drawn
+        // into the scene.
+        if (options.layers.enabled) {
+            webXROptionalFeatures.push('layers');
+        }
         if (options.world.anchors.enabled) {
             webXROptionalFeatures.push('anchors');
         }
         // Sets up lighting.
         if (options.lighting.enabled) {
+            assertWebGLRenderer(this.renderer, 'Lighting');
             webXROptionalFeatures.push('light-estimation');
             this.lighting = new Lighting();
             this.lighting.init(options.lighting, this.renderer, this.scene, this.depth);
@@ -23507,7 +25698,7 @@ class Core {
     }
     renderSimulatorAndScene() {
         if (this.simulatorRunning && this.simulator) {
-            this.simulator.renderScene();
+            this.simulator.renderFrame();
         }
         else {
             this.renderScene();
@@ -23645,6 +25836,7 @@ class StylizedFace extends Script {
         this.texture.dispose();
         this.mesh.geometry.dispose();
         this.mesh.material.dispose();
+        super.dispose();
     }
     drawIfDirty() {
         const blinkScale = this.showEyes
@@ -23799,53 +25991,454 @@ function visualizeDepthMap(depthArray, width, height) {
     link.click();
 }
 
-class OcclusionUtils {
-    /**
-     * Creates a simple material used for rendering objects into the occlusion
-     * map. This material is intended to be used with `renderer.overrideMaterial`.
-     * @returns A new instance of THREE.MeshBasicMaterial.
-     */
-    static createOcclusionMapOverrideMaterial() {
-        return new THREE.MeshBasicMaterial();
+/**
+ * Works out how this platform can back a quad layer.
+ *
+ * @param session - The active XR session, if any.
+ * @param binding - The WebGL binding, if one exists.
+ * @param preferWebGL - Take the WebGL path even where a media binding exists.
+ *   Quest ships both, so without this the WebGL path has no hardware to run
+ *   on: every device that can take it would take the media path instead.
+ * @returns Which layer path is available.
+ */
+function layerCapability(session, binding, preferWebGL = false) {
+    if (!session)
+        return 'unsupported';
+    const hasWebGLQuad = typeof binding?.createQuadLayer ===
+        'function';
+    if (preferWebGL && hasWebGLQuad)
+        return 'webgl';
+    // Media layers need no per-frame drawing, so prefer them where present.
+    if (typeof XRMediaBinding === 'function')
+        return 'media';
+    if (hasWebGLQuad)
+        return 'webgl';
+    return 'unsupported';
+}
+/**
+ * Whether a capability can actually present a layer.
+ *
+ * @param capability - Result of {@link layerCapability}.
+ * @returns True when a quad layer can be created.
+ */
+function isLayerCapable(capability) {
+    return capability !== 'unsupported';
+}
+
+/**
+ * Owns the composition layers an app adds on top of the scene.
+ *
+ * three.js sets `layers: [projectionLayer]` once when the session starts and
+ * never touches that array again, so anything extra has to be composed back in
+ * together with its layer. Dropping the projection layer would blank the scene,
+ * which is why {@link setBaseLayer} is required before anything is added.
+ *
+ * Ordering follows the layers spec: earlier entries are composited behind later
+ * ones, so the projection layer goes first and app layers sit in front of it.
+ */
+class LayerManager {
+    constructor() {
+        this.session = null;
+        this.binding = null;
+        this.gl = null;
+        this.baseLayer = null;
+        this.layers = [];
+        this.capability = 'unsupported';
+        this.preferWebGL = false;
     }
     /**
-     * Modifies a material's shader in-place to incorporate distance-based
-     * alpha occlusion. This is designed to be used with a material's
-     * `onBeforeCompile` property. This only works with built-in three.js
-     * materials.
-     * @param shader - The shader object provided by onBeforeCompile.
+     * Forces the WebGL path on platforms that also offer a media binding.
+     *
+     * Quest has both and would otherwise always take the media path, so without
+     * this the WebGL path cannot be exercised on the hardware most likely to be
+     * to hand.
+     *
+     * @param prefer - Whether to take WebGL over media.
      */
-    static addOcclusionToShader(shader) {
-        shader.uniforms.occlusionEnabled = { value: true };
-        shader.uniforms.tOcclusionMap = { value: null };
-        shader.uniforms.uOcclusionClipFromWorld = { value: new THREE.Matrix4() };
-        shader.defines = { USE_UV: true, DISTANCE: true };
-        shader.vertexShader = shader.vertexShader
-            .replace('#include <common>', [
-            'uniform mat4 uOcclusionClipFromWorld;',
-            'varying vec4 vOcclusionScreenCoord;',
-            '#include <common>',
-        ].join('\n'))
-            .replace('#include <fog_vertex>', [
-            '#include <fog_vertex>',
-            'vOcclusionScreenCoord = uOcclusionClipFromWorld * worldPosition;',
-        ].join('\n'));
-        shader.fragmentShader = shader.fragmentShader
-            .replace('uniform vec3 diffuse;', [
-            'uniform vec3 diffuse;',
-            'uniform bool occlusionEnabled;',
-            'uniform sampler2D tOcclusionMap;',
-            'varying vec4 vOcclusionScreenCoord;',
-        ].join('\n'))
-            .replace('vec4 diffuseColor = vec4( diffuse, opacity );', [
-            'vec4 diffuseColor = vec4( diffuse, opacity );',
-            'vec2 occlusion_coordinates = 0.5 + 0.5 * vOcclusionScreenCoord.xy / vOcclusionScreenCoord.w;',
-            'vec2 occlusion_sample = texture2D(tOcclusionMap, occlusion_coordinates.xy).rg;',
-            'occlusion_sample = occlusion_sample / max(0.0001, occlusion_sample.g);',
-            'float occlusion_value = clamp(occlusion_sample.r, 0.0, 1.0);',
-            'diffuseColor.a *= occlusionEnabled ? occlusion_value : 1.0;',
-        ].join('\n'));
+    setPreferWebGL(prefer) {
+        this.preferWebGL = prefer;
+        this.capability = layerCapability(this.session, this.binding, prefer);
     }
+    /**
+     * Binds the manager to a session.
+     *
+     * @param session - The active session, or null when one ends.
+     * @param binding - The WebGL binding, if one exists.
+     * @param gl - The context the binding was made against. Needed to upload
+     *   frames into a layer's texture on the WebGL path.
+     */
+    setSession(session, binding = null, gl = null) {
+        this.session = session;
+        this.binding = binding;
+        this.gl = gl;
+        this.capability = layerCapability(session, binding, this.preferWebGL);
+        if (!session) {
+            this.layers.length = 0;
+            this.baseLayer = null;
+            this.binding = null;
+            this.gl = null;
+        }
+    }
+    /** @returns The WebGL binding, if the session has one. */
+    getBinding() {
+        return this.binding;
+    }
+    /** @returns The context layer textures are uploaded through. */
+    getContext() {
+        return this.gl;
+    }
+    /**
+     * Records the layer three.js renders the scene into.
+     *
+     * @param layer - The projection or WebGL layer backing the scene.
+     */
+    setBaseLayer(layer) {
+        this.baseLayer = layer;
+    }
+    /** @returns Which layer path this platform supports. */
+    getCapability() {
+        return this.capability;
+    }
+    /** @returns True when a layer can actually be presented. */
+    isSupported() {
+        return isLayerCapable(this.capability) && !!this.baseLayer;
+    }
+    /** @returns The layers currently composited in front of the scene. */
+    getLayers() {
+        return this.layers;
+    }
+    /**
+     * Adds a layer in front of the scene.
+     *
+     * @param layer - Layer to present.
+     * @returns True when it was added and submitted.
+     */
+    add(layer) {
+        if (!this.session || !this.baseLayer)
+            return false;
+        if (this.layers.includes(layer))
+            return true;
+        this.layers.push(layer);
+        try {
+            this.submit();
+        }
+        catch (error) {
+            this.layers.pop();
+            throw error;
+        }
+        return true;
+    }
+    /**
+     * Removes a layer.
+     *
+     * @param layer - Layer to stop presenting.
+     * @returns True when it was present and removed.
+     */
+    remove(layer) {
+        const index = this.layers.indexOf(layer);
+        if (index < 0)
+            return false;
+        this.layers.splice(index, 1);
+        this.submit();
+        return true;
+    }
+    /**
+     * Pushes the current layer stack to the compositor.
+     *
+     * Always includes the base layer, since replacing the array without it would
+     * leave the scene itself unrendered.
+     */
+    submit() {
+        if (!this.session || !this.baseLayer)
+            return;
+        this.session.updateRenderState({
+            layers: [this.baseLayer, ...this.layers],
+        });
+    }
+}
+
+const DEFAULT_WIDTH_M = 1.6;
+/**
+ * Presents a video as a composition layer where the platform allows it.
+ *
+ * The point is resampling. Drawn into the scene, a video goes into the eye
+ * buffer and is then warped again by the compositor, so it is sampled twice and
+ * the first of those is into a buffer that is already lower resolution than the
+ * panel. As a layer it is sampled once, at its own resolution.
+ *
+ * Reports {@link VideoLayerState} rather than throwing when it cannot, so an
+ * app can ask for a layer everywhere and draw the video into the scene on the
+ * platforms that have no layers.
+ */
+class VideoLayer {
+    /**
+     * @param manager - Owns the layer stack this layer joins.
+     */
+    constructor(manager) {
+        this.manager = manager;
+        this.layer = null;
+        this.state = 'fallback';
+        this.path = 'none';
+        this.video = null;
+        this.sourceWidth = 0;
+        this.sourceHeight = 0;
+        this.uploads = 0;
+        this.lastFrameTime = -1;
+    }
+    /** @returns Whether the video is being presented as a layer. */
+    getState() {
+        return this.state;
+    }
+    /** @returns Which binding is presenting the video. */
+    getPath() {
+        return this.path;
+    }
+    /** @returns The underlying layer, if one was created. */
+    getLayer() {
+        return this.layer;
+    }
+    /**
+     * Tries to present a video element as a quad layer.
+     *
+     * @param video - The element to present. Must already have metadata loaded
+     *   for its aspect ratio to be known.
+     * @param session - The active XR session.
+     * @param space - Reference space the placement is expressed in.
+     * @param placement - Where to put the quad.
+     * @returns Whether a layer was created.
+     */
+    attach(video, session, space, placement = {}) {
+        this.detach();
+        if (!this.manager.isSupported()) {
+            this.state = 'fallback';
+            return false;
+        }
+        const width = placement.width ?? DEFAULT_WIDTH_M;
+        const height = placement.height ?? width / aspectRatioOf(video);
+        const position = placement.position ?? new THREE.Vector3(0, 0, -2);
+        const quaternion = placement.quaternion ?? new THREE.Quaternion();
+        const transform = new XRRigidTransform({ x: position.x, y: position.y, z: position.z }, { x: quaternion.x, y: quaternion.y, z: quaternion.z, w: quaternion.w });
+        const capability = this.manager.getCapability();
+        const layer = capability === 'media'
+            ? createMediaLayer(video, session, space, transform, width, height)
+            : capability === 'webgl'
+                ? createWebGLLayer(this.manager.getBinding(), video, space, transform, width, height)
+                : null;
+        if (!layer) {
+            this.state = 'fallback';
+            return false;
+        }
+        let added = false;
+        try {
+            added = this.manager.add(layer);
+        }
+        finally {
+            // A rejected submission must not leave an unowned native layer behind.
+            if (!added)
+                layer.destroy?.();
+        }
+        if (!added) {
+            this.state = 'fallback';
+            return false;
+        }
+        this.layer = layer;
+        this.video = video;
+        this.sourceWidth = video.videoWidth;
+        this.sourceHeight = video.videoHeight;
+        this.uploads = 0;
+        this.lastFrameTime = -1;
+        this.path = capability === 'media' ? 'media' : 'webgl';
+        this.state = 'layer';
+        return true;
+    }
+    /**
+     * Draws the current video frame into the layer.
+     *
+     * Only the WebGL path needs this: on the media path the compositor pulls
+     * frames from the element itself and the app never draws one. Safe to call
+     * every frame regardless.
+     *
+     * @param frame - The frame being rendered.
+     */
+    update(frame) {
+        if (this.path !== 'webgl' || !this.layer || !this.video)
+            return;
+        const binding = this.manager.getBinding();
+        const gl = this.manager.getContext();
+        if (!binding || !gl)
+            return;
+        // The layer texture was allocated at the size the video reported when it
+        // was created. If the source has since changed size, texSubImage2D would
+        // raise a GL error on every frame, so re-attach instead of uploading.
+        if (this.video.videoWidth !== this.sourceWidth ||
+            this.video.videoHeight !== this.sourceHeight) {
+            return;
+        }
+        // The card streams at 30fps but the headset renders at 90, so uploading
+        // every frame would push the same 2048x1152 image three times over.
+        // needsRedraw still forces one, since that means the compositor lost the
+        // layer's contents.
+        const stale = this.video.currentTime === this.lastFrameTime;
+        if (stale && !this.layer.needsRedraw)
+            return;
+        this.lastFrameTime = this.video.currentTime;
+        try {
+            const subImage = binding.getSubImage(this.layer, frame);
+            // three.js caches GL state and skips redundant calls, so binding a
+            // texture behind its back leaves its cache describing something that is
+            // no longer true, and it then renders with whatever it thinks is bound.
+            // Everything touched here is put back so the cache stays honest.
+            const previousUnit = gl.getParameter(gl.ACTIVE_TEXTURE);
+            const previousTexture = gl.getParameter(gl.TEXTURE_BINDING_2D);
+            const previousFlip = gl.getParameter(gl.UNPACK_FLIP_Y_WEBGL);
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+            gl.bindTexture(gl.TEXTURE_2D, subImage.colorTexture);
+            gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, this.video);
+            gl.bindTexture(gl.TEXTURE_2D, previousTexture);
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, previousFlip);
+            gl.activeTexture(previousUnit);
+            this.uploads++;
+        }
+        catch {
+            // getSubImage throws until updateRenderState has taken effect, which is
+            // a frame or two after the layer is added. Dropping a frame is better
+            // than tearing the layer down over a transient state.
+        }
+    }
+    /**
+     * How many frames have actually been uploaded.
+     *
+     * On the WebGL path the app draws every frame itself, so a count that stays
+     * at zero is the difference between a layer that is presenting and one that
+     * was created and then quietly did nothing.
+     *
+     * @returns Number of successful uploads since attaching.
+     */
+    getUploadCount() {
+        return this.uploads;
+    }
+    /** Stops presenting the layer and returns the video to the scene. */
+    detach() {
+        const layer = this.layer;
+        this.layer = null;
+        this.video = null;
+        this.sourceWidth = 0;
+        this.sourceHeight = 0;
+        this.path = 'none';
+        this.state = 'fallback';
+        if (layer) {
+            try {
+                this.manager.remove(layer);
+            }
+            finally {
+                layer.destroy?.();
+            }
+        }
+    }
+}
+/**
+ * Whether this platform treats quad extents as half width and half height.
+ *
+ * The spec means full metres and Chromium passes them to OpenXR unchanged, but
+ * the Quest browser halves them, so the same numbers give a quad at twice the
+ * size there. It applies to the compositor, not to one binding, so the WebGL
+ * path needs the same correction on Quest that the media path does.
+ *
+ * `XRMediaBinding` is the tell: Quest is the only browser that ships it, and it
+ * is still present when the WebGL path is taken by choice.
+ * See immersive-web/layers#324.
+ *
+ * @returns True when extents must be halved.
+ */
+function usesHalfExtents() {
+    return typeof XRMediaBinding === 'function';
+}
+/**
+ * Builds a quad layer the compositor drives itself.
+ *
+ * @param video - Element the compositor reads frames from.
+ * @param session - Session the binding is made against.
+ * @param space - Space the transform is expressed in.
+ * @param transform - Where the quad sits.
+ * @param width - Full width in metres.
+ * @param height - Full height in metres.
+ * @returns The layer, or null when the platform refuses it.
+ */
+function createMediaLayer(video, session, space, transform, width, height) {
+    if (typeof XRMediaBinding !== 'function')
+        return null;
+    const scale = usesHalfExtents() ? 0.5 : 1;
+    try {
+        return new XRMediaBinding(session).createQuadLayer(video, {
+            space,
+            layout: 'mono',
+            transform,
+            width: width * scale,
+            height: height * scale,
+        });
+    }
+    catch (error) {
+        // A platform can advertise the binding and still refuse a given video, for
+        // example one whose metadata has not loaded yet.
+        console.warn('Could not create XR media quad layer:', error);
+        return null;
+    }
+}
+/**
+ * Builds a quad layer the app draws into each frame.
+ *
+ * This is the path Chrome and Android XR need, since neither implements
+ * `XRMediaBinding`.
+ *
+ * @param binding - The WebGL binding for the session.
+ * @param video - Element frames are uploaded from.
+ * @param space - Space the transform is expressed in.
+ * @param transform - Where the quad sits.
+ * @param width - Full width in metres.
+ * @param height - Full height in metres.
+ * @returns The layer, or null when the platform refuses it.
+ */
+function createWebGLLayer(binding, video, space, transform, width, height) {
+    if (!binding?.createQuadLayer)
+        return null;
+    // The texture is allocated once at this size and texSubImage2D refuses a
+    // source that does not fit it. Guessing here and uploading a differently
+    // sized frame raises a GL error every frame, which can take the session down
+    // with it, so wait for the real dimensions instead.
+    if (!video.videoWidth || !video.videoHeight)
+        return null;
+    const scale = usesHalfExtents() ? 0.5 : 1;
+    try {
+        return binding.createQuadLayer({
+            space,
+            // 'default' is a TypeError on a quad layer, so it has to be named.
+            layout: 'mono',
+            transform,
+            width: width * scale,
+            height: height * scale,
+            viewPixelWidth: video.videoWidth,
+            viewPixelHeight: video.videoHeight,
+            // A video changes every frame. getSubImage throws InvalidStateError on a
+            // static layer once needsRedraw has gone false.
+            isStatic: false,
+        });
+    }
+    catch (error) {
+        console.warn('Could not create XR WebGL quad layer:', error);
+        return null;
+    }
+}
+/**
+ * Aspect ratio of a video, falling back to 16:9 before metadata arrives.
+ *
+ * @param video - The element to measure.
+ * @returns Width divided by height.
+ */
+function aspectRatioOf(video) {
+    if (video.videoWidth > 0 && video.videoHeight > 0) {
+        return video.videoWidth / video.videoHeight;
+    }
+    return 16 / 9;
 }
 
 /**
@@ -23861,7 +26454,7 @@ class StrokeRecognizer extends Script {
         this.isRecording = false;
         this.gestureStartTime = 0;
         this.gestureEndTime = 0;
-        this.activeHand = Handedness.LEFT;
+        this.activeHand = Handedness.NONE;
     }
     static { this.dependencies = {
         scene: THREE.Scene,
@@ -23907,10 +26500,17 @@ class StrokeRecognizer extends Script {
         this.isActive = true;
     }
     /**
-     * Deactivates the stroke recognizer and clears any captured points.
+     * Deactivates the stroke recognizer, cancels recording without an end event,
+     * and clears any captured points. The next stroke starts with a fresh delay
+     * and hand selection after reactivation.
+     * Callers should clear any in-progress stroke UI when deactivating.
      */
     deactivate() {
         this.isActive = false;
+        this.isRecording = false;
+        this.gestureStartTime = 0;
+        this.gestureEndTime = 0;
+        this.activeHand = Handedness.NONE;
         this.clearPoints();
     }
     /**
@@ -23954,6 +26554,8 @@ class StrokeRecognizer extends Script {
                 else if (this.user.isSelecting?.(Handedness.RIGHT))
                     this.activeHand = Handedness.RIGHT;
                 this.dispatchEvent({ type: 'unistrokestart', target: this, detail: {} });
+                if (!this.isActive || !this.isRecording)
+                    return;
             }
             const elapsedSincePinch = currentTime - this.gestureStartTime;
             // Wait for the start delay to avoid capturing the initial jitter of the pinch motion.
@@ -24183,8 +26785,9 @@ class SetSimulatorModeEvent extends Event {
 
 class ShowSimulatorInstructionsEvent extends Event {
     static { this.type = 'showSimulatorInstructions'; }
-    constructor() {
+    constructor(simulatorMode) {
         super(ShowSimulatorInstructionsEvent.type, { bubbles: true, composed: true });
+        this.simulatorMode = simulatorMode;
     }
 }
 
@@ -25917,6 +28520,306 @@ class UIText extends UIElement {
     }
 }
 
+const DEFAULT_SINGLE_LINE_HEIGHT = 56;
+const DEFAULT_MULTILINE_HEIGHT = 120;
+const states = new WeakMap();
+/** A single-line or multiline text field backed by native browser editing. */
+class UITextInput extends UIElement {
+    constructor({ ariaLabel, value = '', placeholder = '', multiline = false, disabled = false, readOnly = false, maxLength, onInput, onChange, onSubmit, onFocus, onBlur, style, ...options }) {
+        if (!ariaLabel)
+            throw new Error('UITextInput requires ariaLabel.');
+        validateText(value, 'value');
+        validateText(placeholder, 'placeholder');
+        validateFlag(multiline, 'multiline');
+        validateFlag(disabled, 'disabled');
+        validateFlag(readOnly, 'readOnly');
+        validateMaxLength(maxLength);
+        super('input', {
+            ...options,
+            style: {
+                width: '100%',
+                minHeight: multiline
+                    ? DEFAULT_MULTILINE_HEIGHT
+                    : DEFAULT_SINGLE_LINE_HEIGHT,
+                ...style,
+            },
+        });
+        this.name = 'UITextInput';
+        this.ariaLabel = ariaLabel;
+        this.multiline = multiline;
+        this._value = normalizeTextInputValue(value, multiline);
+        this._placeholder = placeholder;
+        this._disabled = disabled;
+        this._readOnly = readOnly;
+        this._maxLength = maxLength;
+        this.onInput = onInput;
+        this.onChange = onChange;
+        this.onSubmit = onSubmit;
+        this.onFocus = onFocus;
+        this.onBlur = onBlur;
+        states.set(this, {
+            baseline: this._value,
+            focused: false,
+            nativeKeyboardRequests: new Set(),
+            internals: {
+                notifyInput: (next) => this.handleNativeInput(next),
+                notifyFocus: () => this.handleNativeFocus(),
+                notifyBlur: () => this.handleNativeBlur(),
+                notifySubmit: () => this.onSubmit?.(this._value),
+            },
+        });
+        const scrollOwner = states.get(this);
+        registerSemanticControl(this, {
+            kind: 'input',
+            isDisabled: () => this._disabled || !this.ready,
+            activate: () => {
+                if (this.ready && !this._disabled)
+                    this.binding.focus();
+            },
+            begin: (input) => this.binding?.begin?.(input),
+            update: (input) => this.binding?.update?.(input),
+            complete: () => this.binding?.complete?.(),
+            cancel: () => this.binding?.cancel?.(),
+            get scroll() {
+                return scrollOwner.binding?.getScroll?.();
+            },
+        });
+    }
+    /** Whether a mounted backend can currently accept editing operations. */
+    get ready() {
+        return this.binding?.isReady() ?? false;
+    }
+    /** A module or text-rendering failure reported by the mounted backend. */
+    get error() {
+        return this.binding?.getError?.();
+    }
+    get focused() {
+        return states.get(this).focused;
+    }
+    /** Whether a custom keyboard currently owns software-keyboard suppression. */
+    get nativeKeyboardSuppressed() {
+        return states.get(this).nativeKeyboardRequests.size > 0;
+    }
+    /**
+     * Requests that the browser's software keyboard stay hidden while a custom
+     * keyboard is active. Call the returned function to release this request.
+     * Native text editing remains enabled; support depends on the browser.
+     */
+    suppressNativeKeyboard() {
+        const state = states.get(this);
+        const token = {};
+        const wasSuppressed = state.nativeKeyboardRequests.size > 0;
+        state.nativeKeyboardRequests.add(token);
+        if (!wasSuppressed)
+            state.binding?.applyOptions();
+        return () => {
+            if (!state.nativeKeyboardRequests.delete(token))
+                return;
+            if (state.nativeKeyboardRequests.size === 0)
+                state.binding?.applyOptions();
+        };
+    }
+    get value() {
+        return this._value;
+    }
+    /** Programmatic assignment never emits onInput and rebases onChange. */
+    set value(value) {
+        validateText(value, 'value');
+        value = normalizeTextInputValue(value, this.multiline);
+        const changed = value !== this._value;
+        const state = states.get(this);
+        this._value = value;
+        state.baseline = value;
+        state.binding?.applyValue(value);
+        if (changed)
+            this.markUIContentDirty();
+    }
+    get placeholder() {
+        return this._placeholder;
+    }
+    set placeholder(value) {
+        validateText(value, 'placeholder');
+        if (value === this._placeholder)
+            return;
+        this._placeholder = value;
+        this.binding?.applyOptions();
+        this.markUIContentDirty();
+    }
+    get disabled() {
+        return this._disabled;
+    }
+    set disabled(value) {
+        validateFlag(value, 'disabled');
+        if (value === this._disabled)
+            return;
+        this._disabled = value;
+        this.binding?.applyOptions();
+        this.markUIDirty();
+    }
+    get readOnly() {
+        return this._readOnly;
+    }
+    set readOnly(value) {
+        validateFlag(value, 'readOnly');
+        if (value === this._readOnly)
+            return;
+        this._readOnly = value;
+        this.binding?.applyOptions();
+        this.markUIDirty();
+    }
+    get maxLength() {
+        return this._maxLength;
+    }
+    set maxLength(value) {
+        validateMaxLength(value);
+        if (value === this._maxLength)
+            return;
+        this._maxLength = value;
+        this.binding?.applyOptions();
+    }
+    get selectionStart() {
+        return this.binding?.getSelection()?.start;
+    }
+    get selectionEnd() {
+        return this.binding?.getSelection()?.end;
+    }
+    get selectionDirection() {
+        return this.binding?.getSelection()?.direction;
+    }
+    /** UTF-16 code unit offsets, matching browser text field indexing. */
+    get selection() {
+        return this.binding?.getSelection();
+    }
+    setSelectionRange(start, end, direction = 'none') {
+        if (!Number.isInteger(start) || !Number.isInteger(end)) {
+            throw new Error('UITextInput selection offsets must be integers.');
+        }
+        if (!['forward', 'backward', 'none'].includes(direction)) {
+            throw new Error('UITextInput selection direction must be forward, backward, or none.');
+        }
+        this.requireBinding('setSelectionRange').setSelectionRange(Math.max(0, start), Math.max(0, end), direction);
+    }
+    focus() {
+        const binding = this.requireBinding('focus');
+        if (this._disabled)
+            return;
+        binding.focus();
+    }
+    blur() {
+        this.binding?.blur();
+    }
+    /** Replaces the current selection, honoring maxLength like typed input. */
+    insertText(text) {
+        validateText(text, 'insertText');
+        const binding = this.requireBinding('insertText');
+        if (this._disabled || this._readOnly)
+            return;
+        binding.insertText(text);
+    }
+    /**
+     * Applies one KeyboardEvent.key name from a virtual keyboard or automation.
+     *
+     * Returns whether the key was applied. Physical keyboards and IME go through
+     * the native element instead of this narrow path.
+     */
+    pressKey(key, modifiers) {
+        if (typeof key !== 'string' || key.length === 0) {
+            throw new Error('UITextInput.pressKey requires a key name.');
+        }
+        if (!this.ready || this._disabled)
+            return false;
+        return this.binding.pressKey(key, modifiers);
+    }
+    get binding() {
+        return states.get(this).binding;
+    }
+    handleNativeInput(value) {
+        value = normalizeTextInputValue(value, this.multiline);
+        if (value === this._value)
+            return;
+        this._value = value;
+        this.markUIContentDirty();
+        this.onInput?.(value);
+    }
+    handleNativeFocus() {
+        const state = states.get(this);
+        if (state.focused)
+            return;
+        state.focused = true;
+        state.baseline = this._value;
+        this.markUIDirty();
+        this.onFocus?.();
+    }
+    handleNativeBlur() {
+        const state = states.get(this);
+        if (!state.focused)
+            return;
+        state.focused = false;
+        this.markUIDirty();
+        const edited = this._value !== state.baseline;
+        state.baseline = this._value;
+        try {
+            if (edited)
+                this.onChange?.(this._value);
+        }
+        finally {
+            this.onBlur?.();
+        }
+    }
+    requireBinding(operation) {
+        const binding = this.binding;
+        if (!binding || !binding.isReady()) {
+            throw new Error(`UITextInput.${operation} requires a mounted, ready text field.`);
+        }
+        return binding;
+    }
+}
+/** Uses the same line-ending rules as native input and textarea values. */
+function normalizeTextInputValue(value, multiline) {
+    return multiline
+        ? value.replace(/\r\n?/g, '\n')
+        : value.replace(/[\r\n]/g, '');
+}
+/** Attaches one native editing backend and returns its reporting callbacks. */
+function bindTextInput(field, binding) {
+    const state = states.get(field);
+    if (state.binding && state.binding !== binding) {
+        throw new Error('UITextInput already has a native editing backend.');
+    }
+    state.binding = binding;
+    const internals = state.internals;
+    return {
+        field,
+        notifyInput: (value) => internals.notifyInput(value),
+        notifyFocus: () => internals.notifyFocus(),
+        notifyBlur: () => internals.notifyBlur(),
+        notifySubmit: () => internals.notifySubmit(),
+        unbind: () => {
+            if (state.binding !== binding)
+                return;
+            state.binding = undefined;
+            internals.notifyBlur();
+        },
+    };
+}
+function validateText(value, property) {
+    if (typeof value !== 'string') {
+        throw new Error(`UITextInput ${property} must be a string.`);
+    }
+}
+function validateFlag(value, property) {
+    if (typeof value !== 'boolean') {
+        throw new Error(`UITextInput ${property} must be a boolean.`);
+    }
+}
+function validateMaxLength(value) {
+    if (value === undefined)
+        return;
+    if (!Number.isInteger(value) || value < 0) {
+        throw new Error('UITextInput maxLength must be a nonnegative integer or undefined.');
+    }
+}
+
 /** A horizontal slider with one exclusive captured interaction. */
 class UISlider extends UIElement {
     constructor({ ariaLabel, min = 0, max = 1, step = 0.01, value = 0, disabled = false, onInput, onChange, ...options }) {
@@ -26081,7 +28984,6 @@ const jsmUrl = `https://cdn.jsdelivr.net/npm/three@0.${THREE.REVISION}.0/example
 function createGLTFLoader(manager) {
     const dracoLoader = new DRACOLoader(manager);
     dracoLoader.setDecoderPath(jsmUrl + 'libs/draco/');
-    dracoLoader.setDecoderConfig({ type: 'js' });
     const ktx2Loader = new KTX2Loader(manager);
     ktx2Loader.setTranscoderPath(jsmUrl + 'libs/basis/');
     const gltfLoader = new GLTFLoader(manager);
@@ -26236,6 +29138,7 @@ class ModelViewerPlatform extends THREE.Mesh {
         this.geometry.dispose();
         for (const material of this.material)
             material.dispose();
+        super.dispose();
     }
 }
 function createMaterial() {
@@ -26313,6 +29216,7 @@ class RotationHitSurface extends THREE.Mesh {
         this.removeFromParent();
         this.geometry.dispose();
         this.material.dispose();
+        super.dispose();
     }
 }
 /** Loads and presents one interactive glTF or Gaussian Splat model. */
@@ -26321,7 +29225,7 @@ class ModelViewer extends Script {
         depth: Depth,
         interaction: Interaction,
         scene: THREE.Scene,
-        renderer: THREE.WebGLRenderer,
+        rendererHolder: RendererHolder,
         registry: Registry,
         timer: THREE.Timer,
     }; }
@@ -26361,7 +29265,7 @@ class ModelViewer extends Script {
         this.xb.manipulation = normalizeViewerManipulation(value);
         this.syncInteractionSurfaces();
     }
-    async init({ depth, interaction, scene, renderer, registry, timer, }) {
+    async init({ depth, interaction, scene, rendererHolder, registry, timer, }) {
         this.clearHitRegistrations();
         if (this.depth && this.depth !== depth) {
             this.unregisterOcclusionShaders(this.depth);
@@ -26370,7 +29274,7 @@ class ModelViewer extends Script {
         this.depth = depth;
         this.interaction = interaction;
         this.scene = scene;
-        this.renderer = renderer;
+        this.renderer = rendererHolder.renderer;
         this.registry = registry;
         this.timer = timer;
         for (const shader of this.occludableShaders) {
@@ -26446,6 +29350,7 @@ class ModelViewer extends Script {
         this.renderer = undefined;
         this.registry = undefined;
         this.timer = undefined;
+        super.dispose();
     }
     async loadGLTF(source, generation) {
         const gltf = await this.loader.loadGLTF({
@@ -26594,14 +29499,9 @@ class ModelViewer extends Script {
         if (this.occludableMaterials.has(material))
             return;
         this.occludableMaterials.add(material);
-        material.transparent = true;
-        const previous = material.onBeforeCompile;
-        material.onBeforeCompile = (shader, renderer) => {
-            previous.call(material, shader, renderer);
-            OcclusionUtils.addOcclusionToShader(shader);
+        OcclusionUtils.addOcclusionToMaterial(material, (shader) => {
             this.registerOccludableShader(shader);
-        };
-        material.needsUpdate = true;
+        });
     }
     registerOccludableShader(shader) {
         this.occludableShaders.add(shader);
@@ -26615,7 +29515,8 @@ class ModelViewer extends Script {
         }
     }
     async createSparkRendererIfNeeded(generation = this.loadGeneration) {
-        if (!this.splatMesh || !this.scene || !this.renderer || !this.registry) {
+        const renderer = this.registry?.get(THREE.WebGLRenderer);
+        if (!this.splatMesh || !this.scene || !renderer || !this.registry) {
             return;
         }
         const { SparkRenderer } = await import('@sparkjsdev/spark');
@@ -26628,7 +29529,7 @@ class ModelViewer extends Script {
         });
         if (!sparkRenderer) {
             sparkRenderer = new SparkRenderer({
-                renderer: this.renderer,
+                renderer,
                 maxStdDev: Math.sqrt(4),
             });
             this.scene.add(sparkRenderer);
@@ -27089,6 +29990,8 @@ var sdk = /*#__PURE__*/Object.freeze({
     get Keycodes () { return Keycodes; },
     LEFT: LEFT,
     LEFT_VIEW_ONLY_LAYER: LEFT_VIEW_ONLY_LAYER,
+    LayerManager: LayerManager,
+    LayersOptions: LayersOptions,
     Lighting: Lighting,
     LightingOptions: LightingOptions,
     LoadingSpinnerManager: LoadingSpinnerManager,
@@ -27117,6 +30020,7 @@ var sdk = /*#__PURE__*/Object.freeze({
     PlaneDetector: PlaneDetector,
     PlanesOptions: PlanesOptions,
     get PoseJointName () { return PoseJointName; },
+    RENDERER_BACKENDS: RENDERER_BACKENDS,
     RIGHT: RIGHT,
     RIGHT_VIEW_ONLY_LAYER: RIGHT_VIEW_ONLY_LAYER,
     Registry: Registry,
@@ -27169,12 +30073,15 @@ var sdk = /*#__PURE__*/Object.freeze({
     UIImage: UIImage,
     UIOverlay: UIOverlay,
     UIPanel: UIPanel,
+    UIScrollView: UIScrollView,
     UISlider: UISlider,
     UIText: UIText,
+    UITextInput: UITextInput,
     UP: UP,
     User: User,
     VIEW_DEPTH_GAP: VIEW_DEPTH_GAP,
     VideoFileStream: VideoFileStream,
+    VideoLayer: VideoLayer,
     VideoStream: VideoStream,
     VisibilityTransition: VisibilityTransition,
     get VolumeCategory () { return VolumeCategory; },
@@ -27198,6 +30105,8 @@ var sdk = /*#__PURE__*/Object.freeze({
     anchorCapability: anchorCapability,
     applyBVH: applyBVH,
     applySimulatorHandPoseRotationConstraints: applySimulatorHandPoseRotationConstraints,
+    aspectRatioOf: aspectRatioOf,
+    assertWebGLRenderer: assertWebGLRenderer,
     average: average,
     callInitWithDependencyInjection: callInitWithDependencyInjection,
     camera: camera,
@@ -27262,6 +30171,9 @@ var sdk = /*#__PURE__*/Object.freeze({
     intrinsicsToProjectionMatrix: intrinsicsToProjectionMatrix,
     isBVHReady: isBVHReady,
     isDeviceCameraPoseAvailable: isDeviceCameraPoseAvailable,
+    isLayerCapable: isLayerCapable,
+    isWebGPURenderer: isWebGPURenderer,
+    layerCapability: layerCapability,
     lerp: lerp,
     loadStereoImageAsTextures: loadStereoImageAsTextures,
     loadingSpinnerManager: loadingSpinnerManager,
@@ -27297,5 +30209,5 @@ var sdk = /*#__PURE__*/Object.freeze({
 
 registerDebugGlobals(sdk);
 
-export { AnchorsOptions as $, registerUIPresentationObject as A, isUIElement as B, getUIRevision as C, Depth as D, getUICardEdgeOptions as E, getSemanticControl as F, UIOverlay as G, Handedness as H, Interaction as I, XR_BLOCKS_ASSETS_PATH as J, Keycodes as K, SIMULATOR_HAND_POSE_NAMES as L, ModelLoader as M, AI as N, Options as O, Physics as P, AIOptions as Q, Reticle as R, SimulatorHandPose as S, TransformScript as T, UICard as U, ActiveControllers as V, WaitFrame as W, XRDeviceCamera as X, Agent as Y, AnchorManager as Z, AnchoredObjects as _, Script as a, LocalStorageAnchorStore as a$, AudioListener as a0, AudioPlayer as a1, BACK as a2, BackgroundMusic as a3, CategoryVolumes as a4, Context as a5, ContextOptions as a6, Core as a7, CoreSound as a8, DEFAULT_DEVICE_CAMERA_HEIGHT as a9, GamepadController as aA, GazeController as aB, Gemini as aC, GeminiOptions as aD, GenerateSkyboxTool as aE, GestureRecognition as aF, GestureRecognitionOptions as aG, GetWeatherTool as aH, HAND_BONE_IDX_CONNECTION_MAP as aI, HAND_INDEX_TO_LABEL as aJ, HAND_JOINT_COUNT as aK, HAND_JOINT_IDX_CONNECTION_MAP as aL, Hands as aM, HandsOptions as aN, HeadGestureRecognition as aO, HeadGestureRecognitionOptions as aP, HeuristicGestureRecognizer as aQ, HeuristicHeadGestureRecognizer as aR, HumanRecognizer as aS, HumansOptions as aT, InputOptions as aU, InteractionOptions as aV, LEFT as aW, LEFT_VIEW_ONLY_LAYER as aX, Lighting as aY, LightingOptions as aZ, LoadingSpinnerManager as a_, DEFAULT_DEVICE_CAMERA_WIDTH as aa, DEFAULT_RGB_TO_DEPTH_PARAMS as ab, DEVICE_CAMERA_PARAMETERS as ac, DOWN as ad, DepthMesh as ae, DepthMeshOptions as af, DepthOptions as ag, DepthTextures as ah, DetectedBodyPose as ai, DetectedFace as aj, DetectedMesh as ak, DetectedObject as al, DetectedPlane as am, DeviceCameraOptions as an, FINGER_ORDER as ao, FORWARD as ap, FaceCamera as aq, FaceLandmarkName as ar, FaceRecognizer as as, FacesOptions as at, FollowHead as au, FollowObject as av, GEMINI_DEFAULT_FLASH_MODEL as aw, GEMINI_DEFAULT_IMAGE_MODEL as ax, GEMINI_DEFAULT_LIVE_MODEL as ay, GamepadBindings as az, SimulatorMode as b, VolumeCategory as b$, MediaPipeHandContext as b0, MediaPipeHandPoseEstimator as b1, MeshDetectionOptions as b2, MeshDetector as b3, MeshScript as b4, ModelViewer as b5, MouseController as b6, NUM_HANDS as b7, OCCLUDABLE_ITEMS_LAYER as b8, ObjectDetector as b9, Segmenter as bA, SimulatorAnchor as bB, SkyboxAgent as bC, SoundOptions as bD, SoundSynthesizer as bE, SpatialAudio as bF, SpeechRecognizer as bG, SpeechRecognizerOptions as bH, SpeechSynthesizer as bI, SpeechSynthesizerOptions as bJ, StreamState as bK, StrokeRecognizer as bL, StylizedFace as bM, TensorFlowHandPoseEstimator as bN, Tool as bO, UIButton as bP, UIElement as bQ, UIIcon as bR, UIImage as bS, UIPanel as bT, UISlider as bU, UP as bV, User as bW, VIEW_DEPTH_GAP as bX, VideoFileStream as bY, VideoStream as bZ, VisibilityTransition as b_, ObjectsOptions as ba, OcclusionPass as bb, OcclusionUtils as bc, OpenAI as bd, OpenAIOptions as be, Orbit as bf, PhysicsOptions as bg, PlaneDetector as bh, PlanesOptions as bi, PoseJointName as bj, RIGHT as bk, RIGHT_VIEW_ONLY_LAYER as bl, ReticleOptions as bm, Reticles as bn, SIMULATOR_HAND_COMMON_BIOMECHANICAL_CONSTRAINTS_DEGREES as bo, SOUND_PRESETS as bp, SceneDetector as bq, SceneOptions as br, SceneSetOfMarkOptions as bs, SceneVisibilityOptions as bt, ScreenshotSynthesizer as bu, ScriptMixin as bv, ScriptsManager as bw, ScriptsManagerEventType as bx, SegmentCategory as by, SegmentationOptions as bz, SetSimulatorModeEvent as c, getUrlParamBool as c$, WebXRHandContext as c0, WebXRHandPoseEstimator as c1, WorldOptions as c2, XRButton as c3, XREffects as c4, XRPass as c5, XRReferenceSpaceCache as c6, XRTransitionOptions as c7, ZERO_VECTOR3 as c8, ZERO_VISEME as c9, getDeltaTime as cA, getDeviceCameraClipFromView as cB, getDeviceCameraWorldFromClip as cC, getDeviceCameraWorldFromView as cD, getElapsedTime as cE, getFingerBendAngles as cF, getFingerCurl as cG, getFingerDirection as cH, getFingerJoint as cI, getFingerPalmAlignment as cJ, getFingerSpread as cK, getFingerStraightness as cL, getFingertipDistance as cM, getFingertipPalmDistance as cN, getObjectTargetPoint as cO, getPalmNormal as cP, getPalmPose as cQ, getPalmRight as cR, getPalmUp as cS, getPalmWidth as cT, getRelativeBoneAngles as cU, getThumbBendAngles as cV, getThumbCurl as cW, getThumbDirection as cX, getThumbOpposition as cY, getThumbStraightness as cZ, getThumbVerticalDirection as c_, _getBvhImportStatus as ca, add as cb, ai as cc, anchorCapability as cd, applyBVH as ce, average as cf, camera as cg, clamp$1 as ch, clamp01 as ci, clampRotationToAngle as cj, context as ck, core as cl, cropImage as cm, defaultAnchorStorageKey as cn, depth as co, disposeBVH as cp, disposeMaterial as cq, disposeMeshResources as cr, disposeRenderableResources as cs, enableAcceleratedRaycast as ct, estimateHandScale as cu, extractYaw as cv, getAdjacentFingerSpreads as cw, getBoneVectors as cx, getCameraParametersSnapshot as cy, getColorHex as cz, SIMULATOR_HAND_POSE_ROTATIONS as d, getUrlParamFloat as d0, getUrlParamInt as d1, getUrlParameter as d2, getVec4ByColorString as d3, getXrCameraLeft as d4, getXrCameraRight as d5, init as d6, initScript as d7, input as d8, intrinsicsToProjectionMatrix as d9, xrDepthMeshOptions as dA, xrDepthMeshPhysicsOptions as dB, xrDepthMeshVisualizationOptions as dC, xrDeviceCameraEnvironmentContinuousOptions as dD, xrDeviceCameraEnvironmentOptions as dE, xrDeviceCameraUserContinuousOptions as dF, xrDeviceCameraUserOptions as dG, isBVHReady as da, isDeviceCameraPoseAvailable as db, lerp as dc, loadStereoImageAsTextures as dd, loadingSpinnerManager as de, lookAtRotation as df, objectIsDescendantOf as dg, parseBase64DataURL as dh, parseSimulatorHandPoseRotations as di, placeObjectAtIntersectionFacingTarget as dj, print as dk, resolveSimulatorRotationsFromKeypoints as dl, scene as dm, showOnlyInLeftEye as dn, showOnlyInRightEye as dp, sound as dq, timer as dr, transformRgbUvToWorld as ds, traverseUtil as dt, ui as du, urlParams as dv, user as dw, visualizeDepth as dx, visualizeDepthMap as dy, world as dz, SimulatorHandPoseChangeRequestEvent as e, HAND_JOINT_NAMES as f, applySimulatorHandPoseRotationConstraints as g, disposeObjectChildren as h, SetSimulatorEnvironmentEvent as i, ShowSimulatorInstructionsEvent as j, SetSimulatorHandPhysicsEvent as k, Registry as l, callInitWithDependencyInjection as m, disposeObjectTree as n, World as o, Input as p, SimulatorOptions as q, resolveSimulatorHandPoseRotations as r, SparkRendererHolder as s, MAX_GRADIENT_STOPS as t, DEFAULT_GRADIENT_PANEL_PROPS as u, ManipulationAction as v, getUIElementKind as w, getUIStructureRevision as x, setResolvedUICardSize as y, UIText as z };
+export { normalizeManipulationConfig as $, updateScrollViewLayout as A, bindTextInput as B, normalizeTextInputValue as C, Depth as D, isUIElement as E, getUIElementKind as F, getUIStructureRevision as G, Handedness as H, Interaction as I, UICard as J, Keycodes as K, setUICardContentMeasurer as L, ModelLoader as M, setResolvedUICardSize as N, Options as O, Physics as P, UIText as Q, Reticle as R, SparkRendererHolder as S, TransformScript as T, UIScrollView as U, UITextInput as V, WaitFrame as W, XRDeviceCamera as X, registerUIPresentationObject as Y, getUIRevision as Z, getUICardEdgeOptions as _, SimulatorHandPose as a, HeuristicGestureRecognizer as a$, getSemanticControl as a0, UIOverlay as a1, XR_BLOCKS_ASSETS_PATH as a2, SIMULATOR_HAND_POSE_NAMES as a3, AI as a4, AIOptions as a5, ActiveControllers as a6, Agent as a7, AnchorManager as a8, AnchoredObjects as a9, FORWARD as aA, FaceCamera as aB, FaceLandmarkName as aC, FaceRecognizer as aD, FacesOptions as aE, FollowHead as aF, FollowObject as aG, GEMINI_DEFAULT_FLASH_MODEL as aH, GEMINI_DEFAULT_IMAGE_MODEL as aI, GEMINI_DEFAULT_LIVE_MODEL as aJ, GamepadBindings as aK, GamepadController as aL, GazeController as aM, Gemini as aN, GeminiOptions as aO, GenerateSkyboxTool as aP, GestureRecognition as aQ, GestureRecognitionOptions as aR, GetWeatherTool as aS, HAND_BONE_IDX_CONNECTION_MAP as aT, HAND_INDEX_TO_LABEL as aU, HAND_JOINT_COUNT as aV, HAND_JOINT_IDX_CONNECTION_MAP as aW, Hands as aX, HandsOptions as aY, HeadGestureRecognition as aZ, HeadGestureRecognitionOptions as a_, AnchorsOptions as aa, AudioListener as ab, AudioPlayer as ac, BACK as ad, BackgroundMusic as ae, CategoryVolumes as af, Context as ag, ContextOptions as ah, Core as ai, CoreSound as aj, DEFAULT_DEVICE_CAMERA_HEIGHT as ak, DEFAULT_DEVICE_CAMERA_WIDTH as al, DEFAULT_RGB_TO_DEPTH_PARAMS as am, DEVICE_CAMERA_PARAMETERS as an, DOWN as ao, DepthMesh as ap, DepthMeshOptions as aq, DepthOptions as ar, DepthTextures as as, DetectedBodyPose as at, DetectedFace as au, DetectedMesh as av, DetectedObject as aw, DetectedPlane as ax, DeviceCameraOptions as ay, FINGER_ORDER as az, Script as b, Tool as b$, HeuristicHeadGestureRecognizer as b0, HumanRecognizer as b1, HumansOptions as b2, InputOptions as b3, InteractionOptions as b4, LEFT as b5, LEFT_VIEW_ONLY_LAYER as b6, LayerManager as b7, LayersOptions as b8, Lighting as b9, Reticles as bA, SIMULATOR_HAND_COMMON_BIOMECHANICAL_CONSTRAINTS_DEGREES as bB, SOUND_PRESETS as bC, SceneDetector as bD, SceneOptions as bE, SceneSetOfMarkOptions as bF, SceneVisibilityOptions as bG, ScreenshotSynthesizer as bH, ScriptMixin as bI, ScriptsManager as bJ, ScriptsManagerEventType as bK, SegmentCategory as bL, SegmentationOptions as bM, Segmenter as bN, SimulatorAnchor as bO, SkyboxAgent as bP, SoundOptions as bQ, SoundSynthesizer as bR, SpatialAudio as bS, SpeechRecognizer as bT, SpeechRecognizerOptions as bU, SpeechSynthesizer as bV, SpeechSynthesizerOptions as bW, StreamState as bX, StrokeRecognizer as bY, StylizedFace as bZ, TensorFlowHandPoseEstimator as b_, LightingOptions as ba, LoadingSpinnerManager as bb, LocalStorageAnchorStore as bc, MediaPipeHandContext as bd, MediaPipeHandPoseEstimator as be, MeshDetectionOptions as bf, MeshDetector as bg, MeshScript as bh, ModelViewer as bi, MouseController as bj, NUM_HANDS as bk, ObjectDetector as bl, ObjectsOptions as bm, OcclusionPass as bn, OcclusionUtils as bo, OpenAI as bp, OpenAIOptions as bq, Orbit as br, PhysicsOptions as bs, PlaneDetector as bt, PlanesOptions as bu, PoseJointName as bv, RENDERER_BACKENDS as bw, RIGHT as bx, RIGHT_VIEW_ONLY_LAYER as by, ReticleOptions as bz, SimulatorMode as c, getFingerStraightness as c$, UIButton as c0, UIElement as c1, UIIcon as c2, UIImage as c3, UIPanel as c4, UISlider as c5, UP as c6, User as c7, VIEW_DEPTH_GAP as c8, VideoFileStream as c9, context as cA, core as cB, cropImage as cC, defaultAnchorStorageKey as cD, depth as cE, disposeBVH as cF, disposeMaterial as cG, disposeMeshResources as cH, disposeRenderableResources as cI, enableAcceleratedRaycast as cJ, estimateHandScale as cK, extractYaw as cL, getAdjacentFingerSpreads as cM, getBoneVectors as cN, getCameraParametersSnapshot as cO, getColorHex as cP, getDeltaTime as cQ, getDeviceCameraClipFromView as cR, getDeviceCameraWorldFromClip as cS, getDeviceCameraWorldFromView as cT, getElapsedTime as cU, getFingerBendAngles as cV, getFingerCurl as cW, getFingerDirection as cX, getFingerJoint as cY, getFingerPalmAlignment as cZ, getFingerSpread as c_, VideoLayer as ca, VideoStream as cb, VisibilityTransition as cc, VolumeCategory as cd, WebXRHandContext as ce, WebXRHandPoseEstimator as cf, WorldOptions as cg, XRButton as ch, XREffects as ci, XRPass as cj, XRReferenceSpaceCache as ck, XRTransitionOptions as cl, ZERO_VECTOR3 as cm, ZERO_VISEME as cn, _getBvhImportStatus as co, add as cp, ai as cq, anchorCapability as cr, applyBVH as cs, aspectRatioOf as ct, assertWebGLRenderer as cu, average as cv, camera as cw, clamp$1 as cx, clamp01 as cy, clampRotationToAngle as cz, SetSimulatorModeEvent as d, getFingertipDistance as d0, getFingertipPalmDistance as d1, getObjectTargetPoint as d2, getPalmNormal as d3, getPalmPose as d4, getPalmRight as d5, getPalmUp as d6, getPalmWidth as d7, getRelativeBoneAngles as d8, getThumbBendAngles as d9, parseBase64DataURL as dA, parseSimulatorHandPoseRotations as dB, placeObjectAtIntersectionFacingTarget as dC, print as dD, resolveSimulatorRotationsFromKeypoints as dE, scene as dF, showOnlyInLeftEye as dG, showOnlyInRightEye as dH, sound as dI, timer as dJ, transformRgbUvToWorld as dK, traverseUtil as dL, ui as dM, urlParams as dN, user as dO, visualizeDepth as dP, visualizeDepthMap as dQ, world as dR, xrDepthMeshOptions as dS, xrDepthMeshPhysicsOptions as dT, xrDepthMeshVisualizationOptions as dU, xrDeviceCameraEnvironmentContinuousOptions as dV, xrDeviceCameraEnvironmentOptions as dW, xrDeviceCameraUserContinuousOptions as dX, xrDeviceCameraUserOptions as dY, getThumbCurl as da, getThumbDirection as db, getThumbOpposition as dc, getThumbStraightness as dd, getThumbVerticalDirection as de, getUrlParamBool as df, getUrlParamFloat as dg, getUrlParamInt as dh, getUrlParameter as di, getVec4ByColorString as dj, getXrCameraLeft as dk, getXrCameraRight as dl, init as dm, initScript as dn, input as dp, intrinsicsToProjectionMatrix as dq, isBVHReady as dr, isDeviceCameraPoseAvailable as ds, isLayerCapable as dt, layerCapability as du, lerp as dv, loadStereoImageAsTextures as dw, loadingSpinnerManager as dx, lookAtRotation as dy, objectIsDescendantOf as dz, SIMULATOR_HAND_POSE_ROTATIONS as e, SimulatorHandPoseChangeRequestEvent as f, HAND_JOINT_NAMES as g, applySimulatorHandPoseRotationConstraints as h, isWebGPURenderer as i, disposeObjectChildren as j, SetSimulatorEnvironmentEvent as k, ShowSimulatorInstructionsEvent as l, SetSimulatorHandPhysicsEvent as m, Registry as n, callInitWithDependencyInjection as o, disposeObjectTree as p, World as q, resolveSimulatorHandPoseRotations as r, Input as s, SimulatorOptions as t, OCCLUDABLE_ITEMS_LAYER as u, MAX_GRADIENT_STOPS as v, DEFAULT_GRADIENT_PANEL_PROPS as w, ManipulationAction as x, getUIPresentationObject as y, bindScrollView as z };
 //# sourceMappingURL=entry.js.map

@@ -14,15 +14,15 @@
  * limitations under the License.
  *
  * @file xrblocks.js
- * @version v0.21.0
- * @commitid 097f03a
- * @builddate 2026-08-25T01:04:27.433Z
+ * @version v0.21.1
+ * @commitid 4d7c04d
+ * @builddate 2026-09-27T20:45:08.479Z
  * @description XR Blocks SDK, built from source with the above commit ID.
  * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
  * and follow rules below:
  * 1. Include the following importmap for maximum compatibility:
-    "three": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/",
+    "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/",
     "@pmndrs/uikit": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit@1.0.64/dist/index.min.js",
     "@pmndrs/uikit-pub-sub": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit-pub-sub@1.0.64/dist/index.min.js",
     "@pmndrs/msdfonts": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.64/dist/index.min.js",
@@ -43,7 +43,7 @@
 import { LitElement, css, html } from 'lit';
 import { customElement } from 'lit/decorators/custom-element.js';
 import { property } from 'lit/decorators/property.js';
-import { J as XR_BLOCKS_ASSETS_PATH, S as SimulatorHandPose, e as SimulatorHandPoseChangeRequestEvent, L as SIMULATOR_HAND_POSE_NAMES, b as SimulatorMode, i as SetSimulatorEnvironmentEvent, c as SetSimulatorModeEvent, k as SetSimulatorHandPhysicsEvent, j as ShowSimulatorInstructionsEvent } from './entry.js';
+import { a2 as XR_BLOCKS_ASSETS_PATH, c as SimulatorMode, a as SimulatorHandPose, f as SimulatorHandPoseChangeRequestEvent, a3 as SIMULATOR_HAND_POSE_NAMES, k as SetSimulatorEnvironmentEvent, d as SetSimulatorModeEvent, m as SetSimulatorHandPhysicsEvent, l as ShowSimulatorInstructionsEvent } from './entry.js';
 import { state } from 'lit/decorators/state.js';
 import { classMap } from 'lit/directives/class-map.js';
 import { createRef, ref } from 'lit/directives/ref.js';
@@ -104,6 +104,10 @@ class SimulatorInstructionsCloseEvent extends Event {
 }
 
 let SimulatorInstructionsCard = class SimulatorInstructionsCard extends LitElement {
+    constructor() {
+        super(...arguments);
+        this.continueButtonText = 'Continue';
+    }
     static { this.styles = css `
     :host {
       position: relative;
@@ -196,11 +200,14 @@ let SimulatorInstructionsCard = class SimulatorInstructionsCard extends LitEleme
       <div class="image-div">${this.getImageContents()}</div>
       <div class="description-div">${this.getDescriptionContents()}</div>
       <button type="button" @click=${this.continueButtonClicked}>
-        Continue
+        ${this.continueButtonText}
       </button>
     `;
     }
 };
+__decorate([
+    property({ type: String })
+], SimulatorInstructionsCard.prototype, "continueButtonText", void 0);
 SimulatorInstructionsCard = __decorate([
     customElement('xrblocks-simulator-instructions-card')
 ], SimulatorInstructionsCard);
@@ -248,15 +255,17 @@ let HandsInstructions = class HandsInstructions extends SimulatorInstructionsCar
         return html `
       <h2>Hands Mode</h2>
       <p>
-        From Navigation Mode, press <strong>Left Shift</strong> to enter
-        <strong>Hands Mode</strong>. This mode allows for precise manipulation
-        of virtual hands.
+        Hands Mode allows for precise manipulation of virtual hands while
+        navigating the environment.
       </p>
       <ul>
         <li>
-          <strong>Move Hand:</strong> Use the W, A, S, D keys to move it
-          forward, left, backward, and right.
+          <strong>Move Around:</strong> Hold Left Shift and use the W, A, S, D
+          keys to navigate.
         </li>
+        <li><strong>Look Around:</strong> Right-click and drag the mouse.</li>
+        <li><strong>Rotate Hand:</strong> Left-click and drag the mouse.</li>
+        <li><strong>Move Hand:</strong> Use the W, A, S, D keys.</li>
         <li>
           <strong>Elevate Hand:</strong> Use the Q (up) and E (down) keys.
         </li>
@@ -360,13 +369,43 @@ let SimulatorInstructions = class SimulatorInstructions extends LitElement {
       align-items: center;
     }
   `; }
+    getSteps() {
+        const isSinglePage = this.customInstructions.length === 0;
+        const buttonText = isSinglePage ? 'Close' : 'Continue';
+        if (this.simulatorMode) {
+            switch (this.simulatorMode) {
+                case SimulatorMode.USER:
+                case SimulatorMode.EDITOR:
+                case SimulatorMode.POINTER_LOCK:
+                    return [
+                        html `<xrblocks-simulator-user-instructions
+              .continueButtonText=${buttonText}
+            />`,
+                    ];
+                case SimulatorMode.POSE:
+                    return [
+                        html `<xrblocks-simulator-navigation-instructions
+              .continueButtonText=${buttonText}
+            />`,
+                    ];
+                case SimulatorMode.CONTROLLER:
+                    return [
+                        html `<xrblocks-simulator-hands-instructions
+              .continueButtonText=${buttonText}
+            />`,
+                    ];
+            }
+        }
+        return [
+            html `<xrblocks-simulator-user-instructions />`,
+            html `<xrblocks-simulator-navigation-instructions />`,
+            html `<xrblocks-simulator-hands-instructions
+        .continueButtonText=${buttonText}
+      />`,
+        ];
+    }
     constructor() {
         super();
-        this.steps = [
-            html ` <xrblocks-simulator-user-instructions />`,
-            html ` <xrblocks-simulator-navigation-instructions />`,
-            html ` <xrblocks-simulator-hands-instructions />`,
-        ];
         this.customInstructions = [];
         this.step = 0;
         this.addEventListener(SimulatorInstructionsNextEvent.type, this.continueButtonClicked.bind(this));
@@ -376,20 +415,25 @@ let SimulatorInstructions = class SimulatorInstructions extends LitElement {
         this.remove();
     }
     continueButtonClicked() {
-        if (this.step + 1 >= this.steps.length + this.customInstructions.length) {
+        const steps = this.getSteps();
+        if (this.step + 1 >= steps.length + this.customInstructions.length) {
             this.closeInstructions();
             return;
         }
         this.step++;
     }
     render() {
-        return this.step < this.steps.length
-            ? this.steps[this.step]
+        const steps = this.getSteps();
+        return this.step < steps.length
+            ? steps[this.step]
             : html `<xrblocks-simulator-custom-instruction
-          .customInstruction=${this.customInstructions[this.step - this.steps.length]}
+          .customInstruction=${this.customInstructions[this.step - steps.length]}
         />`;
     }
 };
+__decorate([
+    property()
+], SimulatorInstructions.prototype, "simulatorMode", void 0);
 __decorate([
     property()
 ], SimulatorInstructions.prototype, "customInstructions", void 0);
@@ -1240,7 +1284,7 @@ let SimulatorSettingsPanel = class SimulatorSettingsPanel extends LitElement {
     }
     _onShowInstructions() {
         this._isOpen = false;
-        this.dispatchEvent(new ShowSimulatorInstructionsEvent());
+        this.dispatchEvent(new ShowSimulatorInstructionsEvent(this.simulatorMode));
     }
     render() {
         const modes = [

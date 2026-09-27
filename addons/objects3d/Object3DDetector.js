@@ -1,20 +1,24 @@
 import * as THREE from 'three';
-import { enableAcceleratedRaycast, Script, core } from 'xrblocks';
+import { enableAcceleratedRaycast, Script, core, getDeviceCameraWorldFromView, getCameraParametersSnapshot } from 'xrblocks';
 import { Detected3DObject } from './Detected3DObject.js';
 import { sampleDepthInMaskAcrossFrames, anchorFromBboxCenter } from './geometry/DepthSampling.js';
+import { buildFrozenCamera } from './geometry/FrozenCamera.js';
+import { PoseRing } from './geometry/PoseRing.js';
+import { RoomFrameAccumulator, estimateRoomYawFromMesh, yawRelativeToRoom } from './geometry/RoomFrame.js';
 import { unionDetections, snapBoxToFloor, fuseIntoBoxes } from './geometry/Fusion.js';
 import { radiusFromBbox, rejectByAnchor, rejectByY, rejectByAnchorDepth, fitYawOBB } from './geometry/ObbFitting.js';
 import { isSurfaceLabel, categorize, isTinyFlatLabel } from './labels/Categories.js';
 import { getSam, samEncodeSnapshot, samMaskFromBbox } from './masks/SamMask.js';
 import { segmenterMaskFromSnapshot } from './masks/SegmenterMask.js';
 import { rebuildBoxGroupGeometry, CAT_COLOR, buildBoxGroup } from './visuals/BoxGroup.js';
+import './geometry/YawEstimation.js';
 import './masks/SamDevice.js';
 
 /**
  * Reusable 3-D object-detection Script addon.
  *
- * `Object3DDetector` wraps the full pipeline from the `objects_3d` demo into a
- * reusable {@link Script}: snap camera + depth mesh, run 2-D detection, obtain
+ * `Object3DDetector` wraps the full pipeline in a reusable {@link Script}:
+ * snap camera + depth mesh, run 2-D detection, obtain
  * per-object segmentation masks, raycast depth samples into world space, fit an
  * oriented bounding box (OBB), fuse across views, and optionally show debug
  * wireframe boxes.
@@ -39,8 +43,29 @@ const MIN_DEGENERATE_HEIGHT_RATIO = 0.1;
 // well before the first detect() call.
 const _bvhReady = enableAcceleratedRaycast().catch(() => false);
 /**
- * Extracts the 3-D object-detection pipeline from the `objects_3d` demo into a
- * reusable {@link Script}. Attach it to the scene before `xb.init()`, then
+ * Post-multiplies the manual Euler offset, then a 6-DOF extrinsic
+ * correction matrix, onto `worldFromView` — both in the camera's own view
+ * space, on top of the SDK's estimated extrinsics:
+ * `worldFromView · R(offset) · extrinsic`. Exported as a pure function so
+ * the composition can be unit-tested without an XR session. Returns the
+ * input instance unchanged when both corrections are identity/absent.
+ */
+function applyCameraPoseCorrections(worldFromView, offset, extrinsic) {
+    const hasEuler = offset.yaw !== 0 || offset.pitch !== 0 || offset.roll !== 0;
+    if (!hasEuler && !extrinsic)
+        return worldFromView;
+    const out = worldFromView.clone();
+    if (hasEuler) {
+        out.multiply(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(offset.pitch, offset.yaw, offset.roll, 'YXZ')));
+    }
+    if (extrinsic)
+        out.multiply(extrinsic);
+    return out;
+}
+/**
+ * The 3-D object-detection pipeline as a reusable {@link Script}. See the
+ * `objects_3d` demo for a worked integration. Attach it to the scene before
+ * `xb.init()`, then
  * call `await detector.detect()` to populate `detector.results`.
  *
  * ```ts
@@ -60,17 +85,147 @@ class Object3DDetector extends Script {
         super();
         this._results = [];
         this._detectInFlight = false;
+        // ~1.3 s of pose history at 90 fps, enough to cover passthrough video
+        // pipeline latency when pairing a capture with its capture-time pose.
+        this._poseRing = new PoseRing(120);
+        this._roomFrame = new RoomFrameAccumulator();
+        this._diagnostics = null;
+        this._extrinsic = null;
         this._opts = {
             detectBackend: options.detectBackend ?? 'gemini',
             maskBackend: options.maskBackend ?? 'slimsam',
             fuseAcrossViews: options.fuseAcrossViews ?? true,
             showDebugBoxes: options.showDebugBoxes ?? false,
+            maxRayDistance: options.maxRayDistance ?? 12,
+            sceneBounds: {
+                maxXZ: options.sceneBounds?.maxXZ ?? MAX_CENTER_HORIZONTAL_DISTANCE_M,
+                minY: options.sceneBounds?.minY ?? MIN_CENTER_HEIGHT_M,
+                maxY: options.sceneBounds?.maxY ?? MAX_CENTER_HEIGHT_M,
+            },
+            roomHalf: options.roomHalf ?? 3,
+            cameraRotationOffset: {
+                yaw: options.cameraRotationOffset?.yaw ?? 0,
+                pitch: options.cameraRotationOffset?.pitch ?? 0,
+                roll: options.cameraRotationOffset?.roll ?? 0,
+            },
+            orientation: {
+                mode: options.orientation?.mode ?? 'roomFrame',
+                roomYaw: options.orientation?.roomYaw ?? null,
+                roomYawConfidence: options.orientation?.roomYawConfidence ?? 0,
+                snapToleranceRad: options.orientation?.snapToleranceRad ?? (12 * Math.PI) / 180,
+                minYawConfidence: options.orientation?.minYawConfidence ?? 0.35,
+            },
         };
+        this.setCameraExtrinsicCorrection(options.cameraExtrinsicCorrection);
+    }
+    /**
+     * Record the device-camera pose every frame so {@link detect} can pair a
+     * captured video frame with the pose at the frame's `captureTime` — the
+     * passthrough video lags head tracking, so the pose at snapshot time is
+     * newer than the snapshot's pixels.
+     */
+    update() {
+        const deviceCamera = core.deviceCamera;
+        if (!deviceCamera || deviceCamera.simulatorCamera)
+            return;
+        // `core.renderer` may be a WebGPURenderer, whose XR manager types
+        // `getCamera()` as a plain ArrayCamera; the device-camera helpers want the
+        // WebXR-specific shape (same cast as PlanarVST).
+        const xrCameras = core.renderer?.xr?.getCamera?.();
+        if (!xrCameras?.cameras?.length)
+            return;
+        try {
+            this._poseRing.push(performance.now(), getDeviceCameraWorldFromView(core.camera, xrCameras, deviceCamera, this._targetDevice()));
+        }
+        catch (_e) {
+            // Pose momentarily unavailable; skip this frame.
+        }
     }
     /** Currently fitted {@link Detected3DObject} instances from the last
      * (or accumulated) detect run. */
     get results() {
         return this._results;
+    }
+    /**
+     * Diagnostics from the most recent {@link detect} call, or `null` before
+     * the first one. See {@link Object3DDetectorDiagnostics}.
+     */
+    get diagnostics() {
+        return this._diagnostics;
+    }
+    /** Poses currently held in the capture-time pose history ring. */
+    get poseRingSize() {
+        return this._poseRing.size;
+    }
+    /** Extra rotation applied to the device-camera pose, in radians. */
+    get cameraRotationOffset() {
+        return { ...this._opts.cameraRotationOffset };
+    }
+    /**
+     * Adjust the camera rotation offset between detections, so a calibration
+     * error can be nulled out interactively instead of by reloading. Omitted
+     * components are left unchanged.
+     */
+    setCameraRotationOffset(offset) {
+        const current = this._opts.cameraRotationOffset;
+        current.yaw = offset.yaw ?? current.yaw;
+        current.pitch = offset.pitch ?? current.pitch;
+        current.roll = offset.roll ?? current.roll;
+    }
+    /** The currently applied 6-DOF extrinsic correction, or `null`. */
+    get cameraExtrinsicCorrection() {
+        if (!this._extrinsic)
+            return null;
+        const position = new THREE.Vector3();
+        const quaternion = new THREE.Quaternion();
+        this._extrinsic.matrix.decompose(position, quaternion, new THREE.Vector3());
+        return { rotation: quaternion.toArray(), translation: position.toArray() };
+    }
+    /**
+     * Set or clear the 6-DOF extrinsic correction (see
+     * {@link Object3DDetectorOptions.cameraExtrinsicCorrection}). Pass `null`
+     * or an object with neither field to clear it. Safe to call between
+     * `detect()` calls, so a calibration recovered on the fly (e.g. from an
+     * ArUco calibration session) can be applied mid-session.
+     */
+    setCameraExtrinsicCorrection(correction) {
+        if (!correction || (!correction.rotation && !correction.translation)) {
+            this._extrinsic = null;
+            return;
+        }
+        const rotation = correction.rotation?.length === 4
+            ? new THREE.Quaternion().fromArray(correction.rotation).normalize()
+            : new THREE.Quaternion();
+        const translation = correction.translation?.length === 3
+            ? new THREE.Vector3().fromArray(correction.translation)
+            : new THREE.Vector3();
+        this._extrinsic = {
+            matrix: new THREE.Matrix4().compose(translation, rotation, new THREE.Vector3(1, 1, 1)),
+            rotationDeg: THREE.MathUtils.radToDeg(2 * Math.acos(THREE.MathUtils.clamp(Math.abs(rotation.w), -1, 1))),
+            translationCm: translation.length() * 100,
+        };
+    }
+    /** The orientation policy currently in force. */
+    get orientationMode() {
+        return this._opts.orientation.mode;
+    }
+    /**
+     * Switch orientation policy between detections, so the modes can be
+     * A/B compared on device without reloading.
+     */
+    setOrientationMode(mode) {
+        this._opts.orientation.mode = mode;
+    }
+    /** The room frame accumulated so far, or `null` before any usable estimate. */
+    get roomFrame() {
+        return this._roomFrame.current;
+    }
+    /**
+     * Discard the accumulated room frame. Call this after the user recenters or
+     * moves to a different space; {@link clearDetections} does it too.
+     */
+    resetRoomFrame() {
+        this._roomFrame.reset();
     }
     /**
      * Remove all existing results and their debug visuals from the scene.
@@ -96,6 +251,7 @@ class Object3DDetector extends Script {
             this.remove(obj);
         }
         this._results = [];
+        this._roomFrame.reset();
     }
     /**
      * Run the full detection + OBB-fitting pipeline and return the list of
@@ -126,6 +282,81 @@ class Object3DDetector extends Script {
             return this._results;
         }
         this._detectInFlight = true;
+        const t0 = performance.now();
+        const diag = {
+            startedAtMs: t0,
+            frameLatencyMs: null,
+            poseMatchErrorMs: null,
+            poseRingSize: this._poseRing.size,
+            usedDeviceCameraModel: false,
+            cameraFovDeg: 0,
+            cameraAspect: 0,
+            cameraRotationOffsetDeg: {
+                yaw: THREE.MathUtils.radToDeg(this._opts.cameraRotationOffset.yaw),
+                pitch: THREE.MathUtils.radToDeg(this._opts.cameraRotationOffset.pitch),
+                roll: THREE.MathUtils.radToDeg(this._opts.cameraRotationOffset.roll),
+            },
+            cameraExtrinsicCorrection: this._extrinsic
+                ? {
+                    rotationDeg: this._extrinsic.rotationDeg,
+                    translationCm: this._extrinsic.translationCm,
+                }
+                : null,
+            snapshotWidth: 0,
+            snapshotHeight: 0,
+            depthRemapIsIdentity: null,
+            depthVsEyeRotationDeg: null,
+            depthMeshVertices: null,
+            detections2d: 0,
+            fitted3d: 0,
+            rejections: {},
+            timings: {
+                freshFrameWait: 0,
+                snapshot: 0,
+                depthMeshSnapshot: 0,
+                detect2d: 0,
+                masksAndFit: 0,
+                total: 0,
+            },
+            error: null,
+            orientationMode: this._opts.orientation.mode,
+            roomYawDeg: null,
+            roomYawConfidence: null,
+            roomFrameSupportM2: null,
+            yawStats: [],
+        };
+        const bail = (message) => {
+            console.warn(`[Object3DDetector] ${message}`);
+            diag.error = message;
+            diag.timings.total = performance.now() - t0;
+            this._diagnostics = diag;
+            this._detectInFlight = false;
+            return this._results;
+        };
+        if (!deviceCamera) {
+            return bail('device camera not available');
+        }
+        // Wait for a fresh video frame before snapshotting: inside an immersive
+        // session the hidden <video> element can be throttled, so getSnapshot
+        // would otherwise read a frame captured seconds ago from a different
+        // head pose — every box from that capture then lands rotated by the
+        // intervening head motion. The frame's captureTime also lets us pick the
+        // pose the head actually had when the pixels were captured.
+        let captureTimeMs = null;
+        try {
+            const meta = await deviceCamera.waitForFreshFrame?.();
+            if (meta) {
+                captureTimeMs = meta.captureTime ?? meta.receiveTime ?? null;
+                if (captureTimeMs !== null) {
+                    diag.frameLatencyMs = performance.now() - captureTimeMs;
+                }
+            }
+        }
+        catch (_e) {
+            // Freshness signal is best-effort only.
+        }
+        const tAfterWait = performance.now();
+        diag.timings.freshFrameWait = tAfterWait - t0;
         // Wrap the whole body so the in-flight guard is always cleared even if the
         // setup below (canvas / camera clone / bvh / depth snapshot) throws; one
         // failure must not wedge the detector permanently.
@@ -134,55 +365,73 @@ class Object3DDetector extends Script {
             let snapImageData = null;
             try {
                 snapImageData =
-                    deviceCamera?.getSnapshot({ outputFormat: 'imageData' }) ?? null;
+                    deviceCamera.getSnapshot({ outputFormat: 'imageData' }) ?? null;
             }
             catch (_e) {
                 snapImageData = null;
             }
             if (!snapImageData) {
-                console.warn('[Object3DDetector] no camera frame available');
-                return this._results;
+                return bail('no camera frame available');
             }
-            if (!deviceCamera) {
-                console.warn('[Object3DDetector] device camera not available');
-                return this._results;
-            }
+            diag.snapshotWidth = snapImageData.width;
+            diag.snapshotHeight = snapImageData.height;
             // Derive base64 from the same ImageData to avoid a second video-frame read.
             const b64Canvas = document.createElement('canvas');
             b64Canvas.width = snapImageData.width;
             b64Canvas.height = snapImageData.height;
             b64Canvas.getContext('2d').putImageData(snapImageData, 0, 0);
             const snapBase64 = b64Canvas.toDataURL('image/jpeg', 0.9);
-            // Freeze the camera matrix so raycasts align with snapshot pixels.
-            const liveCam = core.camera;
-            const frozenCam = liveCam.clone();
-            frozenCam.matrixAutoUpdate = false;
-            liveCam.updateMatrixWorld();
-            frozenCam.matrix.copy(liveCam.matrix);
-            frozenCam.matrixWorld.copy(liveCam.matrixWorld);
-            frozenCam.matrixWorldInverse.copy(liveCam.matrixWorld).invert();
-            frozenCam.projectionMatrix.copy(liveCam.projectionMatrix);
-            frozenCam.projectionMatrixInverse.copy(liveCam.projectionMatrixInverse);
-            frozenCam.position.copy(liveCam.position);
-            frozenCam.quaternion.copy(liveCam.quaternion);
+            // Freeze the camera model at snapshot time so raycasts align with the
+            // snapshot pixels. The RGB frame comes from the physical passthrough
+            // camera, whose intrinsics and pose differ from the XR render camera
+            // (e.g. on Galaxy XR: ~48° vertical FOV near the right eye, versus the
+            // ~90°+ union frustum between the eyes), so build the frozen camera from
+            // the SDK's device-camera model. In the simulator both models coincide.
             const snapAspect = snapImageData.width / snapImageData.height;
-            frozenCam.userData = { ...frozenCam.userData, snapAspect };
+            const deviceCam = this._buildDeviceFrozenCamera(snapAspect, captureTimeMs, diag);
+            const frozenCam = deviceCam ?? this._buildRenderFrozenCamera(snapAspect);
+            diag.usedDeviceCameraModel = deviceCam !== null;
+            diag.cameraFovDeg = frozenCam.fov;
+            diag.cameraAspect = frozenCam.aspect;
+            this._collectDepthDiagnostics(diag);
+            const tAfterSnapshot = performance.now();
+            diag.timings.snapshot = tAfterSnapshot - tAfterWait;
             // Wait for the BVH patch before building the per-press bounds tree.
             await _bvhReady;
             // Clone and index the depth mesh.
             const frozenDepthMesh = this._snapshotDepthMesh();
             if (!frozenDepthMesh) {
-                console.warn('[Object3DDetector] no depth mesh available');
-                return this._results;
+                return bail('no depth mesh available');
             }
-            const origGetSnapshot = deviceCamera.getSnapshot.bind(deviceCamera);
-            const mutableCamera = deviceCamera;
-            mutableCamera.getSnapshot = (opts) => {
-                if (opts?.outputFormat === 'base64')
-                    return Promise.resolve(snapBase64);
-                if (opts?.outputFormat === 'imageData')
-                    return snapImageData;
-                return origGetSnapshot(opts);
+            diag.depthMeshVertices =
+                frozenDepthMesh.geometry.attributes['position']?.count ?? null;
+            // Estimate the room's dominant wall direction from this capture's depth
+            // mesh, so ill-determined object yaws fall back to the room's axes rather
+            // than to wherever the user happened to be facing at session start.
+            try {
+                this._roomFrame.push(estimateRoomYawFromMesh(frozenDepthMesh, {
+                    viewerPosition: frozenCam.position,
+                }));
+            }
+            catch (_e) {
+                // Room estimation is an optimisation; fitting still works without it.
+            }
+            const roomFrame = this._roomFrame.current;
+            if (roomFrame) {
+                diag.roomYawDeg = THREE.MathUtils.radToDeg(roomFrame.yaw);
+                diag.roomYawConfidence = roomFrame.confidence;
+                diag.roomFrameSupportM2 = roomFrame.supportArea;
+            }
+            const orientation = {
+                ...this._opts.orientation,
+                roomYaw: roomFrame?.yaw ?? this._opts.orientation.roomYaw,
+                roomYawConfidence: roomFrame?.confidence ?? this._opts.orientation.roomYawConfidence,
+            };
+            const tAfterDepthMesh = performance.now();
+            diag.timings.depthMeshSnapshot = tAfterDepthMesh - tAfterSnapshot;
+            const detectionSnapshot = {
+                base64: snapBase64,
+                imageData: snapImageData,
             };
             // Start SAM init + encode in parallel with 2-D detection.
             let samPrep = null;
@@ -198,35 +447,35 @@ class Object3DDetector extends Script {
                 let detected;
                 try {
                     if (this._opts.detectBackend === 'both') {
-                        const cfg = core.world.options.objects.backendConfig;
-                        const prev = cfg.activeBackend;
-                        try {
-                            cfg.activeBackend = 'mediapipe';
-                            const mp = await worldObjects.runDetection();
-                            cfg.activeBackend = 'gemini';
-                            const gm = await worldObjects.runDetection();
-                            detected = unionDetections(mp, gm);
-                        }
-                        finally {
-                            cfg.activeBackend = prev;
-                        }
+                        // Submit both now so their queued runs retain the same frame pose.
+                        const [mp, gm] = await Promise.all([
+                            worldObjects.runDetection({
+                                backend: 'mediapipe',
+                                snapshot: detectionSnapshot,
+                            }),
+                            worldObjects.runDetection({
+                                backend: 'gemini',
+                                snapshot: detectionSnapshot,
+                            }),
+                        ]);
+                        detected = unionDetections(mp, gm);
                     }
                     else {
-                        const cfg = core.world.options.objects.backendConfig;
-                        const prev = cfg.activeBackend;
-                        cfg.activeBackend = this._opts.detectBackend;
-                        try {
-                            detected = await worldObjects.runDetection();
-                        }
-                        finally {
-                            cfg.activeBackend = prev;
-                        }
+                        detected = await worldObjects.runDetection({
+                            backend: this._opts.detectBackend,
+                            snapshot: detectionSnapshot,
+                        });
                     }
                 }
                 catch (e) {
                     console.warn('[Object3DDetector] runDetection threw', e);
+                    diag.error = `runDetection threw: ${e?.message ?? e}`;
                     return this._results;
                 }
+                finally {
+                    diag.timings.detect2d = performance.now() - tAfterDepthMesh;
+                }
+                diag.detections2d = detected.length;
                 if (!detected.length) {
                     console.info('[Object3DDetector] nothing detected');
                     return this._results;
@@ -239,12 +488,11 @@ class Object3DDetector extends Script {
                     }
                     catch (e) {
                         console.warn('[Object3DDetector] SAM encoder failed', e);
+                        diag.error = `SAM encoder failed: ${e?.message ?? e}`;
                         return this._results;
                     }
                 }
-                // Restore the snapshot getter; fitting uses the frozen camera / mesh.
-                deviceCamera.getSnapshot =
-                    origGetSnapshot;
+                const tAfterDetect2d = performance.now();
                 const floorY = this._estimateFloorY();
                 // Pipeline per-object work: mask decode (serial on GPU via samSerialize)
                 // overlaps with depth raycasts for the previous object.
@@ -267,7 +515,7 @@ class Object3DDetector extends Script {
                         }
                         if (!mask)
                             return null;
-                        const { points: raw } = await sampleDepthInMaskAcrossFrames(mask, box2d, DEPTH_SAMPLE_GRID_SIZE, DEPTH_SAMPLE_FRAME_COUNT, frozenCam, frozenDepthMesh, snapAspect);
+                        const { points: raw } = await sampleDepthInMaskAcrossFrames(mask, box2d, DEPTH_SAMPLE_GRID_SIZE, DEPTH_SAMPLE_FRAME_COUNT, frozenCam, frozenDepthMesh, snapAspect, this._opts.maxRayDistance);
                         mask.close();
                         const anchor = anchorFromBboxCenter(box2d, frozenCam, frozenDepthMesh, snapAspect) ??
                             obj.position ??
@@ -311,6 +559,8 @@ class Object3DDetector extends Script {
                             anchor,
                             box2d,
                             tinyFlat: isTinyFlatLabel(obj.label),
+                            roomHalf: this._opts.roomHalf,
+                            orientation,
                         });
                         if (!obb)
                             return null;
@@ -318,10 +568,11 @@ class Object3DDetector extends Script {
                             snapBoxToFloor(obb, floorY);
                         }
                         const c = obb.center;
-                        const farFromRoom = Math.abs(c.x) > MAX_CENTER_HORIZONTAL_DISTANCE_M ||
-                            Math.abs(c.z) > MAX_CENTER_HORIZONTAL_DISTANCE_M ||
-                            c.y < MIN_CENTER_HEIGHT_M ||
-                            c.y > MAX_CENTER_HEIGHT_M;
+                        const bounds = this._opts.sceneBounds;
+                        const farFromRoom = Math.abs(c.x) > bounds.maxXZ ||
+                            Math.abs(c.z) > bounds.maxXZ ||
+                            c.y < bounds.minY ||
+                            c.y > bounds.maxY;
                         const minPoints = MIN_POINTS_BY_CATEGORY[category];
                         const tinyFlat = isTinyFlatLabel(obj.label);
                         const tooFewPoints = !tinyFlat && points.length < minPoints;
@@ -340,6 +591,15 @@ class Object3DDetector extends Script {
                                 degenerate,
                                 kept: points.length,
                             });
+                            for (const [reason, hit] of [
+                                ['farFromRoom', farFromRoom],
+                                ['tooFewPoints', tooFewPoints],
+                                ['oversize', oversize],
+                                ['degenerate', degenerate],
+                            ]) {
+                                if (hit)
+                                    diag.rejections[reason] = (diag.rejections[reason] ?? 0) + 1;
+                            }
                             return null;
                         }
                         return { obb, label: obj.label || 'object', category };
@@ -350,6 +610,20 @@ class Object3DDetector extends Script {
                     }
                 };
                 const pipelineResults = await Promise.all(detected.map(processOne));
+                diag.timings.masksAndFit = performance.now() - tAfterDetect2d;
+                diag.fitted3d = pipelineResults.filter((r) => r?.obb).length;
+                for (const r of pipelineResults) {
+                    if (!r?.obb)
+                        continue;
+                    diag.yawStats.push({
+                        label: r.label,
+                        category: r.category,
+                        yawDeg: THREE.MathUtils.radToDeg(r.obb.angle),
+                        roomRelativeYawDeg: THREE.MathUtils.radToDeg(yawRelativeToRoom(r.obb.angle, roomFrame)),
+                        confidence: r.obb.yawConfidence ?? 0,
+                        method: r.obb.yawMethod ?? 'unknown',
+                    });
+                }
                 // Serial fuse + add pass (fuseIntoBoxes mutates _results).
                 for (const r of pipelineResults) {
                     if (!r || !r.obb)
@@ -387,15 +661,14 @@ class Object3DDetector extends Script {
                 return this._results;
             }
             finally {
-                // Always restore the snapshot getter and clean up the frozen mesh.
-                deviceCamera.getSnapshot =
-                    origGetSnapshot;
                 if (frozenDepthMesh.geometry) {
                     const geom = frozenDepthMesh.geometry;
                     geom.disposeBoundsTree?.();
                     geom.dispose();
                 }
                 frozenDepthMesh.material?.dispose?.();
+                diag.timings.total = performance.now() - t0;
+                this._diagnostics = diag;
                 this._detectInFlight = false;
             }
         }
@@ -403,11 +676,108 @@ class Object3DDetector extends Script {
             this._detectInFlight = false;
         }
     }
+    /**
+     * Build the frozen camera from the SDK's device-camera model (physical
+     * passthrough intrinsics + pose on device; render-camera-derived square
+     * crop in the simulator). Returns `null` when no camera parameters are
+     * available yet (e.g. before init or outside an XR session).
+     */
+    _buildDeviceFrozenCamera(snapAspect, captureTimeMs = null, diag) {
+        const deviceCamera = core.deviceCamera;
+        if (!deviceCamera)
+            return null;
+        try {
+            const params = getCameraParametersSnapshot(core.camera, core.renderer.xr.getCamera(), deviceCamera, this._targetDevice());
+            if (!params)
+                return null;
+            let worldFromView = params.worldFromView;
+            // Prefer the pose the head had when the video frame was actually
+            // captured over the pose at detect() time — the passthrough video lags
+            // tracking, so during head motion the two differ.
+            if (captureTimeMs !== null && !deviceCamera.simulatorCamera) {
+                const historical = this._poseRing.lookup(captureTimeMs);
+                if (historical) {
+                    worldFromView = historical.clone();
+                    if (diag) {
+                        diag.poseMatchErrorMs = this._poseRing.matchErrorMs(captureTimeMs);
+                    }
+                }
+            }
+            worldFromView = applyCameraPoseCorrections(worldFromView, this._opts.cameraRotationOffset, this._extrinsic?.matrix ?? null);
+            return buildFrozenCamera({
+                worldFromView,
+                clipFromView: params.clipFromView,
+                viewFromClip: params.viewFromClip,
+                snapAspect,
+            });
+        }
+        catch (_e) {
+            return null;
+        }
+    }
+    _targetDevice() {
+        return core.world?.objects?.targetDevice ?? 'galaxyxr';
+    }
+    /**
+     * Records how the depth system is configured on this device — whether the
+     * platform reports a depth-camera pose rotated away from the render view,
+     * and whether the view→depth-buffer UV remap is non-trivial. A large
+     * rotation with `matchDepthView: false` means the depth mesh itself — the
+     * surface every detection ray lands on — is the thing to scrutinise when
+     * boxes come back coherently rotated.
+     */
+    _collectDepthDiagnostics(diag) {
+        const depth = core.depth;
+        if (!depth || core.deviceCamera?.simulatorCamera)
+            return;
+        try {
+            const norm = depth.normDepthBufferFromNormViewMatrices?.[0];
+            if (norm) {
+                const identity = new THREE.Matrix4();
+                diag.depthRemapIsIdentity = norm.elements.every((v, i) => Math.abs(v - identity.elements[i]) <= 1e-6);
+            }
+            const eye = core.renderer.xr.getCamera()?.cameras?.[0];
+            const depthRotation = depth.depthCameraRotations?.[0];
+            if (eye && depthRotation) {
+                const eyeRotation = new THREE.Quaternion().setFromRotationMatrix(eye.matrixWorld);
+                diag.depthVsEyeRotationDeg = THREE.MathUtils.radToDeg(eyeRotation.angleTo(depthRotation));
+            }
+        }
+        catch (_e) {
+            // Diagnostics only.
+        }
+    }
+    /**
+     * Legacy fallback: freeze a clone of the render camera. Only correct when
+     * the snapshot was rendered from that camera (simulator / non-XR); kept as
+     * a fallback for callers without device-camera parameters.
+     */
+    _buildRenderFrozenCamera(snapAspect) {
+        const liveCam = core.camera;
+        const frozenCam = liveCam.clone();
+        frozenCam.matrixAutoUpdate = false;
+        liveCam.updateMatrixWorld();
+        frozenCam.matrix.copy(liveCam.matrix);
+        frozenCam.matrixWorld.copy(liveCam.matrixWorld);
+        frozenCam.matrixWorldInverse.copy(liveCam.matrixWorld).invert();
+        frozenCam.projectionMatrix.copy(liveCam.projectionMatrix);
+        frozenCam.projectionMatrixInverse.copy(liveCam.projectionMatrixInverse);
+        frozenCam.position.copy(liveCam.position);
+        frozenCam.quaternion.copy(liveCam.quaternion);
+        frozenCam.userData = { ...frozenCam.userData, snapAspect };
+        return frozenCam;
+    }
     /** Clone the live depth mesh into a static snapshot. */
     _snapshotDepthMesh() {
-        const live = core.depth?.depthMesh;
+        const depth = core.depth;
+        const live = depth?.depthMesh;
         if (!live || !live.geometry)
             return null;
+        // The full-resolution geometry is only rebuilt per-frame when
+        // options.depth.depthMesh.updateFullResolutionGeometry is set (default
+        // false), so force a rebuild from the cached CPU depth to avoid cloning
+        // a stale mesh.
+        depth.updateFullResolutionDepthMesh();
         const clonedGeom = live.geometry.clone();
         clonedGeom.computeBoundingSphere();
         clonedGeom.computeBoundingBox();
@@ -444,4 +814,4 @@ class Object3DDetector extends Script {
     }
 }
 
-export { Object3DDetector };
+export { Object3DDetector, applyCameraPoseCorrections };

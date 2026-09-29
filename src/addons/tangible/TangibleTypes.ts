@@ -45,7 +45,7 @@ export interface TangibleWidget {
 export interface TangibleWidgetsOptions {
   /** Application-defined widget IDs, for example `reading`, `timer`, or `tilt`. */
   widgets: Record<string, TangibleWidget>;
-  /** Maximum processing rate. Rendering remains independent. @defaultValue 30 */
+  /** Maximum processing rate. Rendering remains independent. @defaultValue 60 */
   trackingFps?: number;
   /** Pose low-pass time constant in milliseconds. Higher values smooth more but add lag; 0 disables filtering. @defaultValue 40 */
   poseSmoothingMs?: number;
@@ -55,8 +55,8 @@ export interface TangibleWidgetsOptions {
   maxReprojectionErrorPx?: number;
   /** Optional device camera profile; uses SDK device detection by default. */
   cameraProfile?: string;
-  /** Optional preview hook, called at most twice per second plus registration. */
-  onCameraFrame?: (image: ImageData, region: TangibleRegion) => void;
+  /** Optional image hook, called once after successful registration. */
+  onRegistrationImage?: (image: ImageData) => void;
   /** OpenCV runtime URL. Override for same-origin or offline deployment. */
   assets?: Partial<TangibleAssets>;
 }
@@ -87,8 +87,7 @@ export type TangibleWorkerRequest =
       bitmap?: ImageBitmap;
       /** fx, fy, cx, cy at this frame's image resolution. */
       intrinsics: number[];
-      preview: boolean;
-      previewOnly: boolean;
+      includeRegistrationImage: boolean;
       /** Explicit registration only. Loss never selects a new surface automatically. */
       registration?: TangibleRegion;
     }
@@ -106,5 +105,5 @@ export type TangibleWorkerReply =
       processingMs: number;
       featureCount: number;
       status: string;
-      preview?: {pixels: ArrayBuffer; width: number; height: number};
+      registrationImage?: {pixels: ArrayBuffer; width: number; height: number};
     };

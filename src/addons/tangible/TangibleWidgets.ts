@@ -72,7 +72,6 @@ export class TangibleWidgets extends Script {
   private capturing = false;
   private rawCaptureFrame: CaptureFrame | null = null;
   private lastRequestAt = -Infinity;
-  private lastPreviewAt = -Infinity;
   private lastPoseAt = -Infinity;
   private lastDepthVersion = -1;
   private lastDepthAt = -Infinity;
@@ -105,7 +104,7 @@ export class TangibleWidgets extends Script {
         'TangibleWidgets requires at least one widget ID and factory.'
       );
     }
-    const fps = options.trackingFps ?? 30;
+    const fps = options.trackingFps ?? 60;
     this.poseSmoothingMs = options.poseSmoothingMs ?? 40;
     if (!Number.isFinite(this.poseSmoothingMs) || this.poseSmoothingMs < 0)
       throw new RangeError('poseSmoothingMs must be finite and non-negative.');
@@ -185,7 +184,10 @@ export class TangibleWidgets extends Script {
     this.tracking = true;
     this.registrationPending = true;
     this.registrationStartedAt = performance.now();
-    this.hide('registering', 'Hold the surface inside the preview box still.');
+    this.hide(
+      'registering',
+      'Hold the surface in the centre of your view still.'
+    );
     return true;
   }
 
@@ -239,7 +241,7 @@ export class TangibleWidgets extends Script {
       now - this.registrationStartedAt > 10000
     )
       this.stopTracking(
-        'Registration timed out. Keep a textured, opaque surface in the box and try again.'
+        'Registration timed out. Keep a textured, opaque surface in the centre of your view and try again.'
       );
     const camera = this.engine.deviceCamera!;
     const mesh = this.depth.depthMesh;
@@ -258,15 +260,11 @@ export class TangibleWidgets extends Script {
     }
     if (
       !this.ready ||
-      (!this.tracking && !this.options.onCameraFrame) ||
+      !this.tracking ||
       this.inFlight ||
       this.capturing ||
       now - this.lastRequestAt <
-        (this.tracking
-          ? this.reference.size
-            ? this.trackingInterval
-            : 100
-          : 500)
+        (this.reference.size ? this.trackingInterval : 100)
     )
       return;
     if (
@@ -418,7 +416,12 @@ export class TangibleWidgets extends Script {
 
   private submit(image: ImageData | ImageBitmap, frame: CaptureFrame) {
     const bitmap = 'data' in image ? undefined : image;
-    if (!this.worker || this.inFlight || this.state === 'error') {
+    if (
+      !this.worker ||
+      !this.tracking ||
+      this.inFlight ||
+      this.state === 'error'
+    ) {
       bitmap?.close();
       return;
     }
@@ -426,7 +429,7 @@ export class TangibleWidgets extends Script {
       if (this.registrationPending && !frame.depth?.sample(0.5, 0.5)) {
         bitmap?.close();
         this.retryRegistration(
-          'Waiting for depth at the box centre. Hold an opaque surface still.'
+          'Waiting for depth at the image centre. Hold an opaque surface still.'
         );
         return;
       }
@@ -434,11 +437,6 @@ export class TangibleWidgets extends Script {
       const registration = this.registrationPending
         ? this.imageRegion(image.width, image.height)
         : undefined;
-      const preview =
-        !!this.options.onCameraFrame &&
-        (this.registrationPending ||
-          performance.now() - this.lastPreviewAt >= 500);
-      if (preview) this.lastPreviewAt = performance.now();
       this.inFlight = {
         id,
         frame,
@@ -465,8 +463,7 @@ export class TangibleWidgets extends Script {
             ((1 - p[8]) * image.width) / 2,
             ((1 + p[9]) * image.height) / 2,
           ],
-          preview,
-          previewOnly: !this.tracking,
+          includeRegistrationImage: !!this.options.onRegistrationImage,
         } satisfies TangibleWorkerRequest,
         bitmap ? [bitmap] : [pixels!]
       );
@@ -497,13 +494,6 @@ export class TangibleWidgets extends Script {
     if (!request || request.id !== reply.requestId) return;
     this.inFlight = null;
     if (request.epoch !== this.epoch) return;
-    if (reply.preview && this.options.onCameraFrame) {
-      const {pixels, width, height} = reply.preview;
-      this.options.onCameraFrame(
-        new ImageData(new Uint8ClampedArray(pixels), width, height),
-        this.imageRegion(width, height)
-      );
-    }
     if (!this.tracking) return;
     this.diagnostics.processingMs = reply.processingMs;
     this.diagnostics.imageFeatureCount = reply.featureCount;
@@ -529,6 +519,16 @@ export class TangibleWidgets extends Script {
         if (!this.reference.size) this.retryRegistration(reply.status);
         else this.stopTracking(reply.status);
       } else this.applyObservation(reply.observation, request.frame);
+      if (
+        this.state === 'tracked' &&
+        reply.registrationImage &&
+        this.options.onRegistrationImage
+      ) {
+        const {pixels, width, height} = reply.registrationImage;
+        this.options.onRegistrationImage(
+          new ImageData(new Uint8ClampedArray(pixels), width, height)
+        );
+      }
     } catch (error) {
       this.fail(String(error));
     }
@@ -595,7 +595,7 @@ export class TangibleWidgets extends Script {
         'Waiting for depth at the registration centre.'
       );
     const range = centreDepth.distanceTo(depth.cameraPosition);
-    // Register the surface at the box centre, excluding depth far behind it.
+    // Register the surface at the image centre, excluding depth far behind it.
     const foreground = samples.filter(
       (item) =>
         Math.abs(item.point.distanceTo(depth.cameraPosition) - range) < 0.15

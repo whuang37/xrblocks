@@ -56,7 +56,7 @@ tries camera/depth frames for up to 10 seconds. Hold the object still until
 
 The registration square spans 52% of the shorter image dimension, matching the
 paper's approximate central region. Fill that square with one textured surface.
-The demo draws the exact square in its camera preview. It is not a segmentation
+The demo has no camera preview. It is not a segmentation
 mask and does not find the nearest object across the whole scene.
 
 OpenCV extracts up to 100 features inside the square. Registration requires at
@@ -111,14 +111,16 @@ uses estimated timing and device calibration. That approximation can cause drift
 or poor depth matches during motion. Clear camera pixels and accurate alignment
 remain necessary; removing the detector does not solve camera calibration.
 
-Camera input is capped at 480 pixels wide and tracking at 30 updates/second.
+Camera input is capped at 480 pixels wide and tracking at 60 updates/second.
 There is at most one worker request in flight. Where ImageBitmap and
 OffscreenCanvas are available, the video path transfers a resized bitmap and
 converts pixels inside the worker. Raw XR capture and unsupported video paths
 still use main-thread pixel readback. Pose solving uses CPU WASM, not the GPU.
 
-Preview captures run at most twice per second. Idle previews skip tracking.
-`onCameraFrame(image, region)` receives preview pixels. Diagnostics report
+Inactive tracking does not capture camera frames. No preview is rendered.
+`onRegistrationImage(image)` optionally receives the successful registration
+image once, for uses such as the demo label. Tracking frames return only feature
+and pose data. Diagnostics report
 registered depth features, current image features, inliers, reprojection error
 in pixels, capture latency, depth indexing time, worker time, and image age.
 Depth age grows after registration by design. These timings are not a complete

@@ -76,7 +76,7 @@ function register(gray: CvMat, region: TangibleRegion) {
     cv.goodFeaturesToTrack(gray, found, 100, 0.015, 6, mask);
     featureCount = found.rows;
     if (found.rows < 12) {
-      messageStatus = `Only ${found.rows} image features in the box; need 12. Aim at more texture and register again.`;
+      messageStatus = `Only ${found.rows} image features in the centre of your view; need 12. Aim at more texture and register again.`;
       return;
     }
     points = found.clone();
@@ -341,28 +341,14 @@ function processFrame(
       message.height
     );
   }
-  const preview = message.preview
-    ? {
-        pixels: image.data.buffer as ArrayBuffer,
-        width: image.width,
-        height: image.height,
-      }
-    : undefined;
-  if (message.previewOnly) {
-    scope.postMessage(
-      {
-        type: 'result',
-        requestId: message.requestId,
-        observation: null,
-        processingMs: performance.now() - started,
-        featureCount: 0,
-        status: messageStatus,
-        preview,
-      },
-      preview ? [preview.pixels] : []
-    );
-    return;
-  }
+  const registrationImage =
+    message.registration && message.includeRegistrationImage
+      ? {
+          pixels: image.data.buffer as ArrayBuffer,
+          width: image.width,
+          height: image.height,
+        }
+      : undefined;
   const rgba = cv.matFromImageData(image);
   let gray: CvMat | null = new cv.Mat();
   try {
@@ -393,9 +379,9 @@ function processFrame(
         processingMs,
         featureCount,
         status: messageStatus,
-        preview,
+        registrationImage,
       },
-      preview ? [preview.pixels] : []
+      registrationImage ? [registrationImage.pixels] : []
     );
   } finally {
     rgba.delete();

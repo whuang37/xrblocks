@@ -137,10 +137,6 @@ class ObjectWidget extends xb.Script {
 class ObjectWidgetsDemo extends xb.Script {
   constructor() {
     super();
-    this.previewCanvas = document.createElement('canvas');
-    this.previewTexture = new THREE.CanvasTexture(this.previewCanvas);
-    this.previewTexture.colorSpace = THREE.SRGBColorSpace;
-    this.lastPreview = -Infinity;
     this.widgetIds = ['reading', 'timer', 'tilt'];
     this.selection = 0;
     this.registrationImage = null;
@@ -148,58 +144,13 @@ class ObjectWidgetsDemo extends xb.Script {
     this.labelTimeout = null;
     this.labelStatus = 'Object label: available after registration';
     this.labelAttempted = false;
-    this.pixelStats = 'Waiting for camera pixels';
     this.tracker = new TangibleWidgets({
-      onCameraFrame: (image, region) => {
-        // Preserve only registration input, before the addon's transfer.
-        if (this.tracker.state === 'registering') {
-          this.registrationImage = {
-            pixels: image.data.slice().buffer,
-            width: image.width,
-            height: image.height,
-          };
-        }
-        if (performance.now() - this.lastPreview < 250) return;
-        this.lastPreview = performance.now();
-        if (
-          this.previewCanvas.width !== image.width ||
-          this.previewCanvas.height !== image.height
-        ) {
-          // GPU texture storage cannot change size after its first upload.
-          this.previewTexture.dispose();
-          this.previewCanvas.width = image.width;
-          this.previewCanvas.height = image.height;
-          this.previewTexture = new THREE.CanvasTexture(this.previewCanvas);
-          this.previewTexture.colorSpace = THREE.SRGBColorSpace;
-          this.preview.material.map = this.previewTexture;
-        }
-        const context = this.previewCanvas.getContext('2d');
-        context.putImageData(image, 0, 0);
-        context.strokeStyle = ACCENT;
-        context.lineWidth = 3;
-        context.strokeRect(
-          region.u * image.width,
-          region.v * image.height,
-          region.width * image.width,
-          region.height * image.height
-        );
-        this.previewTexture.needsUpdate = true;
-        this.preview.scale.y = image.height / image.width;
-        this.preview.visible = true;
-        let min = 255,
-          max = 0,
-          sum = 0,
-          count = 0;
-        // Sample the input before its buffer is transferred to the worker.
-        for (let i = 0; i < image.data.length; i += 256) {
-          const value =
-            (image.data[i] + image.data[i + 1] + image.data[i + 2]) / 3;
-          min = Math.min(min, value);
-          max = Math.max(max, value);
-          sum += value;
-          count++;
-        }
-        this.pixelStats = `${image.width}×${image.height}: brightness ${Math.round(min)}–${Math.round(max)}, mean ${Math.round(sum / count)} / 255`;
+      onRegistrationImage: (image) => {
+        this.registrationImage = {
+          pixels: image.data.buffer,
+          width: image.width,
+          height: image.height,
+        };
       },
       widgets: Object.fromEntries(
         this.widgetIds.map((id) => [
@@ -208,14 +159,7 @@ class ObjectWidgetsDemo extends xb.Script {
         ])
       ),
     });
-    this.preview = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.48, 0.48),
-      new THREE.MeshBasicMaterial({map: this.previewTexture, toneMapped: false})
-    );
-    this.preview.position.set(-0.42, 1.4, -1.05);
-    this.preview.name = 'TrackingCameraPreview';
-    this.preview.visible = false;
-    this.add(this.tracker, this.preview);
+    this.add(this.tracker);
     this.lastDashboard = 0;
   }
   init() {
@@ -225,13 +169,13 @@ class ObjectWidgetsDemo extends xb.Script {
     panel.add(text('OBJECT WIDGETS', 25, ACCENT));
     panel.add(
       text(
-        'Fill the green box with a textured surface.\nChoose a widget, then press Register.\nMove and tilt the object after attachment.',
+        'Hold a textured surface in the centre of your view.\nChoose a widget, then press Register.\nMove and tilt the object after attachment.',
         19
       )
     );
     panel.add(
       text(
-        'Keep the box on one rigid surface, roughly 0.4–1.2 m away. Curved surfaces work too.',
+        'Keep one rigid surface centred, roughly 0.4–1.2 m away. Curved surfaces work too.',
         16,
         MUTED
       )
@@ -317,9 +261,6 @@ class ObjectWidgetsDemo extends xb.Script {
   dispose() {
     this.stopLabelWorker();
     this.registrationImage = null;
-    this.previewTexture.dispose();
-    this.preview.geometry.dispose();
-    this.preview.material.dispose();
   }
   update() {
     if (this.tracker.state === 'tracked' && !this.labelAttempted)
@@ -339,7 +280,6 @@ Tracking worker ${d.processingMs.toFixed(0)} ms
 Image age ${d.observationAgeMs.toFixed(0)} ms
 Depth: registration only · fit ${d.reprojectionErrorPx.toFixed(1)} px
 Camera timing: ${d.timing}
-Pixels: ${this.pixelStats}
 Last issue: ${d.lastFailure}`;
   }
 }

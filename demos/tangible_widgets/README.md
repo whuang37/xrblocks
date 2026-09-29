@@ -9,8 +9,8 @@ camera patch and XR depth. It does not wait for object recognition.
 2. Open `/demos/tangible_widgets/?debug=1` through your HTTPS development host.
 3. Enter AR and grant camera permissions.
 4. Use **Change widget** to choose reading, timer, or tilt.
-5. Look at the left camera preview. Fill its green square with a textured surface
-   about 0.4–1.2 m away. Keep the square off your fingers and background.
+5. Hold a textured surface in the centre of your view, about 0.4–1.2 m away.
+   Keep fingers and background outside the central patch. There is no camera preview.
 6. Press **Register centre patch**, then hold still until the status is `tracked`.
    Registration retries missing depth for up to 10 seconds; do not keep pressing it.
 7. Move and tilt the object. The panel should follow the registered surface.
@@ -21,7 +21,7 @@ can attach to a book, decorated cup, labelled bottle, or another suitable surfac
 Flat panels sit above curved surfaces; they do not wrap around them.
 
 If tracking is lost, aim at the surface and register again. **Clear attachment**
-returns to preview mode. A new object is never chosen automatically after loss.
+stops camera capture. A new object is never chosen automatically after loss.
 
 ## Optional object label
 
@@ -34,9 +34,9 @@ It is demo code, not part of the tangible addon or its API.
 
 ## Diagnosis
 
-The preview shows the actual camera input; the green outline is added only to the
-preview. **Pixels** shows sampled brightness from 0–255. All-zero values suggest
-black camera pixels. A black preview with varied values suggests a display issue.
+Tracking requests up to 60 camera updates per second, with one frame in flight.
+Actual speed depends on the camera and processing time. No camera preview is
+rendered or uploaded to a display texture.
 
 Compare image features, depth features, and fit inliers. At least 12 valid depth
 features are required to register. The **Last issue** line retains the failure

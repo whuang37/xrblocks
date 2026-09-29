@@ -141,15 +141,41 @@ class ObjectWidgetsDemo extends xb.Script {
     this.previewTexture = new THREE.CanvasTexture(this.previewCanvas);
     this.previewTexture.colorSpace = THREE.SRGBColorSpace;
     this.lastPreview = -Infinity;
+    this.pixelStats = 'Waiting for camera pixels';
     this.tracker = new TangibleWidgets({
       onCameraFrame: (image) => {
         if (performance.now() - this.lastPreview < 1000) return;
         this.lastPreview = performance.now();
-        this.previewCanvas.width = image.width;
-        this.previewCanvas.height = image.height;
+        if (
+          this.previewCanvas.width !== image.width ||
+          this.previewCanvas.height !== image.height
+        ) {
+          // GPU texture storage cannot change size after its first upload.
+          this.previewTexture.dispose();
+          this.previewCanvas.width = image.width;
+          this.previewCanvas.height = image.height;
+          this.previewTexture = new THREE.CanvasTexture(this.previewCanvas);
+          this.previewTexture.colorSpace = THREE.SRGBColorSpace;
+          this.preview.material.map = this.previewTexture;
+        }
         this.previewCanvas.getContext('2d').putImageData(image, 0, 0);
         this.previewTexture.needsUpdate = true;
         this.preview.scale.y = image.height / image.width;
+        this.preview.visible = true;
+        let min = 255,
+          max = 0,
+          sum = 0,
+          count = 0;
+        // Sample the input before its buffer is transferred to the worker.
+        for (let i = 0; i < image.data.length; i += 256) {
+          const value =
+            (image.data[i] + image.data[i + 1] + image.data[i + 2]) / 3;
+          min = Math.min(min, value);
+          max = Math.max(max, value);
+          sum += value;
+          count++;
+        }
+        this.pixelStats = `${image.width}×${image.height}: brightness ${Math.round(min)}–${Math.round(max)}, mean ${Math.round(sum / count)} / 255`;
       },
       widgets: Object.fromEntries(
         ['book', 'cup', 'bottle'].map((label) => [
@@ -164,6 +190,7 @@ class ObjectWidgetsDemo extends xb.Script {
     );
     this.preview.position.set(-0.42, 1.4, -1.05);
     this.preview.name = 'TrackingCameraPreview';
+    this.preview.visible = false;
     this.add(this.tracker, this.preview);
     this.lastDashboard = 0;
   }
@@ -219,6 +246,7 @@ Worker ${d.processingMs.toFixed(0)} ms: detect ${d.recognitionMs.toFixed(0)} / f
 Image age ${d.observationAgeMs.toFixed(0)} ms
 Depth age ${Number.isFinite(d.depthAgeMs) ? d.depthAgeMs.toFixed(0) : '—'} ms · fit ${(d.residualMeters * 1000).toFixed(0)} mm
 Camera timing: ${d.timing}
+Pixels: ${this.pixelStats}
 Model: ${d.recognition.candidates.map((item) => `${item.label} ${Math.round(item.score * 100)}%`).join(', ') || 'nothing above 20%'}
 Last issue: ${d.lastFailure}`;
   }

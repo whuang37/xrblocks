@@ -67,3 +67,9 @@ from the latest detection; **status** gives the exact rejection reason. A
 recognized book with too few image features now reports that failure instead
 of saying only “sees none.” Lower-score and unsupported labels are diagnostic
 only; they cannot create a widget.
+
+**Pixels** reports sampled input brightness on a 0–255 scale, before the worker
+receives the image. A range and mean of zero indicate that the sampled camera
+pixels are black; varied values with a black panel instead point to a preview
+rendering problem. The preview stays hidden until a frame arrives and recreates
+its GPU texture when the image dimensions change.

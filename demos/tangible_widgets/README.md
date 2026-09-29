@@ -34,7 +34,7 @@ It is demo code, not part of the tangible addon or its API.
 
 ## Diagnosis
 
-Tracking requests up to 60 camera updates per second, with one frame in flight.
+Tracking requests up to 30 camera updates per second, with one frame in flight.
 Actual speed depends on the camera and processing time. No camera preview is
 rendered or uploaded to a display texture.
 

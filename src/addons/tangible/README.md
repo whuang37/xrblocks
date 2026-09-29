@@ -111,7 +111,7 @@ uses estimated timing and device calibration. That approximation can cause drift
 or poor depth matches during motion. Clear camera pixels and accurate alignment
 remain necessary; removing the detector does not solve camera calibration.
 
-Camera input is capped at 480 pixels wide and tracking at 60 updates/second.
+Camera input is capped at 480 pixels wide and tracking at 30 updates/second.
 There is at most one worker request in flight. Where ImageBitmap and
 OffscreenCanvas are available, the video path transfers a resized bitmap and
 converts pixels inside the worker. Raw XR capture and unsupported video paths

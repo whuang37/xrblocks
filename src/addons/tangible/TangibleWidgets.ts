@@ -104,7 +104,7 @@ export class TangibleWidgets extends Script {
         'TangibleWidgets requires at least one widget ID and factory.'
       );
     }
-    const fps = options.trackingFps ?? 60;
+    const fps = options.trackingFps ?? 30;
     this.poseSmoothingMs = options.poseSmoothingMs ?? 40;
     if (!Number.isFinite(this.poseSmoothingMs) || this.poseSmoothingMs < 0)
       throw new RangeError('poseSmoothingMs must be finite and non-negative.');

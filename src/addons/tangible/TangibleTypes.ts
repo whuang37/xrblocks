@@ -45,7 +45,7 @@ export interface TangibleWidget {
 export interface TangibleWidgetsOptions {
   /** Application-defined widget IDs, for example `reading`, `timer`, or `tilt`. */
   widgets: Record<string, TangibleWidget>;
-  /** Maximum processing rate. Rendering remains independent. @defaultValue 60 */
+  /** Maximum processing rate. Rendering remains independent. @defaultValue 30 */
   trackingFps?: number;
   /** Pose low-pass time constant in milliseconds. Higher values smooth more but add lag; 0 disables filtering. @defaultValue 40 */
   poseSmoothingMs?: number;

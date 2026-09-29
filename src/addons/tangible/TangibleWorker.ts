@@ -1,10 +1,7 @@
-// This entry must remain a classic worker: both WASM loaders use importScripts.
-// All imports are types. The SDK build emits a standalone script for this entry.
-import type {ObjectDetector, FilesetResolver} from '@mediapipe/tasks-vision';
+// Classic worker: OpenCV's WASM loader uses importScripts.
 import type {CvMat, OpenCv} from './OpenCvTypes';
 import type {
-  TangibleObservation,
-  TangibleRecognition,
+  TangibleRegion,
   TangibleWorkerReply,
   TangibleWorkerRequest,
 } from './TangibleTypes';
@@ -17,23 +14,14 @@ const scope = self as unknown as {
   close(): void;
 };
 let cv: OpenCv;
-let detector: ObjectDetector | null = null;
 let previousGray: CvMat | null = null;
 let points: CvMat | null = null;
 let pointIds: number[] = [];
-let target: Omit<TangibleObservation, 'features'> | null = null;
-let nextTargetId = 0;
-let labels: string[] = [];
-let lastRecognition = -Infinity;
-let recognitionIntervalMs = 1500;
+let targetId = 0;
 let lastFrameEndTime = -Infinity;
 let disposed = false;
-let recognition: TangibleRecognition = {
-  candidates: [],
-  selectedLabel: null,
-  featureCount: 0,
-  reason: 'Recognition has not run yet.',
-};
+let featureCount = 0;
+let messageStatus = 'Aim at a textured surface and press Register.';
 
 function reset() {
   previousGray?.delete();
@@ -41,20 +29,14 @@ function reset() {
   previousGray = null;
   points = null;
   pointIds = [];
-  target = null;
-  lastRecognition = -Infinity;
+  featureCount = 0;
   lastFrameEndTime = -Infinity;
 }
 
-function initialize(
-  message: Extract<TangibleWorkerRequest, {type: 'initialize'}>
-) {
-  labels = message.labels;
-  recognitionIntervalMs = message.recognitionIntervalMs;
-  // This pinned build is a classic UMD script with a self-resolving thenable.
-  // Resolve a void promise instead of awaiting cv, which would recurse forever.
-  scope.importScripts(message.assets.openCvUrl);
-  const ready = new Promise<void>((resolve) => {
+async function initialize(assets: {openCvUrl: string}) {
+  scope.importScripts(assets.openCvUrl);
+  // OpenCV exposes a self-resolving thenable; resolve void instead of awaiting cv.
+  await new Promise<void>((resolve) => {
     if (scope.cv.then)
       scope.cv.then((value) => {
         cv = value;
@@ -65,121 +47,36 @@ function initialize(
       resolve();
     }
   });
-  return ready.then(async () => {
-    const vision = (await import(
-      /* @vite-ignore */ message.assets.visionModuleUrl
-    )) as {
-      ObjectDetector: typeof ObjectDetector;
-      FilesetResolver: typeof FilesetResolver;
-    };
-    const files = await vision.FilesetResolver.forVisionTasks(
-      message.assets.visionWasmUrl
-    );
-    const created = await vision.ObjectDetector.createFromOptions(files, {
-      baseOptions: {modelAssetPath: message.assets.modelUrl, delegate: 'CPU'},
-      runningMode: 'IMAGE',
-      // Keep rejected categories and scores visible for diagnosis. Acceptance
-      // remains at 0.55 below; this does not relax object registration.
-      scoreThreshold: 0.2,
-      maxResults: -1,
-    });
-    if (disposed) {
-      created.close();
-      return;
-    }
-    detector = created;
-    scope.postMessage({type: 'ready'});
-  });
+  if (!disposed) scope.postMessage({type: 'ready'});
 }
 
-function recognize(image: ImageData, gray: CvMat, timeMs: number) {
-  // Recognition selects a widget once. Optical flow owns tracking after that.
-  if (target || timeMs - lastRecognition < recognitionIntervalMs) return;
-  lastRecognition = timeMs;
-  const results = detector!.detect(image).detections;
-  recognition = {
-    candidates: results
-      .flatMap((item) =>
-        item.categories.slice(0, 1).map((category) => ({
-          label: category.categoryName,
-          score: category.score,
-        }))
-      )
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 5),
-    selectedLabel: null,
-    featureCount: 0,
-    reason: 'No detection reached 20% confidence. Check the camera preview.',
-  };
-  const supported = results.filter(
-    (item) =>
-      item.boundingBox && labels.includes(item.categories[0]?.categoryName)
-  );
-  const detections = supported.filter(
-    (item) => item.categories[0].score >= 0.55
-  );
-  if (!detections.length) {
-    const best = supported.sort(
-      (a, b) => b.categories[0].score - a.categories[0].score
-    )[0];
-    if (best) {
-      recognition.selectedLabel = best.categories[0].categoryName;
-      recognition.reason = `${recognition.selectedLabel} scored ${Math.round(best.categories[0].score * 100)}%; need 55%.`;
-    } else if (results.length) {
-      recognition.reason = `Detected other categories; need ${labels.join(', ')}.`;
-    }
-    return;
-  }
-  // Prefer a supported object near the centre, with a useful image footprint.
-  detections.sort((a, b) => {
-    const rank = (item: typeof a) => {
-      const box = item.boundingBox!;
-      const dx = (box.originX + box.width / 2) / image.width - 0.5;
-      const dy = (box.originY + box.height / 2) / image.height - 0.5;
-      return item.categories[0].score - 0.5 * (dx * dx + dy * dy);
-    };
-    return rank(b) - rank(a);
-  });
-  const detection = detections.find(
-    (item) => item.boundingBox!.width >= 50 && item.boundingBox!.height >= 50
-  );
-  if (!detection) {
-    recognition.selectedLabel = detections[0].categories[0].categoryName;
-    recognition.reason =
-      'Object box is smaller than 50 × 50 pixels. Move closer.';
-    return;
-  }
-  recognition.selectedLabel = detection.categories[0].categoryName;
-  const box = detection.boundingBox!;
-  const mask = cv.Mat.zeros(image.height, image.width, cv.CV_8UC1);
+function register(gray: CvMat, region: TangibleRegion) {
+  reset();
+  const mask = cv.Mat.zeros(gray.rows, gray.cols, cv.CV_8UC1);
   const found = new cv.Mat();
   try {
-    const x0 = Math.max(0, Math.ceil(box.originX + box.width * 0.15));
+    const x0 = Math.max(0, Math.ceil(region.u * gray.cols));
     const x1 = Math.min(
-      image.width,
-      Math.floor(box.originX + box.width * 0.85)
+      gray.cols,
+      Math.floor((region.u + region.width) * gray.cols)
     );
-    const y0 = Math.max(0, Math.ceil(box.originY + box.height * 0.15));
+    const y0 = Math.max(0, Math.ceil(region.v * gray.rows));
     const y1 = Math.min(
-      image.height,
-      Math.floor(box.originY + box.height * 0.85)
+      gray.rows,
+      Math.floor((region.v + region.height) * gray.rows)
     );
     for (let y = y0; y < y1; y++)
-      mask.data.fill(255, y * image.width + x0, y * image.width + x1);
+      mask.data.fill(255, y * gray.cols + x0, y * gray.cols + x1);
     cv.goodFeaturesToTrack(gray, found, 100, 0.015, 6, mask);
-    recognition.featureCount = found.rows;
+    featureCount = found.rows;
     if (found.rows < 12) {
-      recognition.reason = `${recognition.selectedLabel} detected, but only ${found.rows} image features; need 12.`;
+      messageStatus = `Only ${found.rows} image features in the box; need 12. Aim at more texture and register again.`;
       return;
     }
-    recognition.reason = `${recognition.selectedLabel}: image features ready for depth registration.`;
-    points?.delete();
     points = found.clone();
     pointIds = Array.from({length: found.rows}, (_, i) => i);
-    target = {
-      targetId: ++nextTargetId,
-      label: detection.categories[0].categoryName,
-    };
+    targetId++;
+    messageStatus = 'Image patch registered.';
   } finally {
     mask.delete();
     found.delete();
@@ -187,7 +84,7 @@ function recognize(image: ImageData, gray: CvMat, timeMs: number) {
 }
 
 function track(gray: CvMat) {
-  if (!previousGray || !points || !target) return;
+  if (!previousGray || !points) return;
   const next = new cv.Mat();
   const back = new cv.Mat();
   const status = new cv.Mat();
@@ -242,11 +139,14 @@ function track(gray: CvMat) {
     }
     if (ids.length < 12) {
       reset();
+      messageStatus =
+        'Image tracking lost. Aim at the surface and register again.';
       return;
     }
     points.delete();
     points = cv.matFromArray(ids.length, 1, cv.CV_32FC2, values);
     pointIds = ids;
+    featureCount = ids.length;
   } finally {
     for (const mat of [next, back, status, backStatus, errors, backErrors])
       mat.delete();
@@ -256,66 +156,53 @@ function track(gray: CvMat) {
 function processFrame(
   message: Extract<TangibleWorkerRequest, {type: 'frame'}>
 ) {
+  if (!cv || disposed) return;
   const started = performance.now();
-  let opticalFlowMs = 0;
-  let recognitionMs = 0;
-  if (!cv || !detector || disposed) return;
   if (
     previousGray &&
     (message.timeMs - lastFrameEndTime > 600 ||
       previousGray.cols !== message.width ||
       previousGray.rows !== message.height)
-  )
+  ) {
     reset();
-  const reply = (observation: TangibleObservation | null) => {
+    messageStatus =
+      'Camera frames changed or paused. Register the surface again.';
+  }
+  const rgba = cv.matFromImageData(
+    new ImageData(
+      new Uint8ClampedArray(message.pixels),
+      message.width,
+      message.height
+    )
+  );
+  let gray: CvMat | null = new cv.Mat();
+  try {
+    cv.cvtColor(rgba, gray, cv.COLOR_RGBA2GRAY);
+    if (message.registration) register(gray, message.registration);
+    else track(gray);
+    previousGray?.delete();
+    previousGray = points ? gray : null;
+    if (points) gray = null;
+    const observation = points
+      ? {
+          targetId,
+          features: pointIds.map((id, i) => ({
+            id,
+            u: points!.data32F[i * 2] / message.width,
+            v: points!.data32F[i * 2 + 1] / message.height,
+          })),
+        }
+      : null;
     const processingMs = performance.now() - started;
-    // Do not count our own inference time as an idle camera gap. A slow
-    // first detection must be allowed to feed the next optical-flow frame.
     lastFrameEndTime = message.timeMs + processingMs;
     scope.postMessage({
       type: 'result',
       requestId: message.requestId,
       observation,
       processingMs,
-      opticalFlowMs,
-      recognitionMs,
-      recognition,
+      featureCount,
+      status: messageStatus,
     });
-  };
-  if (!target && message.timeMs - lastRecognition < recognitionIntervalMs) {
-    reply(null);
-    return;
-  }
-  const image = new ImageData(
-    new Uint8ClampedArray(message.pixels),
-    message.width,
-    message.height
-  );
-  const rgba = cv.matFromImageData(image);
-  let gray: CvMat | null = new cv.Mat();
-  try {
-    cv.cvtColor(rgba, gray, cv.COLOR_RGBA2GRAY);
-    const flowStarted = performance.now();
-    track(gray);
-    opticalFlowMs = performance.now() - flowStarted;
-    const recognitionStarted = performance.now();
-    recognize(image, gray, message.timeMs);
-    recognitionMs = performance.now() - recognitionStarted;
-    previousGray?.delete();
-    previousGray = target ? gray : null;
-    if (target) gray = null; // Transfer ownership; avoid copying the full image.
-    const observation =
-      target && points
-        ? {
-            ...target,
-            features: pointIds.map((id, i) => ({
-              id,
-              u: points!.data32F[i * 2] / message.width,
-              v: points!.data32F[i * 2 + 1] / message.height,
-            })),
-          }
-        : null;
-    reply(observation);
   } finally {
     rgba.delete();
     gray?.delete();
@@ -326,7 +213,7 @@ scope.onmessage = (event) => {
   const message = event.data;
   try {
     if (message.type === 'initialize') {
-      void initialize(message).catch((error) => {
+      void initialize(message.assets).catch((error) => {
         if (!disposed)
           scope.postMessage({type: 'error', message: String(error)});
       });
@@ -335,8 +222,6 @@ scope.onmessage = (event) => {
     else if (message.type === 'dispose') {
       disposed = true;
       reset();
-      detector?.close();
-      detector = null;
       scope.postMessage({type: 'disposed'});
       scope.close();
     }

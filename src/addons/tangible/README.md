@@ -1,16 +1,13 @@
-# Tangible object widgets
+# Tangible surface widgets
 
-An experimental, depth-assisted object tracker. Show a supported object type,
-register its visible textured patch automatically, and attach an ordinary
-XR Blocks widget to it. No physical dimensions, printed marker, or AI key are
-needed. Both flat and curved **rigid** objects can supply the tracked points.
+Register a textured surface at the camera centre, then attach any XR Blocks
+widget to it. This follows the central-image registration and KLT tracking
+approach in [AhUI, section 3.1](https://duruofei.com/papers/Du_OpportunisticInterfacesForAugmentedReality-TransformingEverydayObjectsIntoTangible6DoFInterfacesUsingAdHocUI_CHI2022.pdf),
+with XR depth and rigid 3D fitting in place of its planar pose solver.
 
-Recognition chooses the widget while searching. It stops while image features
-are tracked and resumes after loss or manual reset. OpenCV
-WASM tracks image features in a worker. The SDK pairs those features with XR
-depth points and fits a rigid transform in metres. This version requires fresh
-depth throughout tracking. It does not implement the paper's depth-free IPPE
-mode or claim native performance parity.
+The addon has no object detector, category names, confidence threshold, or
+recognition model. It loads only OpenCV JS/WASM. Flat and curved rigid surfaces
+can work, provided they supply enough image features and valid depth.
 
 ## Setup
 
@@ -20,14 +17,13 @@ import {TangibleWidgets} from 'xrblocks/addons/tangible/index.js';
 
 const tracker = new TangibleWidgets({
   widgets: {
-    book: {
+    timer: {
       create() {
         const panel = new xb.UICard({
           size: {width: 0.25, height: 0.2},
           manipulation: false,
-          style: {padding: 12, backgroundColor: '#142230'},
         });
-        panel.add(new xb.UIText({text: 'Reading companion'}));
+        panel.add(new xb.UIText({text: 'My timer'}));
         panel.position.z = 0.025;
         return panel;
       },
@@ -45,174 +41,87 @@ options.depth.depthMesh.updateFullResolutionGeometry = true;
 options.depth.depthMesh.depthMeshUpdateFps = 30;
 options.enableReticles();
 await xb.init(options);
+
+// Call from a button or gesture when the tracker is ready and the surface is aimed.
+tracker.register('timer');
 ```
 
-This addon owns its recognizer; do not enable a second continuous object detector
-just for it. Nothing is loaded until the script initializes. Dependencies are
-injected through the engine registry. The base SDK has no new default workload.
+Widget IDs belong to the application. They do not describe or restrict the
+physical object. `register(id)` returns false while loading, after disposal, or
+on a fatal error; it throws for an unknown widget ID. A successful request
+captures the next available camera frame. Hold the object still until `tracked`.
 
-## Registration and attachment
+## Registration and tracking
 
-The default EfficientDet Lite0 model supplies category names such as `book`,
-`cup`, and `bottle`. `widgets` maps supported category names to factories. The
-tracker selects one supported object near the image centre and captures features
-inside an inset detection box. Hold a printed or textured face steady during
-registration. At least 12 usable image/depth features must span a surface.
+The registration square spans 52% of the shorter image dimension, matching the
+paper's approximate central region. Fill that square with one textured surface.
+The demo draws the exact square in its camera preview. It is not a segmentation
+mask and does not find the nearest object across the whole scene.
 
-`target` is the content parent. At registration its origin is the centroid of
-the measured visible patch, with X right, Y up, and +Z toward the viewer. Content
-then follows the estimated object translation and rotation. Put a flat panel at
-local Z = 0.025 to float it just above the registered patch, including on a cup
-or bottle. The widget does not wrap around the object, and the frame does not
-claim to be the object's exact geometric centre or top.
+OpenCV extracts up to 100 features inside the square. Registration requires at
+least 12 features with valid depth, within 15 cm of the depth at the square's
+centre. Missing centre depth or insufficient features reports a specific failure.
+Background beyond that depth band is excluded. Points on fingers or nearby
+background can still contaminate a registration; keep them outside the square.
 
-`patchSize` measures the extent of the registered visible features. It is not
-an estimate of the hidden back of the object or its full bounding box. Widget
-size is an application choice. The example uses a fixed readable panel size.
+The tracker follows matching image features and fits a rigid transform from their
+3D depth positions. Its full depth geometry must be enabled; the default coarse
+collision mesh is insufficient. It never fills missing depth with a guessed plane.
+This version needs fresh depth throughout tracking. It is not pure-depth tracking
+or an implementation of the paper's depth-free planar pose solver.
 
-The factory returns fresh content owned by the tracker. It is called on the
-first accepted registration or when the category changes. It is not called on
-every frame. `reset()` removes and disposes the content and restarts recognition.
-If content has application resources such as timers or textures, release them
-in its idempotent `dispose()` method. Do not share owned geometry/materials with
-unrelated scene objects.
+`target` is the widget's parent in metres. Its initial origin is the centroid of
+the registered points, with X right, Y up, and +Z toward the viewer. Put content
+at local Z = 0.025 for a flat panel above the patch, including on curved objects.
+`patchSize` measures the visible registered features, not the whole object.
 
-This is category recognition, not persistent recognition of a specific cup or
-book. After full loss, a newly recognized object receives a new registration.
-There is no saved object identity or front/back template library.
+`tilt` reports yaw/pitch relative to the neutral orientation, normalized to ±1 at
+30 degrees. `twist` reports local roll in radians. `recenter()` sets the current
+tracked orientation as neutral. Ordinary child buttons use XR Blocks ray/pinch
+input. The addon does not detect fingertip contact.
 
-## Interaction and validity
+Loss hides content and disables interaction. Brief stale observations can recover
+if feature tracking survives; full feature loss, a long camera gap, or failed
+registration requires another explicit `register(id)`. It does not automatically
+attach to a different surface. `reset()` clears content and returns to `idle`.
+Widget content is owned and disposed by the tracker.
 
-- Use ordinary child `UIButton`, slider, and other spatial UI controls. They use
-  the existing interaction system. Do not enable grab manipulation on the
-  tracked attachment: tracking owns that transform.
-- `tilt` provides normalized yaw/pitch from a neutral orientation, clamped at
-  30 degrees with a small central dead zone. `twist` is the local roll angle in
-  radians; it is not an unwrapped multi-turn dial.
-- `recenter()` makes the current measured orientation the neutral pose.
-- `state`, `status`, `label`, and `diagnostics` expose registration, validity,
-  point count, fit residual, worker duration, and observation/depth age.
-- On stale, missing, or inconsistent evidence, the attachment is hidden,
-  interaction is disabled, and motion controls return to zero. Timer widgets
-  can retain application state while hidden. Tracking never silently holds a
-  stale pose as a current observation.
+## Camera and performance
 
-The tracker uses rigid point registration, not a planar homography, so a
-textured bottle can be used as a 6DoF control. Plain, reflective, transparent,
-symmetric, small, or heavily occluded objects can fail. A category bounding box
-is not a segmentation mask: background or fingers can contaminate registration.
-Use a clear view of the object's textured face. Rotation that hides all registered
-features requires a new registration; uninterrupted 360-degree tracking is not
-supported.
+The raw XR camera path uses capture-frame pose and depth. The video-camera path
+uses estimated timing and device calibration. That approximation can cause drift
+or poor depth matches during motion. Clear camera pixels and accurate alignment
+remain necessary; removing the detector does not solve camera calibration.
 
-## Camera and depth alignment
+Camera input is capped at 480 pixels wide and tracking at 15 updates/second.
+There is at most one worker request in flight. Idle/lost preview captures run at
+4 fps with no worker tracking. `onCameraFrame(image, region)` can render a preview;
+copy pixels synchronously because their buffer may be transferred afterwards.
+The demo draws its preview at most four times per second.
 
-Use an Android XR browser that exposes both the environment camera and XR depth.
-The demo must be served in a secure context, normally HTTPS on a headset.
-WebAssembly support alone does not establish camera/depth availability.
+Diagnostics report image/depth features, inliers, fit residual, capture latency,
+depth indexing time, worker time, image/depth age, and the last failure.
+These timings are not a complete headset rendering profile.
 
-The raw WebXR camera path saves the matching XRView projection and pose with the
-capture-frame depth. The media-stream path uses the SDK's device camera profile
-and current depth; its timing is estimated. Diagnostics distinguish these paths.
-Camera/depth exposure times can differ and the media-stream profile is approximate,
-so fast object/head motion can cause misalignment. Hardware validation is still
-required. An ordinary webcam without depth cannot run this mode.
+The version-pinned OpenCV 4.12.0 general-purpose runtime is about 10 MB and is
+external to the SDK bundle. Override `assets.openCvUrl` to self-host it. No
+MediaPipe or model assets are loaded by this addon. Disposal requests worker
+shutdown, forces termination after 250 ms, and releases its depth lease.
 
-The depth index projects real depth-mesh vertices into RGB coordinates and keeps
-nearest visible points. It searches a small neighbourhood to accommodate coarse
-depth resolution. It does not fill large holes with an invented plane. Configure
-`patchHoles: false`; the example does this. A depth residual measures internal fit
-consistency, not absolute camera calibration accuracy.
+## Demo and checks
 
-Enable `updateFullResolutionGeometry: true`. The usual 40 by 40 collision mesh
-is too coarse for small handheld patches; this addon uses the full depth geometry
-and reports a setup error when full updates are disabled.
+Build with `npm run build:sdk`. Serve over HTTPS and open
+`/demos/tangible_widgets/?debug=1`. See [device steps](../../../demos/tangible_widgets/README.md).
+The demo may label an object once after registration in a separate worker. That
+optional code belongs to the demo; it cannot select, reject, or move an attachment.
 
-## Runtime assets and performance
-
-The default assets are version-pinned URLs for MediaPipe 0.10.34, EfficientDet
-Lite0 model version 1, and OpenCV 4.12.0. They download on first use, then recognition
-and tracking execute locally. No images are sent to a cloud inference service.
-Asset hosts still receive ordinary file requests.
-
-OpenCV uses a separate classic worker because the WASM loaders use
-`importScripts`. Deploy `build/addons/tangible/` together with the rest of the SDK
-build. No import-map entries are required inside the worker. The default OpenCV
-build is a general-purpose, approximately 10 MB JS/WASM asset, **not a custom SIMD
-build**. It is external to the SDK bundle. Override `assets` with self-hosted
-compatible runtime/model files, or an optimized OpenCV classic build exposing
-`Mat`, `goodFeaturesToTrack`, `cvtColor`, and `calcOpticalFlowPyrLK`.
-
-```js
-const tracker = new TangibleWidgets({
-  widgets,
-  assets: {
-    openCvUrl: '/vendor/opencv.js',
-    visionModuleUrl: '/vendor/vision_bundle.mjs',
-    visionWasmUrl: '/vendor/wasm',
-    modelUrl: '/vendor/efficientdet_lite0.tflite',
-  },
-});
-```
-
-One worker handles recognition and optical flow. There is at most one frame in
-flight; camera snapshots are capped at 480 pixels wide and 15 updates/second by
-default. While searching, captures run at the recognition interval (1.5 seconds
-by default). Duplicate media frames are skipped. Camera matrices are computed
-only for captures, and the worker retains the grayscale frame without copying it.
-Rigid pose fitting accepts an all-point fit immediately when every point agrees;
-outlier sampling is reserved for inconsistent measurements. Raw XR camera images
-are resized on the GPU before readback. Camera readback still occurs on the render
-thread, and depth indexing/rigid fitting run in TypeScript. Measure
-end-to-end latency and sustained frame rate on the target headset; this is a
-working first implementation, not a certified performance result.
-
-Disposal requests worker shutdown, forces termination after a 250 ms grace period,
-and releases the addon's depth lease and content. It does not stop the shared
-camera or other depth clients.
-
-## Demo and verification
-
-Run `npm run build:sdk`, then `npm run serve`. Open
-`/demos/tangible_widgets/` through your HTTPS development host on Android XR.
-The demo provides a book reading widget, cup timer, and bottle tilt control.
-It also exposes a diagnostics panel and registration/neutral buttons.
-See [demo instructions](../../../demos/tangible_widgets/README.md).
-
-For an actual WASM optical-flow check, download the pinned `openCvUrl` to a local file, build the SDK,
-and run:
+Run the focused lifecycle checks with `npx vitest run src/addons/tangible`.
+To exercise the emitted worker with actual OpenCV WASM:
 
 ```sh
 node tools/tangible/verify-worker.mjs /path/to/opencv.js
 ```
 
-That check runs the emitted worker and real OpenCV WASM on translated textured
-images, tests tracking loss, and closes the worker runtime. It injects category
-recognition and is not evidence of real-camera recognition or headset accuracy.
-
-## Device diagnosis
-
-The demo keeps the last tracking failure visible. Compare image features with
-depth features: image features with few depth matches point to depth coverage
-or camera alignment; no image features points to detection or texture.
-`captureMs` measures snapshot latency (including the XR-frame wait on the raw
-camera path), `depthIndexMs` measures depth indexing, and `processingMs` measures
-worker time. `recognitionMs` and `opticalFlowMs` separate detection from tracking
-inside that worker time. These are not a complete rendering profile. `observationAgeMs`
-shows why a result was rejected by the unchanged 500 ms freshness limit.
-
-Slow first recognition can be rejected as stale; the next frame can still use
-its image features to start fresh tracking. Worker processing time does not
-count toward the 600 ms idle-gap reset. Depth and rigid-fit checks still apply.
-
-Recognition diagnostics retain the top five model labels above 20% confidence,
-even if they are unsupported. Registration still requires a supported label at
-55%, a box at least 50 × 50 pixels, and 12 image features.
-`diagnostics.recognition.reason` distinguishes no detections, unsupported labels,
-low confidence, small boxes, and insufficient texture. A detected label can now
-remain visible even when it fails feature selection; it does not imply tracking.
-
-The optional `onCameraFrame(image)` callback receives the exact detector input
-on the main thread. Copy it synchronously if needed: its pixel buffer transfers
-to the worker immediately afterwards. It is intended for a diagnostic preview.
-The demo copies at most one image per second into its left-hand preview panel.
+That check covers central-region feature extraction, image translation, tracking
+loss, explicit re-registration, and disposal without any injected detector.
+Device testing is still required for camera/depth alignment and sustained speed.

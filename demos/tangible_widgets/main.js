@@ -50,24 +50,24 @@ function card(width, height) {
 }
 
 class ObjectWidget extends xb.Script {
-  constructor(label, tracker) {
+  constructor(widgetId, tracker) {
     super();
-    this.label = label;
+    this.widgetId = widgetId;
     this.tracker = tracker;
     this.page = 0;
     this.remaining = 180;
     this.running = false;
     this.lastTime = 0;
     this.lastDisplay = '';
-    this.panel = card(0.27, label === 'book' ? 0.31 : 0.25);
+    this.panel = card(0.27, widgetId === 'reading' ? 0.31 : 0.25);
     // In front of the registered visible patch, including on a curved object.
     this.panel.position.z = 0.025;
     this.add(this.panel);
     this.panel.add(
       text(
-        label === 'book'
+        widgetId === 'reading'
           ? 'READING COMPANION'
-          : label === 'cup'
+          : widgetId === 'timer'
             ? 'TEA TIMER'
             : 'TILT CONTROL',
         18,
@@ -76,7 +76,7 @@ class ObjectWidget extends xb.Script {
     );
     this.body = text('', 17);
     this.panel.add(this.body);
-    if (label === 'book') {
+    if (widgetId === 'reading') {
       this.body.text = pages[0];
       this.panel.add(
         button('Next page', () => {
@@ -84,8 +84,8 @@ class ObjectWidget extends xb.Script {
           this.body.text = pages[this.page];
         })
       );
-    } else if (label === 'cup') {
-      this.body.text = '03:00\n\nA timer attached to your cup.';
+    } else if (widgetId === 'timer') {
+      this.body.text = '03:00\n\nA timer attached to this surface.';
       this.toggle = button('Start / pause', () => {
         this.running = !this.running;
       });
@@ -98,7 +98,7 @@ class ObjectWidget extends xb.Script {
       );
     } else {
       this.body.text =
-        'Tilt the bottle to move the dot.\nUse Neutral tilt to set its centre.';
+        'Tilt the object to move the dot.\nUse Neutral tilt to set its centre.';
       const board = new THREE.Mesh(
         new THREE.PlaneGeometry(0.2, 0.08),
         new THREE.MeshBasicMaterial({color: '#09151f'})
@@ -117,11 +117,11 @@ class ObjectWidget extends xb.Script {
     const now = performance.now();
     const elapsed = this.lastTime ? (now - this.lastTime) / 1000 : 0;
     this.lastTime = now;
-    if (this.label === 'cup') {
+    if (this.widgetId === 'timer') {
       if (this.running) this.remaining = Math.max(0, this.remaining - elapsed);
       if (!this.remaining) this.running = false;
       const seconds = Math.ceil(this.remaining);
-      const value = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}\n\n${seconds ? 'A timer attached to your cup.' : 'Your tea is ready.'}`;
+      const value = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}\n\n${seconds ? 'A timer attached to this surface.' : 'Your tea is ready.'}`;
       if (value !== this.lastDisplay) {
         this.body.text = value;
         this.lastDisplay = value;
@@ -141,10 +141,25 @@ class ObjectWidgetsDemo extends xb.Script {
     this.previewTexture = new THREE.CanvasTexture(this.previewCanvas);
     this.previewTexture.colorSpace = THREE.SRGBColorSpace;
     this.lastPreview = -Infinity;
+    this.widgetIds = ['reading', 'timer', 'tilt'];
+    this.selection = 0;
+    this.registrationImage = null;
+    this.labelWorker = null;
+    this.labelTimeout = null;
+    this.labelStatus = 'Object label: available after registration';
+    this.labelAttempted = false;
     this.pixelStats = 'Waiting for camera pixels';
     this.tracker = new TangibleWidgets({
-      onCameraFrame: (image) => {
-        if (performance.now() - this.lastPreview < 1000) return;
+      onCameraFrame: (image, region) => {
+        // Preserve only registration input, before the addon's transfer.
+        if (this.tracker.state === 'registering') {
+          this.registrationImage = {
+            pixels: image.data.slice().buffer,
+            width: image.width,
+            height: image.height,
+          };
+        }
+        if (performance.now() - this.lastPreview < 250) return;
         this.lastPreview = performance.now();
         if (
           this.previewCanvas.width !== image.width ||
@@ -158,7 +173,16 @@ class ObjectWidgetsDemo extends xb.Script {
           this.previewTexture.colorSpace = THREE.SRGBColorSpace;
           this.preview.material.map = this.previewTexture;
         }
-        this.previewCanvas.getContext('2d').putImageData(image, 0, 0);
+        const context = this.previewCanvas.getContext('2d');
+        context.putImageData(image, 0, 0);
+        context.strokeStyle = ACCENT;
+        context.lineWidth = 3;
+        context.strokeRect(
+          region.u * image.width,
+          region.v * image.height,
+          region.width * image.width,
+          region.height * image.height
+        );
         this.previewTexture.needsUpdate = true;
         this.preview.scale.y = image.height / image.width;
         this.preview.visible = true;
@@ -178,9 +202,9 @@ class ObjectWidgetsDemo extends xb.Script {
         this.pixelStats = `${image.width}×${image.height}: brightness ${Math.round(min)}–${Math.round(max)}, mean ${Math.round(sum / count)} / 255`;
       },
       widgets: Object.fromEntries(
-        ['book', 'cup', 'bottle'].map((label) => [
-          label,
-          {create: () => new ObjectWidget(label, this.tracker)},
+        this.widgetIds.map((id) => [
+          id,
+          {create: () => new ObjectWidget(id, this.tracker)},
         ])
       ),
     });
@@ -195,27 +219,52 @@ class ObjectWidgetsDemo extends xb.Script {
     this.lastDashboard = 0;
   }
   init() {
-    const panel = card(0.57, 0.94);
+    const panel = card(0.57, 1.08);
     panel.name = 'ObjectWidgetsDashboard';
     panel.position.set(0.44, 1.45, -1.05);
     panel.add(text('OBJECT WIDGETS', 25, ACCENT));
     panel.add(
       text(
-        'Show a book, cup, or bottle.\nHold it still to register. Then move it.\nThe left preview is the image sent to the detector.',
+        'Fill the green box with a textured surface.\nChoose a widget, then press Register.\nMove and tilt the object after attachment.',
         19
       )
     );
     panel.add(
       text(
-        'Use a printed or textured surface, roughly 0.4–1.2 m away. No measurements or API key needed.',
+        'Keep the box on one rigid surface, roughly 0.4–1.2 m away. Curved surfaces work too.',
         16,
         MUTED
       )
     );
-    this.statusText = text('Loading local models…', 18);
+    this.statusText = text('Loading OpenCV…', 18);
     this.diagnosticText = text(' ', 14, MUTED);
     panel.add(this.statusText, this.diagnosticText);
-    panel.add(button('Find / register again', () => this.tracker.reset()));
+    this.choiceText = text('Widget: reading', 18, ACCENT);
+    this.labelText = text(this.labelStatus, 15, MUTED);
+    panel.add(this.choiceText, this.labelText);
+    panel.add(
+      button('Change widget', () => {
+        this.selection = (this.selection + 1) % this.widgetIds.length;
+        this.choiceText.text = `Widget: ${this.widgetIds[this.selection]}`;
+      })
+    );
+    panel.add(
+      button('Register centre patch', () => {
+        if (!this.tracker.register(this.widgetIds[this.selection])) return;
+        this.stopLabelWorker();
+        this.registrationImage = null;
+        this.labelAttempted = false;
+        this.labelStatus = 'Object label: waiting for registration';
+      })
+    );
+    panel.add(
+      button('Clear attachment', () => {
+        this.tracker.reset();
+        this.stopLabelWorker();
+        this.registrationImage = null;
+        this.labelStatus = 'Object label: available after registration';
+      })
+    );
     panel.add(button('Neutral tilt', () => this.tracker.recenter()));
     panel.add(
       text(
@@ -226,28 +275,71 @@ class ObjectWidgetsDemo extends xb.Script {
     );
     this.add(panel);
   }
+  stopLabelWorker() {
+    clearTimeout(this.labelTimeout);
+    this.labelTimeout = null;
+    this.labelWorker?.terminate();
+    this.labelWorker = null;
+  }
+  labelRegisteredObject() {
+    this.labelAttempted = true;
+    const image = this.registrationImage;
+    this.registrationImage = null;
+    if (!image) return;
+    this.labelStatus = 'Object label: checking once…';
+    // This optional demo worker never supplies data to the tracker.
+    try {
+      const worker = new Worker(new URL('./LabelWorker.js', import.meta.url));
+      this.labelWorker = worker;
+      const finish = (message) => {
+        if (this.labelWorker !== worker) return;
+        this.labelStatus = message;
+        this.stopLabelWorker();
+      };
+      worker.onmessage = ({data}) =>
+        finish(`Object label (estimate): ${data.label}`);
+      worker.onerror = () =>
+        finish('Object label unavailable; tracking continues.');
+      this.labelTimeout = setTimeout(
+        () => finish('Object label timed out; tracking continues.'),
+        30000
+      );
+      worker.postMessage(image, [image.pixels]);
+    } catch {
+      this.labelStatus = 'Object label unavailable; tracking continues.';
+      this.stopLabelWorker();
+    }
+  }
+  onXRSessionEnded() {
+    this.stopLabelWorker();
+    this.registrationImage = null;
+  }
   dispose() {
+    this.stopLabelWorker();
+    this.registrationImage = null;
     this.previewTexture.dispose();
     this.preview.geometry.dispose();
     this.preview.material.dispose();
   }
   update() {
+    if (this.tracker.state === 'tracked' && !this.labelAttempted)
+      this.labelRegisteredObject();
     if (!this.statusText || performance.now() - this.lastDashboard < 250)
       return;
     this.lastDashboard = performance.now();
     this.statusText.text = this.tracker.status;
     this.statusText.style.color =
       this.tracker.state === 'tracked' ? ACCENT : MUTED;
+    this.labelText.text = this.labelStatus;
     const d = this.tracker.diagnostics;
-    this.diagnosticText.text = `${this.tracker.state.toUpperCase()} · sees ${d.detectedLabel}
+    this.diagnosticText.text = `${this.tracker.state.toUpperCase()} · ${this.tracker.widgetId ?? 'no attachment'}
 ${d.imageFeatureCount} image / ${d.featureCount} depth / ${d.inliers} fit points
 Capture ${d.captureMs.toFixed(0)} ms · depth index ${d.depthIndexMs.toFixed(0)} ms
-Worker ${d.processingMs.toFixed(0)} ms: detect ${d.recognitionMs.toFixed(0)} / flow ${d.opticalFlowMs.toFixed(0)}
+Tracking worker ${d.processingMs.toFixed(0)} ms
 Image age ${d.observationAgeMs.toFixed(0)} ms
 Depth age ${Number.isFinite(d.depthAgeMs) ? d.depthAgeMs.toFixed(0) : '—'} ms · fit ${(d.residualMeters * 1000).toFixed(0)} mm
 Camera timing: ${d.timing}
 Pixels: ${this.pixelStats}
-Model: ${d.recognition.candidates.map((item) => `${item.label} ${Math.round(item.score * 100)}%`).join(', ') || 'nothing above 20%'}
 Last issue: ${d.lastFailure}`;
   }
 }

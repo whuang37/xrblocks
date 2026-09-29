@@ -1,75 +1,51 @@
-# Object widgets demo
+# Surface widgets demo
 
-Show a **book**, **cup**, or **bottle** to attach a widget automatically:
+Attach a widget to any textured, rigid surface. Registration uses the central
+camera patch and XR depth. It does not wait for object recognition.
 
-- Book: a short reading card with a working Next page button.
-- Cup: a three-minute start/pause/reset timer.
-- Bottle: a dot controlled by the registered object's tilt.
+## On Galaxy XR
 
-All three widgets attach to the visible object patch. Curved objects do not use
-a separate floating side panel. Registration sets a local attachment frame;
-the panel stays flat rather than wrapping around the object.
+1. Build with `npm run build:sdk` and run `npm run serve`.
+2. Open `/demos/tangible_widgets/?debug=1` through your HTTPS development host.
+3. Enter AR and grant camera permissions.
+4. Use **Change widget** to choose reading, timer, or tilt.
+5. Look at the left camera preview. Fill its green square with a textured surface
+   about 0.4–1.2 m away. Keep the square off your fingers and background.
+6. Press **Register centre patch**, then hold still until the status is `tracked`.
+7. Move and tilt the object. The panel should follow the registered surface.
 
-## Run on Android XR
+The reading card has sample pages and a Next button. The timer has start/pause
+and reset. Tilt moves a dot; **Neutral tilt** sets its centre. Any of these widgets
+can attach to a book, decorated cup, labelled bottle, or another suitable surface.
+Flat panels sit above curved surfaces; they do not wrap around them.
 
-1. Run `npm ci` if dependencies are missing, then `npm run build:sdk`.
-2. Run `npm run serve` and expose this checkout through your usual HTTPS
-   development host. A plain HTTP LAN address is not a secure camera/WebXR origin.
-3. Open `/demos/tangible_widgets/?debug=1` in the headset browser.
-4. Enter AR and grant the requested camera and XR permissions.
-5. Hold a textured object near the centre of view, about 0.4–1.2 m away. Wait for
-   the status to show `tracked`, then move and rotate it slowly.
-6. Use **Find / register again** to choose another object. Use **Neutral tilt**
-   to reset the bottle control's neutral orientation.
+If tracking is lost, aim at the surface and register again. **Clear attachment**
+returns to preview mode. A new object is never chosen automatically after loss.
 
-No API key, printed fiducial, or physical size entry is required. The default
-models/runtime files load from public CDNs. Image processing then runs locally.
+## Optional object label
 
-The first registration can take a moment. An object needs enough visible image
-features and usable depth points. Prefer a printed cover, decorated cup, or
-opaque labelled bottle. Clear bottles and plain cups often provide poor evidence.
+After registration succeeds, the demo runs one MediaPipe detection on the saved
+registration image in `LabelWorker.js`. It considers boxes covering the image
+centre and displays a category estimate. Unknown, incorrect, slow, or failed
+labels do not change the selected widget or tracking. Detection runs in a separate
+worker, loads only after registration, and stops after its result or a timeout.
+It is demo code, not part of the tangible addon or its API.
 
-The diagnostics report depth feature count, rigid-fit residual, worker time,
-observation age, and camera timing mode. `estimated` indicates the media-stream
-camera path, which uses the SDK's approximate device calibration. A small fit
-residual does not prove exact camera alignment.
+## Diagnosis
 
-If the widget disappears, check the status. Missing depth, occlusion, stale
-frames, or inconsistent motion disable the attachment and its controls. This
-version needs depth while tracking and does not track continuously through a full
-rotation that hides the registered face. Recognition selects an object category;
-it does not remember your specific book or cup across sessions.
+The preview shows the actual camera input; the green outline is added only to the
+preview. **Pixels** shows sampled brightness from 0–255. All-zero values suggest
+black camera pixels. A black preview with varied values suggests a display issue.
 
-## Desktop and scope
+Compare image features, depth features, and fit inliers. At least 12 valid depth
+features are required to register. The **Last issue** line retains the failure
+reason. Transparent, plain, reflective, or heavily occluded surfaces may fail.
+Tracking requires depth and cannot follow a full rotation that hides the patch.
 
-The desktop simulator can load the UI and run the worker, but its scene needs a
-recognizable textured object and simulated depth for registration. A normal webcam
-alone is insufficient. The demo does not replace camera recognition with simulator
-ground truth. Use Android XR for the intended interaction trial.
+Camera timing `estimated` uses the device video stream and approximate calibration;
+`xr-frame` uses raw XR camera access. Neither label guarantees physical alignment.
+A webcam alone cannot supply XR depth. Desktop registration needs trackable
+texture and simulated depth, but no category detector or ground-truth object label.
 
-The reading content is sample text; it does not read the book's pages. The timer
-runs locally; it does not control an appliance. Existing ray/pinch UI input works
-on the attached cards; this addon does not add a monocular fingertip-touch detector.
-
-With `?debug=1`, inspect `window.tangibleDemo.tracker` in the browser console.
-See [addon setup and limits](../../src/addons/tangible/README.md).
-
-For a failed device run, record **Last issue**, the detected category, image/depth
-feature counts, capture/depth-index/worker times, image age, and camera timing.
-The last failure stays visible after a new registration attempt. Recognition
-runs only while searching; tracking captures are capped at 15 fps and 480 pixels
-wide. Raw XR snapshots are resized before GPU readback.
-
-The left-hand camera preview shows the actual input sent to the detector,
-refreshed at most once a second. Confirm that your object is visible, upright,
-and reasonably large in this image. **Model** shows the top labels and scores
-from the latest detection; **status** gives the exact rejection reason. A
-recognized book with too few image features now reports that failure instead
-of saying only “sees none.” Lower-score and unsupported labels are diagnostic
-only; they cannot create a widget.
-
-**Pixels** reports sampled input brightness on a 0–255 scale, before the worker
-receives the image. A range and mean of zero indicate that the sampled camera
-pixels are black; varied values with a black panel instead point to a preview
-rendering problem. The preview stays hidden until a frame arrives and recreates
-its GPU texture when the image dimensions change.
+In debug mode, inspect `window.tangibleDemo.tracker`.
+See [addon setup](../../src/addons/tangible/README.md).

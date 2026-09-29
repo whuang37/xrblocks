@@ -367,8 +367,9 @@ export class XRDeviceCamera extends VideoStream<XRDeviceCameraDetails> {
    * one-shot GPU readback for the next {@link updateXRCamera} call and then
    * resolves through {@link getSnapshot}. Concurrent camera-access calls share
    * that next XR-frame readback, but each resolves with its own requested
-   * format. If no XR camera frame arrives within about one second, or the raw
-   * camera path is stopped, the promise resolves to `null`. Synchronous
+   * format. The readback uses the largest requested dimensions; the cached
+   * frame has that resolution. If no XR camera frame arrives within about one
+   * second, or the raw camera path is stopped, the promise resolves to `null`. Synchronous
    * {@link getSnapshot} on that fallback path returns the most recently
    * captured one-shot frame, or `null` when no capture has completed yet.
    */
@@ -536,7 +537,20 @@ export class XRDeviceCamera extends VideoStream<XRDeviceCameraDetails> {
     const requests = this.pendingXRCameraCaptures_.splice(0);
     for (const request of requests) clearTimeout(request.timeout);
     try {
-      this.xrCameraSnapshotImageData_ = this.captureXRCameraSnapshot_();
+      // Read back only the largest requested image. Resizing after a native
+      // camera readback still stalls the GPU and copies every source pixel.
+      const width = Math.min(
+        this.width!,
+        Math.max(...requests.map(({options}) => options.width ?? this.width!))
+      );
+      const height = Math.min(
+        this.height!,
+        Math.max(...requests.map(({options}) => options.height ?? this.height!))
+      );
+      this.xrCameraSnapshotImageData_ = this.captureXRCameraSnapshot_(
+        width,
+        height
+      );
       for (const request of requests) {
         const result = (
           this.getSnapshot as (
@@ -556,7 +570,10 @@ export class XRDeviceCamera extends VideoStream<XRDeviceCameraDetails> {
     }
   }
 
-  private captureXRCameraSnapshot_() {
+  private captureXRCameraSnapshot_(
+    captureWidth: number,
+    captureHeight: number
+  ) {
     if (
       !this.renderer_ ||
       !this.xrCameraTexture_ ||
@@ -568,7 +585,7 @@ export class XRDeviceCamera extends VideoStream<XRDeviceCameraDetails> {
     assertWebGLRenderer(this.renderer_, 'XRDeviceCamera.captureSnapshot');
 
     this.ensureXRCameraCopyObjects_();
-    this.ensureXRCameraRenderTarget_();
+    this.ensureXRCameraRenderTarget_(captureWidth, captureHeight);
     if (!this.xrCameraRenderTarget_) return null;
 
     if (this.xrCameraCopyMaterial_!.map !== this.xrCameraTexture_) {
@@ -608,25 +625,21 @@ export class XRDeviceCamera extends VideoStream<XRDeviceCameraDetails> {
     );
   }
 
-  private ensureXRCameraRenderTarget_() {
+  private ensureXRCameraRenderTarget_(width: number, height: number) {
     if (
       this.xrCameraRenderTarget_ &&
-      this.xrCameraRenderTarget_.width === this.width &&
-      this.xrCameraRenderTarget_.height === this.height
+      this.xrCameraRenderTarget_.width === width &&
+      this.xrCameraRenderTarget_.height === height
     ) {
       return;
     }
     this.xrCameraRenderTarget_?.dispose();
-    this.xrCameraRenderTarget_ = new THREE.WebGLRenderTarget(
-      this.width!,
-      this.height!,
-      {
-        format: THREE.RGBAFormat,
-        type: THREE.UnsignedByteType,
-        depthBuffer: false,
-        stencilBuffer: false,
-      }
-    );
+    this.xrCameraRenderTarget_ = new THREE.WebGLRenderTarget(width, height, {
+      format: THREE.RGBAFormat,
+      type: THREE.UnsignedByteType,
+      depthBuffer: false,
+      stencilBuffer: false,
+    });
     this.xrCameraRenderTarget_.texture.colorSpace = THREE.SRGBColorSpace;
   }
 

@@ -9,7 +9,6 @@ import {
   type CameraParametersSnapshot,
 } from 'xrblocks';
 import {DepthFrame} from './DepthFrame';
-import {estimateRigidPose, type PointPair} from './RigidPose';
 import {
   DEFAULT_TANGIBLE_ASSETS,
   type TangibleObservation,
@@ -19,6 +18,12 @@ import {
   type TangibleWorkerReply,
   type TangibleWorkerRequest,
 } from './TangibleTypes';
+
+interface CaptureFrame {
+  timeMs: number;
+  camera: CameraParametersSnapshot;
+  depth: DepthFrame | null;
+}
 
 /** Registers a central image patch with depth and attaches selected content. */
 export class TangibleWidgets extends Script {
@@ -43,7 +48,7 @@ export class TangibleWidgets extends Script {
     lastFailure: 'none',
     featureCount: 0,
     inliers: 0,
-    residualMeters: 0,
+    reprojectionErrorPx: 0,
     processingMs: 0,
     poseAgeMs: Infinity,
     depthAgeMs: Infinity,
@@ -61,12 +66,13 @@ export class TangibleWidgets extends Script {
   private inFlight: {
     id: number;
     epoch: number;
-    depth: DepthFrame;
+    frame: CaptureFrame;
     startedAt: number;
   } | null = null;
   private capturing = false;
-  private rawCaptureFrame: DepthFrame | null = null;
+  private rawCaptureFrame: CaptureFrame | null = null;
   private lastRequestAt = -Infinity;
+  private lastPreviewAt = -Infinity;
   private lastPoseAt = -Infinity;
   private lastDepthVersion = -1;
   private lastDepthAt = -Infinity;
@@ -82,7 +88,7 @@ export class TangibleWidgets extends Script {
   private readonly trackingInterval: number;
   private readonly poseSmoothingMs: number;
   private readonly maxAge: number;
-  private readonly maxResidual: number;
+  private readonly maxReprojectionError: number;
   private readonly cameraProfile: string;
 
   constructor(private readonly options: TangibleWidgetsOptions) {
@@ -98,13 +104,13 @@ export class TangibleWidgets extends Script {
         'TangibleWidgets requires at least one widget ID and factory.'
       );
     }
-    const fps = options.trackingFps ?? 15;
-    this.poseSmoothingMs = options.poseSmoothingMs ?? 100;
+    const fps = options.trackingFps ?? 30;
+    this.poseSmoothingMs = options.poseSmoothingMs ?? 40;
     if (!Number.isFinite(this.poseSmoothingMs) || this.poseSmoothingMs < 0)
       throw new RangeError('poseSmoothingMs must be finite and non-negative.');
     this.maxAge = options.maxPoseAgeMs ?? 500;
-    this.maxResidual = options.maxResidualMeters ?? 0.025;
-    for (const value of [fps, this.maxAge, this.maxResidual]) {
+    this.maxReprojectionError = options.maxReprojectionErrorPx ?? 3;
+    for (const value of [fps, this.maxAge, this.maxReprojectionError]) {
       if (!Number.isFinite(value) || value <= 0)
         throw new RangeError(
           'Tangible tracking options must be positive finite numbers.'
@@ -134,8 +140,6 @@ export class TangibleWidgets extends Script {
       );
       return;
     }
-    depth.resumeDepth(this);
-    this.depthAcquired = true;
     try {
       this.worker = new Worker(new URL('./TangibleWorker.js', import.meta.url));
       this.worker.onmessage = (event: MessageEvent<TangibleWorkerReply>) =>
@@ -153,6 +157,7 @@ export class TangibleWidgets extends Script {
       );
       this.send({
         type: 'initialize',
+        maxReprojectionErrorPx: this.maxReprojectionError,
         assets: {...DEFAULT_TANGIBLE_ASSETS, ...optionsAssets(this.options)},
       });
     } catch (error) {
@@ -166,6 +171,15 @@ export class TangibleWidgets extends Script {
       throw new Error(`Unknown widget: ${widgetId}`);
     if (!this.ready || this.stopped || this.state === 'error') return false;
     this.reset();
+    this.depth!.resumeDepth(this);
+    this.depthAcquired = true;
+    this.lastDepthVersion =
+      (
+        this.depth!.depthMesh?.geometry?.getAttribute('position') as
+          | THREE.BufferAttribute
+          | undefined
+      )?.version ?? -1;
+    this.lastDepthAt = -Infinity;
     this.widgetId = widgetId;
     this.tracking = true;
     this.registrationPending = true;
@@ -177,6 +191,7 @@ export class TangibleWidgets extends Script {
   reset() {
     if (this.stopped || this.state === 'error') return;
     this.epoch++;
+    this.releaseDepth();
     this.reference.clear();
     this.targetId = null;
     this.lastPoseAt = -Infinity;
@@ -229,21 +244,23 @@ export class TangibleWidgets extends Script {
     if (camera.isUsingXRCameraAccess && this.capturing) {
       // Raw capture resolves after this animation frame. Save the depth and
       // XRView from that frame before its pixels reach the worker.
-      this.rawCaptureFrame = this.freezeDepth(time, frame);
+      this.rawCaptureFrame = this.captureFrame(time, frame);
     }
     if (
       !this.ready ||
+      (!this.tracking && !this.options.onCameraFrame) ||
       this.inFlight ||
       this.capturing ||
-      now - this.lastRequestAt < (this.tracking ? this.trackingInterval : 250)
+      now - this.lastRequestAt < (this.tracking ? this.trackingInterval : 500)
     )
       return;
     if (
       !camera.loaded ||
       !camera.width ||
       !camera.height ||
-      !mesh ||
-      this.diagnostics.depthAgeMs > this.maxAge
+      (this.tracking &&
+        !this.reference.size &&
+        this.diagnostics.depthAgeMs > this.maxAge)
     ) {
       this.hide(
         this.tracking ? (this.reference.size ? 'lost' : 'registering') : 'idle',
@@ -284,13 +301,36 @@ export class TangibleWidgets extends Script {
     } else {
       try {
         if (camera.video.currentTime === this.lastVideoTime) return;
-        const depth = this.freezeDepth(now, frame);
-        if (!depth) return;
+        const captured = this.captureFrame(now, frame);
+        if (!captured) return;
         this.lastVideoTime = camera.video.currentTime;
         const captureStarted = performance.now();
-        const image = camera.getSnapshot(snapshotOptions);
-        this.diagnostics.captureMs = performance.now() - captureStarted;
-        if (image) this.submit(image, depth);
+        if (
+          typeof createImageBitmap === 'function' &&
+          typeof OffscreenCanvas !== 'undefined'
+        ) {
+          this.capturing = true;
+          const epoch = this.epoch;
+          // Resizing is browser-owned. Canvas conversion and getImageData run in the worker.
+          void createImageBitmap(camera.video, {
+            resizeWidth: width,
+            resizeHeight: height,
+            resizeQuality: 'low',
+          })
+            .then((bitmap) => {
+              this.diagnostics.captureMs = performance.now() - captureStarted;
+              if (this.stopped || epoch !== this.epoch) bitmap.close();
+              else this.submit(bitmap, captured);
+            })
+            .catch((error) => this.fail(String(error)))
+            .finally(() => {
+              this.capturing = false;
+            });
+        } else {
+          const image = camera.getSnapshot(snapshotOptions);
+          this.diagnostics.captureMs = performance.now() - captureStarted;
+          if (image) this.submit(image, captured);
+        }
       } catch (error) {
         this.fail(String(error));
       }
@@ -331,63 +371,92 @@ export class TangibleWidgets extends Script {
     );
   }
 
-  private freezeDepth(timeMs: number, frame?: XRFrame): DepthFrame | null {
-    const mesh = this.depth?.depthMesh;
-    const params = this.cameraParameters(frame);
-    if (!mesh || !params || this.diagnostics.depthAgeMs > this.maxAge)
-      return null;
-    const started = performance.now();
-    const snapshot = new DepthFrame(
-      mesh,
-      params.worldFromView,
-      params.clipFromView,
-      timeMs
-    );
-    this.diagnostics.depthIndexMs = performance.now() - started;
-    return snapshot;
+  private captureFrame(timeMs: number, frame?: XRFrame): CaptureFrame | null {
+    const camera = this.cameraParameters(frame);
+    if (!camera) return null;
+    let depth: DepthFrame | null = null;
+    this.diagnostics.depthIndexMs = 0;
+    if (this.tracking && !this.reference.size) {
+      const mesh = this.depth?.depthMesh;
+      if (!mesh || this.diagnostics.depthAgeMs > this.maxAge) return null;
+      const started = performance.now();
+      depth = new DepthFrame(
+        mesh,
+        camera.worldFromView,
+        camera.clipFromView,
+        timeMs
+      );
+      this.diagnostics.depthIndexMs = performance.now() - started;
+    }
+    return {timeMs, camera, depth};
   }
 
-  private submit(image: ImageData, depth: DepthFrame) {
-    if (!this.worker || this.inFlight || this.state === 'error') return;
-    const side = Math.min(image.width, image.height) * 0.52;
-    const region: TangibleRegion = {
-      u: (image.width - side) / (2 * image.width),
-      v: (image.height - side) / (2 * image.height),
-      width: side / image.width,
-      height: side / image.height,
+  private imageRegion(width: number, height: number): TangibleRegion {
+    const side = Math.min(width, height) * 0.52;
+    return {
+      u: (width - side) / (2 * width),
+      v: (height - side) / (2 * height),
+      width: side / width,
+      height: side / height,
     };
+  }
+
+  private submit(image: ImageData | ImageBitmap, frame: CaptureFrame) {
+    const bitmap = 'data' in image ? undefined : image;
+    if (!this.worker || this.inFlight || this.state === 'error') {
+      bitmap?.close();
+      return;
+    }
     try {
-      this.options.onCameraFrame?.(image, region);
-      if (!this.tracking) return; // Preview only; no worker work while idle.
-      if (this.registrationPending && !depth.sample(0.5, 0.5)) {
+      if (this.registrationPending && !frame.depth?.sample(0.5, 0.5)) {
+        bitmap?.close();
         this.stopTracking(
           'No depth at the box centre. Aim at an opaque surface and register again.'
         );
         return;
       }
       const id = ++this.requestId;
+      const registration = this.registrationPending
+        ? this.imageRegion(image.width, image.height)
+        : undefined;
+      const preview =
+        !!this.options.onCameraFrame &&
+        (this.registrationPending ||
+          performance.now() - this.lastPreviewAt >= 500);
+      if (preview) this.lastPreviewAt = performance.now();
       this.inFlight = {
         id,
-        depth,
+        frame,
         epoch: this.epoch,
         startedAt: performance.now(),
       };
-      const registration = this.registrationPending ? region : undefined;
       this.registrationPending = false;
-      const pixels = image.data.buffer as ArrayBuffer;
+      const pixels =
+        'data' in image ? (image.data.buffer as ArrayBuffer) : undefined;
+      const p = frame.camera.clipFromView.elements;
       this.worker.postMessage(
         {
           type: 'frame',
           requestId: id,
-          timeMs: depth.timeMs,
+          timeMs: frame.timeMs,
           width: image.width,
           height: image.height,
           pixels,
+          bitmap,
           registration,
+          intrinsics: [
+            (p[0] * image.width) / 2,
+            (p[5] * image.height) / 2,
+            ((1 - p[8]) * image.width) / 2,
+            ((1 + p[9]) * image.height) / 2,
+          ],
+          preview,
+          previewOnly: !this.tracking,
         } satisfies TangibleWorkerRequest,
-        [pixels]
+        bitmap ? [bitmap] : [pixels!]
       );
     } catch (error) {
+      bitmap?.close();
       this.fail(String(error));
     }
   }
@@ -413,14 +482,21 @@ export class TangibleWidgets extends Script {
     if (!request || request.id !== reply.requestId) return;
     this.inFlight = null;
     if (request.epoch !== this.epoch) return;
+    if (reply.preview && this.options.onCameraFrame) {
+      const {pixels, width, height} = reply.preview;
+      this.options.onCameraFrame(
+        new ImageData(new Uint8ClampedArray(pixels), width, height),
+        this.imageRegion(width, height)
+      );
+    }
+    if (!this.tracking) return;
     this.diagnostics.processingMs = reply.processingMs;
     this.diagnostics.imageFeatureCount = reply.featureCount;
-    this.diagnostics.featureCount = 0;
     this.diagnostics.inliers = 0;
-    this.diagnostics.residualMeters = 0;
+    this.diagnostics.reprojectionErrorPx = 0;
     this.diagnostics.observationAgeMs =
-      performance.now() - request.depth.timeMs;
-    if (performance.now() - request.depth.timeMs > this.maxAge) {
+      performance.now() - request.frame.timeMs;
+    if (performance.now() - request.frame.timeMs > this.maxAge) {
       this.hide(
         'lost',
         `Image is ${Math.round(this.diagnostics.observationAgeMs)} ms old (limit ${this.maxAge} ms). Waiting for tracking.`
@@ -429,7 +505,7 @@ export class TangibleWidgets extends Script {
     }
     try {
       if (!reply.observation) this.stopTracking(reply.status);
-      else this.applyObservation(reply.observation, request.depth);
+      else this.applyObservation(reply.observation, request.frame);
     } catch (error) {
       this.fail(String(error));
     }
@@ -437,14 +513,49 @@ export class TangibleWidgets extends Script {
 
   private applyObservation(
     observation: TangibleObservation,
-    depth: DepthFrame
+    frame: CaptureFrame
   ) {
     if (!this.widgetId || !this.tracking) return;
+    if (!this.reference.size) {
+      if (!frame.depth)
+        return this.stopTracking(
+          'Registration depth is unavailable. Register again.'
+        );
+      this.registerObservation(observation, frame, frame.depth);
+      return;
+    }
+    const pose = observation.pose;
+    if (!pose || observation.targetId !== this.targetId) {
+      this.hide(
+        'lost',
+        'Image pose is uncertain. Keep the registered surface visible.'
+      );
+      if (performance.now() - this.lastPoseAt > this.maxAge)
+        this.stopTracking('Image pose was lost. Register the surface again.');
+      return;
+    }
+    const world = frame.camera.worldFromView
+      .clone()
+      .multiply(new THREE.Matrix4().fromArray(pose.cameraFromObject));
+    const position = new THREE.Vector3(),
+      quaternion = new THREE.Quaternion();
+    world.decompose(position, quaternion, new THREE.Vector3());
+    this.diagnostics.inliers = pose.inliers;
+    this.diagnostics.reprojectionErrorPx = pose.reprojectionErrorPx;
+    this.publishPose(position, quaternion, frame.timeMs);
+  }
+
+  private registerObservation(
+    observation: TangibleObservation,
+    frame: CaptureFrame,
+    depth: DepthFrame
+  ) {
+    if (!this.widgetId) return;
     const samples = observation.features.flatMap((feature) => {
       const point = depth.sample(feature.u, feature.v);
       return point ? [{id: feature.id, point}] : [];
     });
-    this.diagnostics.featureCount = samples.length;
+
     if (this.targetId !== observation.targetId) {
       this.reference.clear();
       this.targetId = observation.targetId;
@@ -453,87 +564,90 @@ export class TangibleWidgets extends Script {
         'Hold the object still while its depth is registered.'
       );
     }
-    if (!this.reference.size) {
-      if (samples.length < 12)
-        return this.stopTracking(
-          `${samples.length}/${observation.features.length} image features have depth; need 12.`
-        );
-      const centreDepth = depth.sample(0.5, 0.5);
-      if (!centreDepth)
-        return this.stopTracking(
-          'No depth at the registration centre. Register again.'
-        );
-      const range = centreDepth.distanceTo(depth.cameraPosition);
-      // Register the surface at the box centre, excluding depth far behind it.
-      const foreground = samples.filter(
-        (item) =>
-          Math.abs(item.point.distanceTo(depth.cameraPosition) - range) < 0.15
+    if (samples.length < 12)
+      return this.stopTracking(
+        `${samples.length}/${observation.features.length} image features have depth; need 12.`
       );
-      if (foreground.length < 12)
-        return this.stopTracking(
-          `${foreground.length} depth points agree on object distance; need 12.`
-        );
-      const center = new THREE.Vector3();
-      for (const sample of foreground) center.add(sample.point);
-      center.divideScalar(foreground.length);
-      const inverse = depth.cameraQuaternion.clone().invert();
-      for (const sample of foreground)
-        this.reference.set(
-          sample.id,
-          sample.point.clone().sub(center).applyQuaternion(inverse)
-        );
-      // Reject registrations that cannot constrain a full rigid transform.
-      const proof = estimateRigidPose(
-        foreground.map((sample) => ({
-          source: this.reference.get(sample.id)!,
-          target: sample.point,
-        })),
-        this.maxResidual
+    const centreDepth = depth.sample(0.5, 0.5);
+    if (!centreDepth)
+      return this.stopTracking(
+        'No depth at the registration centre. Register again.'
       );
-      if (!proof) {
-        this.reference.clear();
-        return this.stopTracking('Depth points do not span a stable surface.');
-      }
-      this.neutral.copy(depth.cameraQuaternion);
-      this.smoothingPosition.copy(center);
-      this.smoothingQuaternion.copy(depth.cameraQuaternion);
-      this.patchSize.copy(
-        new THREE.Box3()
-          .setFromPoints([...this.reference.values()])
-          .getSize(new THREE.Vector3())
+    const range = centreDepth.distanceTo(depth.cameraPosition);
+    // Register the surface at the box centre, excluding depth far behind it.
+    const foreground = samples.filter(
+      (item) =>
+        Math.abs(item.point.distanceTo(depth.cameraPosition) - range) < 0.15
+    );
+    if (foreground.length < 12)
+      return this.stopTracking(
+        `${foreground.length} depth points agree on object distance; need 12.`
       );
-      if (!this.target.children.length) {
-        const widget = this.options.widgets[this.widgetId].create(
-          this.widgetId
-        );
-        this.target.add(widget);
-      }
+    const center = new THREE.Vector3();
+    for (const sample of foreground) center.add(sample.point);
+    center.divideScalar(foreground.length);
+    const inverse = depth.cameraQuaternion.clone().invert();
+    for (const sample of foreground)
+      this.reference.set(
+        sample.id,
+        sample.point.clone().sub(center).applyQuaternion(inverse)
+      );
+    // A line or tiny cluster cannot constrain all rotations.
+    const axis = new THREE.Vector3(),
+      cross = new THREE.Vector3();
+    let spread = 0,
+      area = 0;
+    for (const point of this.reference.values()) {
+      spread += point.lengthSq();
+      if (point.lengthSq() > axis.lengthSq()) axis.copy(point);
     }
-    const pairs: PointPair[] = samples.flatMap((sample) => {
-      const source = this.reference.get(sample.id);
-      return source ? [{source, target: sample.point}] : [];
+    for (const point of this.reference.values())
+      area = Math.max(area, cross.crossVectors(point, axis).lengthSq());
+    if (spread / this.reference.size < 0.000025 || area < 1e-10) {
+      this.reference.clear();
+      return this.stopTracking('Depth points do not span a stable surface.');
+    }
+    this.neutral.copy(depth.cameraQuaternion);
+    this.smoothingPosition.copy(center);
+    this.smoothingQuaternion.copy(depth.cameraQuaternion);
+    this.patchSize.copy(
+      new THREE.Box3()
+        .setFromPoints([...this.reference.values()])
+        .getSize(new THREE.Vector3())
+    );
+    this.diagnostics.featureCount = foreground.length;
+    this.send({
+      type: 'reference',
+      targetId: observation.targetId,
+      points: [...this.reference].map(([id, point]) => ({
+        id,
+        x: point.x,
+        y: point.y,
+        z: point.z,
+      })),
     });
-    const pose = estimateRigidPose(pairs, this.maxResidual);
-    if (!pose) {
-      this.hide(
-        'lost',
-        'Depth and image motion disagree. Hold the textured surface in view.'
-      );
-      if (performance.now() - this.lastPoseAt > this.maxAge)
-        this.stopTracking(
-          'Depth and image motion disagree. Register the surface again.'
-        );
-      return;
+    this.releaseDepth();
+    this.publishPose(center, depth.cameraQuaternion, frame.timeMs);
+    if (!this.target.children.length) {
+      const widget = this.options.widgets[this.widgetId].create(this.widgetId);
+      this.target.add(widget);
     }
-    const dt = Math.max(0, depth.timeMs - this.lastPoseAt);
+  }
+
+  private publishPose(
+    position: THREE.Vector3,
+    quaternion: THREE.Quaternion,
+    timeMs: number
+  ) {
+    const dt = Math.max(0, timeMs - this.lastPoseAt);
     // Time-based exponential LPF: translation lerp and shortest-path quaternion
     // slerp. The first pose snaps into place instead of blending from an old target.
     const alpha =
       this.poseSmoothingMs === 0 || !Number.isFinite(this.lastPoseAt)
         ? 1
         : 1 - Math.exp(-dt / this.poseSmoothingMs);
-    this.smoothingPosition.lerp(pose.position, alpha);
-    this.smoothingQuaternion.slerp(pose.quaternion, alpha);
+    this.smoothingPosition.lerp(position, alpha);
+    this.smoothingQuaternion.slerp(quaternion, alpha);
     const world = new THREE.Matrix4().compose(
       this.smoothingPosition,
       this.smoothingQuaternion,
@@ -557,10 +671,8 @@ export class TangibleWidgets extends Script {
     );
     if (this.tilt.length() < 0.08) this.tilt.set(0, 0);
     this.twist = angles.z;
-    this.lastPoseAt = depth.timeMs;
-    this.diagnostics.inliers = pose.inliers;
-    this.diagnostics.residualMeters = pose.residualMeters;
-    this.diagnostics.poseAgeMs = Math.max(0, performance.now() - depth.timeMs);
+    this.lastPoseAt = timeMs;
+    this.diagnostics.poseAgeMs = Math.max(0, performance.now() - timeMs);
     this.target.visible = true;
     this.target.xb!.interactionEnabled = true;
     this.state = 'tracked';
@@ -568,6 +680,7 @@ export class TangibleWidgets extends Script {
   }
 
   private stopTracking(reason: string) {
+    this.releaseDepth();
     this.tracking = false;
     this.registrationPending = false;
     this.hide('lost', reason);

@@ -40,7 +40,10 @@ black camera pixels. A black preview with varied values suggests a display issue
 Compare image features, depth features, and fit inliers. At least 12 valid depth
 features are required to register. The **Last issue** line retains the failure
 reason. Transparent, plain, reflective, or heavily occluded surfaces may fail.
-Tracking requires depth and cannot follow a full rotation that hides the patch.
+Depth is required only for registration. Motion uses the saved 3D feature map
+and camera images; it cannot follow a full rotation that hides the patch.
+Fit error is now shown in image pixels. Compare capture and worker times and
+check that button presses remain responsive while moving the object.
 
 Camera timing `estimated` uses the device video stream and approximate calibration;
 `xr-frame` uses raw XR camera access. Neither label guarantees physical alignment.

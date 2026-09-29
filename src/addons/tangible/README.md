@@ -3,7 +3,7 @@
 Register a textured surface at the camera centre, then attach any XR Blocks
 widget to it. This follows the central-image registration and KLT tracking
 approach in [AhUI, section 3.1](https://duruofei.com/papers/Du_OpportunisticInterfacesForAugmentedReality-TransformingEverydayObjectsIntoTangible6DoFInterfacesUsingAdHocUI_CHI2022.pdf),
-with XR depth and rigid 3D fitting in place of its planar pose solver.
+with an XR depth feature map and a 3D-to-2D pose solver.
 
 The addon has no object detector, category names, confidence threshold, or
 recognition model. It loads only OpenCV JS/WASM. Flat and curved rigid surfaces
@@ -64,11 +64,18 @@ centre. Missing centre depth or insufficient features reports a specific failure
 Background beyond that depth band is excluded. Points on fingers or nearby
 background can still contaminate a registration; keep them outside the square.
 
-The tracker follows matching image features and fits a rigid transform from their
-3D depth positions. Its full depth geometry must be enabled; the default coarse
-collision mesh is insufficient. It never fills missing depth with a guessed plane.
-This version needs fresh depth throughout tracking. It is not pure-depth tracking
-or an implementation of the paper's depth-free planar pose solver.
+Depth creates a fixed 3D feature map during registration. Later frames track the
+same image features and solve their pose with OpenCV PnP-RANSAC in the worker.
+This supports flat and curved rigid surfaces without fitting a plane. At least
+six matches and a majority of inliers must pass the reprojection check (default
+`maxReprojectionErrorPx: 3`). Keep the registered texture visible.
+
+Full depth geometry is required for registration; the coarse collision mesh is
+insufficient. The tracker releases its depth lease after registration and does
+not rebuild the map or sample depth during motion. Other depth consumers can
+still keep depth active. Re-register to refresh the map. Initial depth errors
+remain in the map; this does not provide tracking through occlusion or a full
+360-degree object model.
 
 `target` is the widget's parent in metres. Its initial origin is the centroid of
 the registered points, with X right, Y up, and +Z toward the viewer. Put content
@@ -76,10 +83,10 @@ at local Z = 0.025 for a flat panel above the patch, including on curved objects
 `patchSize` measures the visible registered features, not the whole object.
 
 The final position and quaternion use a time-based exponential low-pass filter,
-with a default `poseSmoothingMs: 100` time constant. Larger values reduce jitter
+with a default `poseSmoothingMs: 40` time constant. Larger values reduce jitter
 but add response lag; set it to `0` to disable filtering. Tilt, twist, and recenter
 use that same filtered orientation. A new registration starts at its measured
-pose without blending from the old attachment. Depth fitting, residual checks,
+pose without blending from the old attachment. Pose fitting, reprojection checks,
 and observation freshness use the original measurements, not filtered values.
 
 `tilt` reports yaw/pitch relative to the neutral orientation, normalized to ±1 at
@@ -100,15 +107,18 @@ uses estimated timing and device calibration. That approximation can cause drift
 or poor depth matches during motion. Clear camera pixels and accurate alignment
 remain necessary; removing the detector does not solve camera calibration.
 
-Camera input is capped at 480 pixels wide and tracking at 15 updates/second.
-There is at most one worker request in flight. Idle/lost preview captures run at
-4 fps with no worker tracking. `onCameraFrame(image, region)` can render a preview;
-copy pixels synchronously because their buffer may be transferred afterwards.
-The demo draws its preview at most four times per second.
+Camera input is capped at 480 pixels wide and tracking at 30 updates/second.
+There is at most one worker request in flight. Where ImageBitmap and
+OffscreenCanvas are available, the video path transfers a resized bitmap and
+converts pixels inside the worker. Raw XR capture and unsupported video paths
+still use main-thread pixel readback. Pose solving uses CPU WASM, not the GPU.
 
-Diagnostics report image/depth features, inliers, fit residual, capture latency,
-depth indexing time, worker time, image/depth age, and the last failure.
-These timings are not a complete headset rendering profile.
+Preview captures run at most twice per second. Idle previews skip tracking.
+`onCameraFrame(image, region)` receives preview pixels. Diagnostics report
+registered depth features, current image features, inliers, reprojection error
+in pixels, capture latency, depth indexing time, worker time, and image age.
+Depth age grows after registration by design. These timings are not a complete
+headset rendering profile, and the frame-rate cap is not a speed guarantee.
 
 The version-pinned OpenCV 4.12.0 general-purpose runtime is about 10 MB and is
 external to the SDK bundle. Override `assets.openCvUrl` to self-host it. No
@@ -130,5 +140,5 @@ node tools/tangible/verify-worker.mjs /path/to/opencv.js
 ```
 
 That check covers central-region feature extraction, image translation, tracking
-loss, explicit re-registration, and disposal without any injected detector.
+loss, explicit re-registration, disposal, and planar/curved pose estimation with outliers.
 Device testing is still required for camera/depth alignment and sustained speed.

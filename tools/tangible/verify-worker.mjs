@@ -2,6 +2,7 @@
  * Usage: node tools/tangible/verify-worker.mjs /path/to/opencv.js
  */
 import assert from 'node:assert/strict';
+import * as THREE from 'three';
 import console from 'node:console';
 import {readFile} from 'node:fs/promises';
 import {createRequire} from 'node:module';
@@ -43,15 +44,33 @@ assert.doesNotMatch(
   script,
   /mediapipe|efficientdet|ObjectDetector|visionModuleUrl/i
 );
-vm.runInNewContext(script, {
+const sandbox = vm.createContext({
+  OffscreenCanvas: class {
+    constructor(width, height) {
+      Object.assign(this, {width, height});
+    }
+    getContext() {
+      return {
+        drawImage: (bitmap) => {
+          this.image = bitmap.image;
+        },
+        getImageData: () => this.image,
+      };
+    }
+  },
   self: scope,
   ImageData: TestImageData,
   Uint8ClampedArray,
   performance,
 });
+vm.runInContext(script, sandbox);
 const send = (data) => scope.onmessage({data});
 try {
-  send({type: 'initialize', assets: {openCvUrl: 'injected'}});
+  send({
+    type: 'initialize',
+    assets: {openCvUrl: 'injected'},
+    maxReprojectionErrorPx: 3,
+  });
   await new Promise((resolve, reject) => {
     const started = performance.now();
     const poll = () => {
@@ -94,6 +113,9 @@ try {
       width: 320,
       height: 240,
       pixels: image(dx, dy, blank),
+      intrinsics: [300, 300, 160, 120],
+      preview: false,
+      previewOnly: false,
       registration: register ? region : undefined,
     });
     const reply = replies.at(-1);
@@ -130,8 +152,83 @@ try {
   assert.ok(frame(32, 0, 0, {register: true}));
   send({type: 'reset'});
   assert.equal(frame(33, 0, 0), null);
+  let bitmapClosed = false;
+  const previewImage = new TestImageData(
+    new Uint8ClampedArray(image(0, 0)),
+    320,
+    240
+  );
+  send({
+    type: 'frame',
+    requestId: 34,
+    timeMs: 3400,
+    width: 320,
+    height: 240,
+    bitmap: {
+      image: previewImage,
+      close() {
+        bitmapClosed = true;
+      },
+    },
+    intrinsics: [300, 300, 160, 120],
+    preview: true,
+    previewOnly: true,
+  });
+  assert.equal(bitmapClosed, true, 'Worker must release the bitmap');
+  assert.equal(replies.at(-1).preview.pixels, previewImage.data.buffer);
+  assert.equal(replies.at(-1).observation, null, 'Preview must skip tracking');
+  // Exercise the emitted PnP solver on calibrated planar and curved surfaces.
+  const seed = frame(100, 0, 0, {register: true});
+  for (const curved of [false, true]) {
+    const model = seed.features.map(({id, u, v}) => {
+      const depth = curved
+        ? 1 + 0.12 * Math.cos((u - 0.5) * 12) * Math.cos((v - 0.5) * 9)
+        : 1;
+      return {
+        id,
+        x: ((u * 320 - 160) * depth) / 300,
+        y: (-(v * 240 - 120) * depth) / 300,
+        z: 1 - depth,
+      };
+    });
+    send({type: 'reference', targetId: seed.targetId, points: model});
+    const expected = new THREE.Matrix4().compose(
+      new THREE.Vector3(0.04, -0.025, -0.95),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(0.12, -0.18, 0.07)),
+      new THREE.Vector3(1, 1, 1)
+    );
+    const pixels = model.flatMap((p, i) => {
+      const point = new THREE.Vector3(p.x, p.y, p.z).applyMatrix4(expected);
+      return [
+        (300 * point.x) / -point.z + 160 + (i % 5 === 0 ? 40 : 0),
+        (-300 * point.y) / -point.z + 120,
+      ];
+    });
+    vm.runInContext(
+      `points.delete(); points = cv.matFromArray(${model.length}, 1, cv.CV_32FC2, ${JSON.stringify(pixels)});`,
+      sandbox
+    );
+    const pose = vm.runInContext('estimatePose([300, 300, 160, 120])', sandbox);
+    assert.ok(pose, `Missing ${curved ? 'curved' : 'planar'} pose`);
+    const actual = new THREE.Matrix4().fromArray(pose.cameraFromObject);
+    const a = new THREE.Vector3(),
+      q = new THREE.Quaternion();
+    const b = new THREE.Vector3(),
+      r = new THREE.Quaternion();
+    actual.decompose(a, q, new THREE.Vector3());
+    expected.decompose(b, r, new THREE.Vector3());
+    assert.ok(a.distanceTo(b) < 0.003, `Position error ${a.distanceTo(b)}`);
+    assert.ok(q.angleTo(r) < 0.02, `Rotation error ${q.angleTo(r)}`);
+    assert.ok(pose.inliers >= model.length * 0.5);
+    // Destroy correspondence: no arbitrary pose should be accepted.
+    vm.runInContext(`points.data32F.fill(0);`, sandbox);
+    assert.equal(
+      vm.runInContext('estimatePose([300, 300, 160, 120])', sandbox),
+      null
+    );
+  }
   console.log(
-    `WASM passed: central registration, ${next.features.length} features, shift ${dx.toFixed(2)}, ${dy.toFixed(2)} pixels, loss, explicit re-registration, gap, blank frame, and reset.`
+    `WASM passed: central registration, ${next.features.length} features, shift ${dx.toFixed(2)}, ${dy.toFixed(2)} pixels, loss, explicit re-registration, gap, blank frame, reset, and planar/curved PnP with 20% outliers.`
   );
 } finally {
   send({type: 'dispose'});

@@ -2,13 +2,14 @@
 import type {CvMat, OpenCv} from './OpenCvTypes';
 import type {
   TangibleRegion,
+  TangiblePose,
   TangibleWorkerReply,
   TangibleWorkerRequest,
 } from './TangibleTypes';
 
 const scope = self as unknown as {
   onmessage: ((event: MessageEvent<TangibleWorkerRequest>) => void) | null;
-  postMessage(message: TangibleWorkerReply): void;
+  postMessage(message: TangibleWorkerReply, transfer?: Transferable[]): void;
   importScripts(url: string): void;
   cv: OpenCv & {then?: (callback: (cv: OpenCv) => void) => void};
   close(): void;
@@ -21,9 +22,14 @@ let targetId = 0;
 let lastFrameEndTime = -Infinity;
 let disposed = false;
 let featureCount = 0;
+let maxReprojectionErrorPx = 3;
+const reference = new Map<number, {x: number; y: number; z: number}>();
+let canvas: OffscreenCanvas | null = null;
+let context: OffscreenCanvasRenderingContext2D | null = null;
 let messageStatus = 'Aim at a textured surface and press Register.';
 
 function reset() {
+  reference.clear();
   previousGray?.delete();
   points?.delete();
   previousGray = null;
@@ -137,7 +143,7 @@ function track(gray: CvMat) {
       values.push(x, y);
       ids.push(pointIds[i]);
     }
-    if (ids.length < 12) {
+    if (ids.length < (reference.size ? 6 : 12)) {
       reset();
       messageStatus =
         'Image tracking lost. Aim at the surface and register again.';
@@ -153,10 +159,153 @@ function track(gray: CvMat) {
   }
 }
 
+/** Solve a fixed 3D feature map against current pixels; no fresh depth required. */
+function estimatePose(intrinsics: number[]): TangiblePose | null {
+  if (!points || reference.size < 6) return null;
+  const object: number[] = [],
+    image: number[] = [];
+  for (let i = 0; i < pointIds.length; i++) {
+    const point = reference.get(pointIds[i]);
+    if (!point) continue;
+    object.push(point.x, point.y, point.z);
+    image.push(points.data32F[i * 2], points.data32F[i * 2 + 1]);
+  }
+  const xs = image.filter((_, i) => i % 2 === 0);
+  const ys = image.filter((_, i) => i % 2 === 1);
+  if (
+    Math.max(...xs) - Math.min(...xs) < 6 ||
+    Math.max(...ys) - Math.min(...ys) < 6
+  )
+    return null;
+  const count = image.length / 2;
+  if (count < 6) return null;
+  const [fx, fy, cx, cy] = intrinsics;
+  if (![fx, fy, cx, cy].every(Number.isFinite) || fx <= 0 || fy <= 0)
+    return null;
+  const objectMat = cv.matFromArray(count, 1, cv.CV_64FC3, object);
+  const imageMat = cv.matFromArray(count, 1, cv.CV_64FC2, image);
+  const camera = cv.matFromArray(3, 3, cv.CV_64FC1, [
+    fx,
+    0,
+    cx,
+    0,
+    fy,
+    cy,
+    0,
+    0,
+    1,
+  ]);
+  const distortion = new cv.Mat(),
+    rvec = new cv.Mat(),
+    tvec = new cv.Mat();
+  const inliers = new cv.Mat(),
+    rotation = new cv.Mat();
+  try {
+    // ITERATIVE refits the RANSAC consensus and supports both planar and curved maps.
+    if (
+      !cv.solvePnPRansac(
+        objectMat,
+        imageMat,
+        camera,
+        distortion,
+        rvec,
+        tvec,
+        false,
+        60,
+        maxReprojectionErrorPx,
+        0.99,
+        inliers,
+        cv.SOLVEPNP_ITERATIVE
+      )
+    )
+      return null;
+    if (inliers.rows < Math.max(6, Math.floor(count * 0.5) + 1)) return null;
+    cv.Rodrigues(rvec, rotation);
+    const r = rotation.data64F,
+      t = tvec.data64F;
+    if (![...r, ...t].every(Number.isFinite)) return null;
+    let error = 0;
+    for (const i of inliers.data32S) {
+      const x = object[i * 3],
+        y = object[i * 3 + 1],
+        z = object[i * 3 + 2];
+      const px = r[0] * x + r[1] * y + r[2] * z + t[0];
+      const py = r[3] * x + r[4] * y + r[5] * z + t[1];
+      const pz = r[6] * x + r[7] * y + r[8] * z + t[2];
+      if (pz <= 0.05) return null;
+      error +=
+        ((fx * px) / pz + cx - image[i * 2]) ** 2 +
+        ((fy * py) / pz + cy - image[i * 2 + 1]) ** 2;
+    }
+    const reprojectionErrorPx = Math.sqrt(error / inliers.rows);
+    if (reprojectionErrorPx > maxReprojectionErrorPx) return null;
+    // OpenCV camera axes: +Y down, +Z forward. Convert to Three.js once here.
+    return {
+      cameraFromObject: [
+        r[0],
+        -r[3],
+        -r[6],
+        0,
+        r[1],
+        -r[4],
+        -r[7],
+        0,
+        r[2],
+        -r[5],
+        -r[8],
+        0,
+        t[0],
+        -t[1],
+        -t[2],
+        1,
+      ],
+      inliers: inliers.rows,
+      reprojectionErrorPx,
+    };
+  } catch {
+    // Degenerate correspondences can make OpenCV reject the solve.
+    return null;
+  } finally {
+    for (const mat of [
+      objectMat,
+      imageMat,
+      camera,
+      distortion,
+      rvec,
+      tvec,
+      inliers,
+      rotation,
+    ])
+      mat.delete();
+  }
+}
+
+function setReference(
+  message: Extract<TangibleWorkerRequest, {type: 'reference'}>
+) {
+  if (message.targetId !== targetId || !points) return;
+  reference.clear();
+  for (const point of message.points) reference.set(point.id, point);
+  // Track only features with registered depth, not surrounding background.
+  const ids: number[] = [],
+    values: number[] = [];
+  for (let i = 0; i < pointIds.length; i++)
+    if (reference.has(pointIds[i])) {
+      ids.push(pointIds[i]);
+      values.push(points.data32F[i * 2], points.data32F[i * 2 + 1]);
+    }
+  points.delete();
+  points = cv.matFromArray(ids.length, 1, cv.CV_32FC2, values);
+  pointIds = ids;
+}
+
 function processFrame(
   message: Extract<TangibleWorkerRequest, {type: 'frame'}>
 ) {
-  if (!cv || disposed) return;
+  if (!cv || disposed) {
+    message.bitmap?.close();
+    return;
+  }
   const started = performance.now();
   if (
     previousGray &&
@@ -168,13 +317,53 @@ function processFrame(
     messageStatus =
       'Camera frames changed or paused. Register the surface again.';
   }
-  const rgba = cv.matFromImageData(
-    new ImageData(
-      new Uint8ClampedArray(message.pixels),
+  let image: ImageData;
+  if (message.bitmap) {
+    try {
+      if (
+        !canvas ||
+        canvas.width !== message.width ||
+        canvas.height !== message.height
+      ) {
+        canvas = new OffscreenCanvas(message.width, message.height);
+        context = canvas.getContext('2d', {willReadFrequently: true});
+      }
+      if (!context) throw new Error('Worker image conversion is unavailable.');
+      context.drawImage(message.bitmap, 0, 0, message.width, message.height);
+      image = context.getImageData(0, 0, message.width, message.height);
+    } finally {
+      message.bitmap.close();
+    }
+  } else {
+    image = new ImageData(
+      new Uint8ClampedArray(message.pixels!),
       message.width,
       message.height
-    )
-  );
+    );
+  }
+  const preview = message.preview
+    ? {
+        pixels: image.data.buffer as ArrayBuffer,
+        width: image.width,
+        height: image.height,
+      }
+    : undefined;
+  if (message.previewOnly) {
+    scope.postMessage(
+      {
+        type: 'result',
+        requestId: message.requestId,
+        observation: null,
+        processingMs: performance.now() - started,
+        featureCount: 0,
+        status: messageStatus,
+        preview,
+      },
+      preview ? [preview.pixels] : []
+    );
+    return;
+  }
+  const rgba = cv.matFromImageData(image);
   let gray: CvMat | null = new cv.Mat();
   try {
     cv.cvtColor(rgba, gray, cv.COLOR_RGBA2GRAY);
@@ -186,6 +375,7 @@ function processFrame(
     const observation = points
       ? {
           targetId,
+          pose: reference.size ? estimatePose(message.intrinsics) : null,
           features: pointIds.map((id, i) => ({
             id,
             u: points!.data32F[i * 2] / message.width,
@@ -195,14 +385,18 @@ function processFrame(
       : null;
     const processingMs = performance.now() - started;
     lastFrameEndTime = message.timeMs + processingMs;
-    scope.postMessage({
-      type: 'result',
-      requestId: message.requestId,
-      observation,
-      processingMs,
-      featureCount,
-      status: messageStatus,
-    });
+    scope.postMessage(
+      {
+        type: 'result',
+        requestId: message.requestId,
+        observation,
+        processingMs,
+        featureCount,
+        status: messageStatus,
+        preview,
+      },
+      preview ? [preview.pixels] : []
+    );
   } finally {
     rgba.delete();
     gray?.delete();
@@ -213,11 +407,13 @@ scope.onmessage = (event) => {
   const message = event.data;
   try {
     if (message.type === 'initialize') {
+      maxReprojectionErrorPx = message.maxReprojectionErrorPx;
       void initialize(message.assets).catch((error) => {
         if (!disposed)
           scope.postMessage({type: 'error', message: String(error)});
       });
-    } else if (message.type === 'frame') processFrame(message);
+    } else if (message.type === 'reference') setReference(message);
+    else if (message.type === 'frame') processFrame(message);
     else if (message.type === 'reset') reset();
     else if (message.type === 'dispose') {
       disposed = true;

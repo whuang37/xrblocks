@@ -78,7 +78,15 @@ function setup(
       cameraQuaternion: new THREE.Quaternion(),
       sample,
     } as DepthFrame;
-    Reflect.get(tracker, 'submit').call(tracker, image, depth);
+    const camera = new THREE.PerspectiveCamera(60, 4 / 3, 0.1, 10);
+    Reflect.get(tracker, 'submit').call(tracker, image, {
+      timeMs: performance.now(),
+      depth,
+      camera: {
+        worldFromView: camera.matrixWorld,
+        clipFromView: camera.projectionMatrix,
+      },
+    });
     return worker.postMessage.mock.calls
       .map(([m]) => m)
       .filter((m) => m.type === 'frame')
@@ -94,6 +102,13 @@ function setup(
       observation: hasFeatures
         ? {
             targetId: 1,
+            pose: {
+              cameraFromObject: new THREE.Matrix4()
+                .makeTranslation(0, 0, -1)
+                .toArray(),
+              inliers: 16,
+              reprojectionErrorPx: 0,
+            },
             features: Array.from({length: 16}, (_, id) => ({
               id,
               u: 0.35 + (id % 4) * 0.1,
@@ -109,8 +124,10 @@ describe('manual surface registration', () => {
   it('previews without tracking, then attaches only the explicitly chosen widget', () => {
     const {tracker, worker, create, preview, submit, reply, pauseDepth} =
       setup();
-    expect(submit()).toBeUndefined();
-    expect(preview).toHaveBeenCalledOnce();
+    const idle = submit()!;
+    expect(idle.previewOnly).toBe(true);
+    reply(idle.requestId, false);
+    expect(preview).not.toHaveBeenCalled();
     expect(tracker.register('timer')).toBe(true);
     const first = submit()!;
     expect(first.registration).toEqual({
@@ -122,6 +139,10 @@ describe('manual surface registration', () => {
     reply(first.requestId);
     expect(tracker.state).toBe('tracked');
     expect(tracker.widgetId).toBe('timer');
+    expect(pauseDepth).toHaveBeenCalledOnce();
+    expect(
+      worker.postMessage.mock.calls.some(([m]) => m.type === 'reference')
+    ).toBe(true);
     expect(create).toHaveBeenCalledExactlyOnceWith('timer');
     expect(tracker.target.visible).toBe(true);
     const next = submit()!;
@@ -132,7 +153,7 @@ describe('manual surface registration', () => {
     expect(tracker.target.xb?.interactionEnabled).toBe(false);
     const count = worker.postMessage.mock.calls.length;
     submit();
-    expect(worker.postMessage).toHaveBeenCalledTimes(count);
+    expect(worker.postMessage).toHaveBeenCalledTimes(count + 1);
     tracker.dispose();
     worker.reply({type: 'disposed'});
     expect(worker.terminate).toHaveBeenCalledOnce();

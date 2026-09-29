@@ -4,6 +4,8 @@ export interface CvMat {
   cols: number;
   data: Uint8Array;
   data32F: Float32Array;
+  data64F: Float64Array;
+  data32S: Int32Array;
   clone(): CvMat;
   delete(): void;
 }
@@ -14,6 +16,25 @@ export interface OpenCv {
   CV_8UC1: number;
   CV_32FC2: number;
   COLOR_RGBA2GRAY: number;
+  CV_64FC1: number;
+  CV_64FC2: number;
+  CV_64FC3: number;
+  SOLVEPNP_ITERATIVE: number;
+  solvePnPRansac(
+    objectPoints: CvMat,
+    imagePoints: CvMat,
+    cameraMatrix: CvMat,
+    distortion: CvMat,
+    rvec: CvMat,
+    tvec: CvMat,
+    useGuess: boolean,
+    iterations: number,
+    error: number,
+    confidence: number,
+    inliers: CvMat,
+    flags: number
+  ): boolean;
+  Rodrigues(source: CvMat, destination: CvMat): void;
   matFromImageData(image: ImageData): CvMat;
   matFromArray(
     rows: number,

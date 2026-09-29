@@ -268,7 +268,7 @@ class ObjectWidgetsDemo extends xb.Script {
     panel.add(button('Neutral tilt', () => this.tracker.recenter()));
     panel.add(
       text(
-        'On Android XR, enter AR and allow camera + depth. Missing depth pauses tracking.',
+        'On Android XR, enter AR and allow camera + depth. Depth sets the initial scale; image features track motion.',
         15,
         MUTED
       )
@@ -337,7 +337,7 @@ ${d.imageFeatureCount} image / ${d.featureCount} depth / ${d.inliers} fit points
 Capture ${d.captureMs.toFixed(0)} ms · depth index ${d.depthIndexMs.toFixed(0)} ms
 Tracking worker ${d.processingMs.toFixed(0)} ms
 Image age ${d.observationAgeMs.toFixed(0)} ms
-Depth age ${Number.isFinite(d.depthAgeMs) ? d.depthAgeMs.toFixed(0) : '—'} ms · fit ${(d.residualMeters * 1000).toFixed(0)} mm
+Depth: registration only · fit ${d.reprojectionErrorPx.toFixed(1)} px
 Camera timing: ${d.timing}
 Pixels: ${this.pixelStats}
 Last issue: ${d.lastFailure}`;

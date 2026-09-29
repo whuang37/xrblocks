@@ -14,9 +14,17 @@ export interface TrackedFeature {
   v: number;
 }
 
+export interface TangiblePose {
+  /** Column-major transform in the Three.js camera convention (forward -Z). */
+  cameraFromObject: number[];
+  inliers: number;
+  reprojectionErrorPx: number;
+}
+
 export interface TangibleObservation {
   targetId: number;
   features: TrackedFeature[];
+  pose: TangiblePose | null;
 }
 
 export type TangibleState =
@@ -37,17 +45,17 @@ export interface TangibleWidget {
 export interface TangibleWidgetsOptions {
   /** Application-defined widget IDs, for example `reading`, `timer`, or `tilt`. */
   widgets: Record<string, TangibleWidget>;
-  /** Maximum processing rate. Rendering remains independent. @defaultValue 15 */
+  /** Maximum processing rate. Rendering remains independent. @defaultValue 30 */
   trackingFps?: number;
-  /** Pose low-pass time constant in milliseconds. Higher values smooth more but add lag; 0 disables filtering. @defaultValue 100 */
+  /** Pose low-pass time constant in milliseconds. Higher values smooth more but add lag; 0 disables filtering. @defaultValue 40 */
   poseSmoothingMs?: number;
   /** Maximum usable observation age, including worker time. @defaultValue 500 */
   maxPoseAgeMs?: number;
-  /** Maximum rigid-fit residual, in metres. @defaultValue 0.025 */
-  maxResidualMeters?: number;
+  /** Maximum image reprojection error in pixels. @defaultValue 3 */
+  maxReprojectionErrorPx?: number;
   /** Optional device camera profile; uses SDK device detection by default. */
   cameraProfile?: string;
-  /** Optional synchronous preview hook. Copy pixels here; their buffer can be transferred afterwards. */
+  /** Optional preview hook, called at most twice per second plus registration. */
   onCameraFrame?: (image: ImageData, region: TangibleRegion) => void;
   /** OpenCV runtime URL. Override for same-origin or offline deployment. */
   assets?: Partial<TangibleAssets>;
@@ -63,14 +71,24 @@ export const DEFAULT_TANGIBLE_ASSETS: Readonly<TangibleAssets> = {
 };
 
 export type TangibleWorkerRequest =
-  | {type: 'initialize'; assets: TangibleAssets}
+  | {type: 'initialize'; assets: TangibleAssets; maxReprojectionErrorPx: number}
+  | {
+      type: 'reference';
+      targetId: number;
+      points: {id: number; x: number; y: number; z: number}[];
+    }
   | {
       type: 'frame';
       requestId: number;
       timeMs: number;
       width: number;
       height: number;
-      pixels: ArrayBuffer;
+      pixels?: ArrayBuffer;
+      bitmap?: ImageBitmap;
+      /** fx, fy, cx, cy at this frame's image resolution. */
+      intrinsics: number[];
+      preview: boolean;
+      previewOnly: boolean;
       /** Explicit registration only. Loss never selects a new surface automatically. */
       registration?: TangibleRegion;
     }
@@ -88,4 +106,5 @@ export type TangibleWorkerReply =
       processingMs: number;
       featureCount: number;
       status: string;
+      preview?: {pixels: ArrayBuffer; width: number; height: number};
     };

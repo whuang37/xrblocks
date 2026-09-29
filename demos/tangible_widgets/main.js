@@ -137,7 +137,20 @@ class ObjectWidget extends xb.Script {
 class ObjectWidgetsDemo extends xb.Script {
   constructor() {
     super();
+    this.previewCanvas = document.createElement('canvas');
+    this.previewTexture = new THREE.CanvasTexture(this.previewCanvas);
+    this.previewTexture.colorSpace = THREE.SRGBColorSpace;
+    this.lastPreview = -Infinity;
     this.tracker = new TangibleWidgets({
+      onCameraFrame: (image) => {
+        if (performance.now() - this.lastPreview < 1000) return;
+        this.lastPreview = performance.now();
+        this.previewCanvas.width = image.width;
+        this.previewCanvas.height = image.height;
+        this.previewCanvas.getContext('2d').putImageData(image, 0, 0);
+        this.previewTexture.needsUpdate = true;
+        this.preview.scale.y = image.height / image.width;
+      },
       widgets: Object.fromEntries(
         ['book', 'cup', 'bottle'].map((label) => [
           label,
@@ -145,17 +158,23 @@ class ObjectWidgetsDemo extends xb.Script {
         ])
       ),
     });
-    this.add(this.tracker);
+    this.preview = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.48, 0.48),
+      new THREE.MeshBasicMaterial({map: this.previewTexture, toneMapped: false})
+    );
+    this.preview.position.set(-0.42, 1.4, -1.05);
+    this.preview.name = 'TrackingCameraPreview';
+    this.add(this.tracker, this.preview);
     this.lastDashboard = 0;
   }
   init() {
-    const panel = card(0.52, 0.82);
+    const panel = card(0.57, 0.94);
     panel.name = 'ObjectWidgetsDashboard';
     panel.position.set(0.44, 1.45, -1.05);
     panel.add(text('OBJECT WIDGETS', 25, ACCENT));
     panel.add(
       text(
-        'Show a book, cup, or bottle.\nHold it still to register. Then move it.',
+        'Show a book, cup, or bottle.\nHold it still to register. Then move it.\nThe left preview is the image sent to the detector.',
         19
       )
     );
@@ -180,6 +199,11 @@ class ObjectWidgetsDemo extends xb.Script {
     );
     this.add(panel);
   }
+  dispose() {
+    this.previewTexture.dispose();
+    this.preview.geometry.dispose();
+    this.preview.material.dispose();
+  }
   update() {
     if (!this.statusText || performance.now() - this.lastDashboard < 250)
       return;
@@ -195,6 +219,7 @@ Worker ${d.processingMs.toFixed(0)} ms: detect ${d.recognitionMs.toFixed(0)} / f
 Image age ${d.observationAgeMs.toFixed(0)} ms
 Depth age ${Number.isFinite(d.depthAgeMs) ? d.depthAgeMs.toFixed(0) : '—'} ms · fit ${(d.residualMeters * 1000).toFixed(0)} mm
 Camera timing: ${d.timing}
+Model: ${d.recognition.candidates.map((item) => `${item.label} ${Math.round(item.score * 100)}%`).join(', ') || 'nothing above 20%'}
 Last issue: ${d.lastFailure}`;
   }
 }

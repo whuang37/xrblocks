@@ -4,6 +4,7 @@ import type {ObjectDetector, FilesetResolver} from '@mediapipe/tasks-vision';
 import type {CvMat, OpenCv} from './OpenCvTypes';
 import type {
   TangibleObservation,
+  TangibleRecognition,
   TangibleWorkerReply,
   TangibleWorkerRequest,
 } from './TangibleTypes';
@@ -27,6 +28,12 @@ let lastRecognition = -Infinity;
 let recognitionIntervalMs = 1500;
 let lastFrameEndTime = -Infinity;
 let disposed = false;
+let recognition: TangibleRecognition = {
+  candidates: [],
+  selectedLabel: null,
+  featureCount: 0,
+  reason: 'Recognition has not run yet.',
+};
 
 function reset() {
   previousGray?.delete();
@@ -71,9 +78,10 @@ function initialize(
     const created = await vision.ObjectDetector.createFromOptions(files, {
       baseOptions: {modelAssetPath: message.assets.modelUrl, delegate: 'CPU'},
       runningMode: 'IMAGE',
-      scoreThreshold: 0.55,
-      maxResults: 8,
-      categoryAllowlist: labels,
+      // Keep rejected categories and scores visible for diagnosis. Acceptance
+      // remains at 0.55 below; this does not relax object registration.
+      scoreThreshold: 0.2,
+      maxResults: -1,
     });
     if (disposed) {
       created.close();
@@ -88,12 +96,40 @@ function recognize(image: ImageData, gray: CvMat, timeMs: number) {
   // Recognition selects a widget once. Optical flow owns tracking after that.
   if (target || timeMs - lastRecognition < recognitionIntervalMs) return;
   lastRecognition = timeMs;
-  const detections = detector!
-    .detect(image)
-    .detections.filter(
-      (item) =>
-        item.boundingBox && labels.includes(item.categories[0]?.categoryName)
-    );
+  const results = detector!.detect(image).detections;
+  recognition = {
+    candidates: results
+      .flatMap((item) =>
+        item.categories.slice(0, 1).map((category) => ({
+          label: category.categoryName,
+          score: category.score,
+        }))
+      )
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5),
+    selectedLabel: null,
+    featureCount: 0,
+    reason: 'No detection reached 20% confidence. Check the camera preview.',
+  };
+  const supported = results.filter(
+    (item) =>
+      item.boundingBox && labels.includes(item.categories[0]?.categoryName)
+  );
+  const detections = supported.filter(
+    (item) => item.categories[0].score >= 0.55
+  );
+  if (!detections.length) {
+    const best = supported.sort(
+      (a, b) => b.categories[0].score - a.categories[0].score
+    )[0];
+    if (best) {
+      recognition.selectedLabel = best.categories[0].categoryName;
+      recognition.reason = `${recognition.selectedLabel} scored ${Math.round(best.categories[0].score * 100)}%; need 55%.`;
+    } else if (results.length) {
+      recognition.reason = `Detected other categories; need ${labels.join(', ')}.`;
+    }
+    return;
+  }
   // Prefer a supported object near the centre, with a useful image footprint.
   detections.sort((a, b) => {
     const rank = (item: typeof a) => {
@@ -107,7 +143,13 @@ function recognize(image: ImageData, gray: CvMat, timeMs: number) {
   const detection = detections.find(
     (item) => item.boundingBox!.width >= 50 && item.boundingBox!.height >= 50
   );
-  if (!detection) return;
+  if (!detection) {
+    recognition.selectedLabel = detections[0].categories[0].categoryName;
+    recognition.reason =
+      'Object box is smaller than 50 × 50 pixels. Move closer.';
+    return;
+  }
+  recognition.selectedLabel = detection.categories[0].categoryName;
   const box = detection.boundingBox!;
   const mask = cv.Mat.zeros(image.height, image.width, cv.CV_8UC1);
   const found = new cv.Mat();
@@ -125,7 +167,12 @@ function recognize(image: ImageData, gray: CvMat, timeMs: number) {
     for (let y = y0; y < y1; y++)
       mask.data.fill(255, y * image.width + x0, y * image.width + x1);
     cv.goodFeaturesToTrack(gray, found, 100, 0.015, 6, mask);
-    if (found.rows < 12) return;
+    recognition.featureCount = found.rows;
+    if (found.rows < 12) {
+      recognition.reason = `${recognition.selectedLabel} detected, but only ${found.rows} image features; need 12.`;
+      return;
+    }
+    recognition.reason = `${recognition.selectedLabel}: image features ready for depth registration.`;
     points?.delete();
     points = found.clone();
     pointIds = Array.from({length: found.rows}, (_, i) => i);
@@ -232,6 +279,7 @@ function processFrame(
       processingMs,
       opticalFlowMs,
       recognitionMs,
+      recognition,
     });
   };
   if (!target && message.timeMs - lastRecognition < recognitionIntervalMs) {

@@ -59,3 +59,11 @@ feature counts, capture/depth-index/worker times, image age, and camera timing.
 The last failure stays visible after a new registration attempt. Recognition
 runs only while searching; tracking captures are capped at 15 fps and 480 pixels
 wide. Raw XR snapshots are resized before GPU readback.
+
+The left-hand camera preview shows the actual input sent to the detector,
+refreshed at most once a second. Confirm that your object is visible, upright,
+and reasonably large in this image. **Model** shows the top labels and scores
+from the latest detection; **status** gives the exact rejection reason. A
+recognized book with too few image features now reports that failure instead
+of saying only “sees none.” Lower-score and unsupported labels are diagnostic
+only; they cannot create a widget.

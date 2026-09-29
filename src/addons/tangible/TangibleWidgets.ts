@@ -13,6 +13,7 @@ import {estimateRigidPose, type PointPair} from './RigidPose';
 import {
   DEFAULT_TANGIBLE_ASSETS,
   type TangibleObservation,
+  type TangibleRecognition,
   type TangibleState,
   type TangibleWidgetsOptions,
   type TangibleWorkerReply,
@@ -37,6 +38,12 @@ export class TangibleWidgets extends Script {
   readonly diagnostics = {
     imageFeatureCount: 0,
     detectedLabel: 'none',
+    recognition: {
+      candidates: [],
+      selectedLabel: null,
+      featureCount: 0,
+      reason: 'Recognition has not run yet.',
+    } as TangibleRecognition,
     captureMs: 0,
     depthIndexMs: 0,
     observationAgeMs: 0,
@@ -354,6 +361,7 @@ export class TangibleWidgets extends Script {
       startedAt: performance.now(),
     };
     try {
+      this.options.onCameraFrame?.(image);
       const pixels = image.data.buffer as ArrayBuffer;
       this.worker.postMessage(
         {
@@ -395,9 +403,11 @@ export class TangibleWidgets extends Script {
     this.diagnostics.processingMs = reply.processingMs;
     this.diagnostics.opticalFlowMs = reply.opticalFlowMs;
     this.diagnostics.recognitionMs = reply.recognitionMs;
-    this.diagnostics.detectedLabel = reply.observation?.label ?? 'none';
+    this.diagnostics.recognition = reply.recognition;
+    this.diagnostics.detectedLabel =
+      reply.observation?.label ?? reply.recognition.selectedLabel ?? 'none';
     this.diagnostics.imageFeatureCount =
-      reply.observation?.features.length ?? 0;
+      reply.observation?.features.length ?? reply.recognition.featureCount;
     this.diagnostics.featureCount = 0;
     this.diagnostics.inliers = 0;
     this.diagnostics.residualMeters = 0;
@@ -422,10 +432,7 @@ export class TangibleWidgets extends Script {
     depth: DepthFrame
   ) {
     if (!observation) {
-      this.hide(
-        'searching',
-        'No textured object found. Show its printed surface.'
-      );
+      this.hide('searching', this.diagnostics.recognition.reason);
       return;
     }
     if (!this.options.widgets[observation.label]) return;

@@ -13,6 +13,14 @@ export interface TangibleObservation {
   features: TrackedFeature[];
 }
 
+/** Latest detector result, before registration and feature checks. */
+export interface TangibleRecognition {
+  candidates: {label: string; score: number}[];
+  selectedLabel: string | null;
+  featureCount: number;
+  reason: string;
+}
+
 export type TangibleState =
   | 'loading'
   | 'searching'
@@ -41,6 +49,8 @@ export interface TangibleWidgetsOptions {
   maxResidualMeters?: number;
   /** Optional device camera profile; uses SDK device detection by default. */
   cameraProfile?: string;
+  /** Optional synchronous preview hook. Copy pixels here; their buffer is transferred afterwards. */
+  onCameraFrame?: (image: ImageData) => void;
   /** Runtime assets. Override with same-origin URLs for offline deployment. */
   assets?: Partial<TangibleAssets>;
 }
@@ -92,4 +102,5 @@ export type TangibleWorkerReply =
       processingMs: number;
       opticalFlowMs: number;
       recognitionMs: number;
+      recognition: TangibleRecognition;
     };

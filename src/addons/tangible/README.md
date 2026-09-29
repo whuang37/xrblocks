@@ -204,3 +204,15 @@ shows why a result was rejected by the unchanged 500 ms freshness limit.
 Slow first recognition can be rejected as stale; the next frame can still use
 its image features to start fresh tracking. Worker processing time does not
 count toward the 600 ms idle-gap reset. Depth and rigid-fit checks still apply.
+
+Recognition diagnostics retain the top five model labels above 20% confidence,
+even if they are unsupported. Registration still requires a supported label at
+55%, a box at least 50 × 50 pixels, and 12 image features.
+`diagnostics.recognition.reason` distinguishes no detections, unsupported labels,
+low confidence, small boxes, and insufficient texture. A detected label can now
+remain visible even when it fails feature selection; it does not imply tracking.
+
+The optional `onCameraFrame(image)` callback receives the exact detector input
+on the main thread. Copy it synchronously if needed: its pixel buffer transfers
+to the worker immediately afterwards. It is intended for a diagnostic preview.
+The demo copies at most one image per second into its left-hand preview panel.

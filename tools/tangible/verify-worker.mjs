@@ -57,10 +57,13 @@ const visionModuleUrl =
   'data:text/javascript,' +
   encodeURIComponent(`
   export let calls = 0;
+  export let options;
+  let detections = [{boundingBox: {originX: 30, originY: 30, width: 240, height: 180}, categories: [{categoryName: 'book', score: 0.95}]}];
+  export const setDetections = (value) => { detections = value; };
   export const FilesetResolver = {forVisionTasks: async () => ({})};
-  export const ObjectDetector = {createFromOptions: async () => ({
-    detect: () => { calls++; return ({detections: [{boundingBox: {originX: 30, originY: 30, width: 240, height: 180}, categories: [{categoryName: 'book', score: 0.95}]}]}); }, close() {}
-  })};
+  export const ObjectDetector = {createFromOptions: async (files, config) => { options = config; return {
+    detect: () => { calls++; return {detections}; }, close() {}
+  }; }};
 `);
 const vision = await import(visionModuleUrl);
 const send = (data) => scope.onmessage({data});
@@ -159,8 +162,32 @@ try {
     1,
     'Do not rerun recognition during tracking'
   );
+  assert.equal(vision.options.scoreThreshold, 0.2);
+  assert.equal(vision.options.categoryAllowlist, undefined);
+  const candidate = (label, score, width = 240) => ({
+    boundingBox: {originX: 30, originY: 30, width, height: 180},
+    categories: [{categoryName: label, score}],
+  });
+  const diagnose = (detections, blank = false) => {
+    send({type: 'reset'});
+    vision.setDetections(detections);
+    assert.equal(frame(200, 0, 0, blank), null);
+    return replies.at(-1).recognition;
+  };
+  assert.match(diagnose([]).reason, /No detection reached 20%/);
+  const unsupported = diagnose([candidate('chair', 0.9)]);
+  assert.equal(unsupported.candidates[0].label, 'chair');
+  assert.match(unsupported.reason, /other categories/);
+  const weak = diagnose([candidate('book', 0.4)]);
+  assert.equal(weak.selectedLabel, 'book');
+  assert.match(weak.reason, /40%; need 55%/);
+  assert.match(diagnose([candidate('book', 0.9, 30)]).reason, /smaller than/);
+  const noFeatures = diagnose([candidate('book', 0.9)], true);
+  assert.equal(noFeatures.selectedLabel, 'book');
+  assert.equal(noFeatures.featureCount, 0);
+  assert.match(noFeatures.reason, /only 0 image features/);
   console.log(
-    `Actual WASM optical flow passed: ${next.features.length} features, shift ${mean(dx).toFixed(2)}, ${mean(dy).toFixed(2)} pixels; loss, idle throttling, reacquisition, slow recognition recovery, and detection-free tracking passed.`
+    `Actual WASM optical flow passed: ${next.features.length} features, shift ${mean(dx).toFixed(2)}, ${mean(dy).toFixed(2)} pixels; loss, idle throttling, reacquisition, slow recognition recovery, detection-free tracking, and rejection diagnostics passed.`
   );
 } finally {
   send({type: 'dispose'});

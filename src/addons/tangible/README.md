@@ -49,7 +49,8 @@ tracker.register('timer');
 Widget IDs belong to the application. They do not describe or restrict the
 physical object. `register(id)` returns false while loading, after disposal, or
 on a fatal error; it throws for an unknown widget ID. A successful request
-captures the next available camera frame. Hold the object still until `tracked`.
+tries camera/depth frames for up to 10 seconds. Hold the object still until
+`tracked`; missing samples retry without another button press.
 
 ## Registration and tracking
 
@@ -60,7 +61,9 @@ mask and does not find the nearest object across the whole scene.
 
 OpenCV extracts up to 100 features inside the square. Registration requires at
 least 12 features with valid depth, within 15 cm of the depth at the square's
-centre. Missing centre depth or insufficient features reports a specific failure.
+centre. Missing centre depth or insufficient features reports the retry reason.
+Nearby depth samples are projected onto each feature’s camera ray, so depth
+resolution does not introduce a fixed image-coordinate mismatch.
 Background beyond that depth band is excluded. Points on fingers or nearby
 background can still contaminate a registration; keep them outside the square.
 
@@ -94,6 +97,7 @@ and observation freshness use the original measurements, not filtered values.
 tracked orientation as neutral. Ordinary child buttons use XR Blocks ray/pinch
 input. The addon does not detect fingertip contact.
 
+Brief rejected poses keep the last valid attachment until its age limit.
 Loss hides content and disables interaction. Brief stale observations can recover
 if feature tracking survives; full feature loss, a long camera gap, or failed
 registration requires another explicit `register(id)`. It does not automatically

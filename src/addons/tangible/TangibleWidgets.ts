@@ -84,6 +84,7 @@ export class TangibleWidgets extends Script {
   private workerTimeout: ReturnType<typeof setTimeout> | null = null;
   private tracking = false;
   private registrationPending = false;
+  private registrationStartedAt = 0;
   private lastVideoTime = NaN;
   private readonly trackingInterval: number;
   private readonly poseSmoothingMs: number;
@@ -183,6 +184,7 @@ export class TangibleWidgets extends Script {
     this.widgetId = widgetId;
     this.tracking = true;
     this.registrationPending = true;
+    this.registrationStartedAt = performance.now();
     this.hide('registering', 'Hold the surface inside the preview box still.');
     return true;
   }
@@ -231,6 +233,14 @@ export class TangibleWidgets extends Script {
       this.fail('The tracking worker stopped responding. Reload to try again.');
       return;
     }
+    if (
+      this.tracking &&
+      !this.reference.size &&
+      now - this.registrationStartedAt > 10000
+    )
+      this.stopTracking(
+        'Registration timed out. Keep a textured, opaque surface in the box and try again.'
+      );
     const camera = this.engine.deviceCamera!;
     const mesh = this.depth.depthMesh;
     const attribute = mesh?.geometry.getAttribute('position') as
@@ -251,7 +261,12 @@ export class TangibleWidgets extends Script {
       (!this.tracking && !this.options.onCameraFrame) ||
       this.inFlight ||
       this.capturing ||
-      now - this.lastRequestAt < (this.tracking ? this.trackingInterval : 500)
+      now - this.lastRequestAt <
+        (this.tracking
+          ? this.reference.size
+            ? this.trackingInterval
+            : 100
+          : 500)
     )
       return;
     if (
@@ -410,8 +425,8 @@ export class TangibleWidgets extends Script {
     try {
       if (this.registrationPending && !frame.depth?.sample(0.5, 0.5)) {
         bitmap?.close();
-        this.stopTracking(
-          'No depth at the box centre. Aim at an opaque surface and register again.'
+        this.retryRegistration(
+          'Waiting for depth at the box centre. Hold an opaque surface still.'
         );
         return;
       }
@@ -497,6 +512,12 @@ export class TangibleWidgets extends Script {
     this.diagnostics.observationAgeMs =
       performance.now() - request.frame.timeMs;
     if (performance.now() - request.frame.timeMs > this.maxAge) {
+      if (!this.reference.size) {
+        this.retryRegistration(
+          'Registration image was late. Hold still while retrying.'
+        );
+        return;
+      }
       this.hide(
         'lost',
         `Image is ${Math.round(this.diagnostics.observationAgeMs)} ms old (limit ${this.maxAge} ms). Waiting for tracking.`
@@ -504,8 +525,10 @@ export class TangibleWidgets extends Script {
       return;
     }
     try {
-      if (!reply.observation) this.stopTracking(reply.status);
-      else this.applyObservation(reply.observation, request.frame);
+      if (!reply.observation) {
+        if (!this.reference.size) this.retryRegistration(reply.status);
+        else this.stopTracking(reply.status);
+      } else this.applyObservation(reply.observation, request.frame);
     } catch (error) {
       this.fail(String(error));
     }
@@ -526,10 +549,8 @@ export class TangibleWidgets extends Script {
     }
     const pose = observation.pose;
     if (!pose || observation.targetId !== this.targetId) {
-      this.hide(
-        'lost',
-        'Image pose is uncertain. Keep the registered surface visible.'
-      );
+      // Keep the last valid pose through a short rejected frame. The age limit
+      // still hides stale content and ends tracking if no valid pose returns.
       if (performance.now() - this.lastPoseAt > this.maxAge)
         this.stopTracking('Image pose was lost. Register the surface again.');
       return;
@@ -565,13 +586,13 @@ export class TangibleWidgets extends Script {
       );
     }
     if (samples.length < 12)
-      return this.stopTracking(
+      return this.retryRegistration(
         `${samples.length}/${observation.features.length} image features have depth; need 12.`
       );
     const centreDepth = depth.sample(0.5, 0.5);
     if (!centreDepth)
-      return this.stopTracking(
-        'No depth at the registration centre. Register again.'
+      return this.retryRegistration(
+        'Waiting for depth at the registration centre.'
       );
     const range = centreDepth.distanceTo(depth.cameraPosition);
     // Register the surface at the box centre, excluding depth far behind it.
@@ -580,7 +601,7 @@ export class TangibleWidgets extends Script {
         Math.abs(item.point.distanceTo(depth.cameraPosition) - range) < 0.15
     );
     if (foreground.length < 12)
-      return this.stopTracking(
+      return this.retryRegistration(
         `${foreground.length} depth points agree on object distance; need 12.`
       );
     const center = new THREE.Vector3();
@@ -605,7 +626,9 @@ export class TangibleWidgets extends Script {
       area = Math.max(area, cross.crossVectors(point, axis).lengthSq());
     if (spread / this.reference.size < 0.000025 || area < 1e-10) {
       this.reference.clear();
-      return this.stopTracking('Depth points do not span a stable surface.');
+      return this.retryRegistration(
+        'Depth points do not span a stable surface.'
+      );
     }
     this.neutral.copy(depth.cameraQuaternion);
     this.smoothingPosition.copy(center);
@@ -677,6 +700,14 @@ export class TangibleWidgets extends Script {
     this.target.xb!.interactionEnabled = true;
     this.state = 'tracked';
     this.status = `${this.widgetId}: attached and tracking`;
+  }
+
+  private retryRegistration(reason: string) {
+    this.reference.clear();
+    this.targetId = null;
+    this.registrationPending = true;
+    this.send({type: 'reset'});
+    this.hide('registering', reason);
   }
 
   private stopTracking(reason: string) {

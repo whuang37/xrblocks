@@ -4,6 +4,8 @@ import * as THREE from 'three';
 export class DepthFrame {
   private readonly points: Float32Array;
   private readonly ranges: Float32Array;
+  private readonly worldFromClip: THREE.Matrix4;
+  private readonly forward: THREE.Vector3;
   readonly cameraPosition = new THREE.Vector3();
   readonly cameraQuaternion = new THREE.Quaternion();
 
@@ -21,6 +23,10 @@ export class DepthFrame {
     const clipFromWorld = clipFromCamera
       .clone()
       .multiply(worldFromCamera.clone().invert());
+    this.worldFromClip = clipFromWorld.clone().invert();
+    this.forward = new THREE.Vector3(0, 0, -1).applyQuaternion(
+      this.cameraQuaternion
+    );
     const positions = mesh.geometry.getAttribute('position');
     const world = new THREE.Vector3();
     const clip = new THREE.Vector3();
@@ -74,8 +80,18 @@ export class DepthFrame {
         }
       }
     }
-    return nearest < 0
-      ? null
-      : new THREE.Vector3().fromArray(this.points, nearest * 3);
+    if (nearest < 0) return null;
+    const point = new THREE.Vector3().fromArray(this.points, nearest * 3);
+    const ray = new THREE.Vector3(u * 2 - 1, 1 - v * 2, 0)
+      .applyMatrix4(this.worldFromClip)
+      .sub(this.cameraPosition)
+      .normalize();
+    // Use the nearby depth value on the requested RGB ray. Returning the
+    // neighbour's XYZ would bake a pixel mismatch into the fixed PnP map.
+    const z = point.sub(this.cameraPosition).dot(this.forward);
+    const cosine = ray.dot(this.forward);
+    return z > 0 && cosine > 0
+      ? ray.multiplyScalar(z / cosine).add(this.cameraPosition)
+      : null;
   }
 }

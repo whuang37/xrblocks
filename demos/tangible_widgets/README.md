@@ -12,6 +12,7 @@ camera patch and XR depth. It does not wait for object recognition.
 5. Look at the left camera preview. Fill its green square with a textured surface
    about 0.4–1.2 m away. Keep the square off your fingers and background.
 6. Press **Register centre patch**, then hold still until the status is `tracked`.
+   Registration retries missing depth for up to 10 seconds; do not keep pressing it.
 7. Move and tilt the object. The panel should follow the registered surface.
 
 The reading card has sample pages and a Next button. The timer has start/pause

@@ -125,20 +125,11 @@ external to the SDK bundle. Override `assets.openCvUrl` to self-host it. No
 MediaPipe or model assets are loaded by this addon. Disposal requests worker
 shutdown, forces termination after 250 ms, and releases its depth lease.
 
-## Demo and checks
+## Demo
 
 Build with `npm run build:sdk`. Serve over HTTPS and open
 `/demos/tangible_widgets/?debug=1`. See [device steps](../../../demos/tangible_widgets/README.md).
 The demo may label an object once after registration in a separate worker. That
 optional code belongs to the demo; it cannot select, reject, or move an attachment.
 
-Run the focused lifecycle checks with `npx vitest run src/addons/tangible`.
-To exercise the emitted worker with actual OpenCV WASM:
-
-```sh
-node tools/tangible/verify-worker.mjs /path/to/opencv.js
-```
-
-That check covers central-region feature extraction, image translation, tracking
-loss, explicit re-registration, disposal, and planar/curved pose estimation with outliers.
-Device testing is still required for camera/depth alignment and sustained speed.
+Device testing is required for camera/depth alignment and sustained speed.

@@ -75,6 +75,13 @@ the registered points, with X right, Y up, and +Z toward the viewer. Put content
 at local Z = 0.025 for a flat panel above the patch, including on curved objects.
 `patchSize` measures the visible registered features, not the whole object.
 
+The final position and quaternion use a time-based exponential low-pass filter,
+with a default `poseSmoothingMs: 100` time constant. Larger values reduce jitter
+but add response lag; set it to `0` to disable filtering. Tilt, twist, and recenter
+use that same filtered orientation. A new registration starts at its measured
+pose without blending from the old attachment. Depth fitting, residual checks,
+and observation freshness use the original measurements, not filtered values.
+
 `tilt` reports yaw/pitch relative to the neutral orientation, normalized to ±1 at
 30 degrees. `twist` reports local roll in radians. `recenter()` sets the current
 tracked orientation as neutral. Ordinary child buttons use XR Blocks ray/pinch

@@ -73,7 +73,6 @@ export class TangibleWidgets extends Script {
   private targetId: number | null = null;
   private readonly reference = new Map<number, THREE.Vector3>();
   private readonly neutral = new THREE.Quaternion();
-  private readonly worldQuaternion = new THREE.Quaternion();
   private readonly smoothingPosition = new THREE.Vector3();
   private readonly smoothingQuaternion = new THREE.Quaternion();
   private workerTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -81,6 +80,7 @@ export class TangibleWidgets extends Script {
   private registrationPending = false;
   private lastVideoTime = NaN;
   private readonly trackingInterval: number;
+  private readonly poseSmoothingMs: number;
   private readonly maxAge: number;
   private readonly maxResidual: number;
   private readonly cameraProfile: string;
@@ -99,6 +99,9 @@ export class TangibleWidgets extends Script {
       );
     }
     const fps = options.trackingFps ?? 15;
+    this.poseSmoothingMs = options.poseSmoothingMs ?? 100;
+    if (!Number.isFinite(this.poseSmoothingMs) || this.poseSmoothingMs < 0)
+      throw new RangeError('poseSmoothingMs must be finite and non-negative.');
     this.maxAge = options.maxPoseAgeMs ?? 500;
     this.maxResidual = options.maxResidualMeters ?? 0.025;
     for (const value of [fps, this.maxAge, this.maxResidual]) {
@@ -190,7 +193,7 @@ export class TangibleWidgets extends Script {
   /** Set the current measured orientation as the controls' neutral pose. */
   recenter() {
     if (this.state !== 'tracked') return;
-    this.neutral.copy(this.worldQuaternion);
+    this.neutral.copy(this.smoothingQuaternion);
     this.tilt.set(0, 0);
     this.twist = 0;
   }
@@ -491,7 +494,6 @@ export class TangibleWidgets extends Script {
         this.reference.clear();
         return this.stopTracking('Depth points do not span a stable surface.');
       }
-      this.worldQuaternion.copy(depth.cameraQuaternion);
       this.neutral.copy(depth.cameraQuaternion);
       this.smoothingPosition.copy(center);
       this.smoothingQuaternion.copy(depth.cameraQuaternion);
@@ -523,9 +525,13 @@ export class TangibleWidgets extends Script {
         );
       return;
     }
-    this.worldQuaternion.copy(pose.quaternion);
     const dt = Math.max(0, depth.timeMs - this.lastPoseAt);
-    const alpha = 1 - Math.exp(-dt / 45);
+    // Time-based exponential LPF: translation lerp and shortest-path quaternion
+    // slerp. The first pose snaps into place instead of blending from an old target.
+    const alpha =
+      this.poseSmoothingMs === 0 || !Number.isFinite(this.lastPoseAt)
+        ? 1
+        : 1 - Math.exp(-dt / this.poseSmoothingMs);
     this.smoothingPosition.lerp(pose.position, alpha);
     this.smoothingQuaternion.slerp(pose.quaternion, alpha);
     const world = new THREE.Matrix4().compose(
@@ -540,7 +546,10 @@ export class TangibleWidgets extends Script {
       this.target.quaternion,
       this.target.scale
     );
-    const relative = this.neutral.clone().invert().multiply(pose.quaternion);
+    const relative = this.neutral
+      .clone()
+      .invert()
+      .multiply(this.smoothingQuaternion);
     const angles = new THREE.Euler().setFromQuaternion(relative, 'YXZ');
     this.tilt.set(
       THREE.MathUtils.clamp(angles.y / (Math.PI / 6), -1, 1),

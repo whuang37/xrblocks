@@ -39,6 +39,8 @@ export interface TangibleWidgetsOptions {
   widgets: Record<string, TangibleWidget>;
   /** Maximum processing rate. Rendering remains independent. @defaultValue 15 */
   trackingFps?: number;
+  /** Pose low-pass time constant in milliseconds. Higher values smooth more but add lag; 0 disables filtering. @defaultValue 100 */
+  poseSmoothingMs?: number;
   /** Maximum usable observation age, including worker time. @defaultValue 500 */
   maxPoseAgeMs?: number;
   /** Maximum rigid-fit residual, in metres. @defaultValue 0.025 */

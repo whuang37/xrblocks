@@ -149,7 +149,7 @@ class ObjectWidgetsDemo extends xb.Script {
     this.lastDashboard = 0;
   }
   init() {
-    const panel = card(0.45, 0.64);
+    const panel = card(0.52, 0.82);
     panel.name = 'ObjectWidgetsDashboard';
     panel.position.set(0.44, 1.45, -1.05);
     panel.add(text('OBJECT WIDGETS', 25, ACCENT));
@@ -188,7 +188,14 @@ class ObjectWidgetsDemo extends xb.Script {
     this.statusText.style.color =
       this.tracker.state === 'tracked' ? ACCENT : MUTED;
     const d = this.tracker.diagnostics;
-    this.diagnosticText.text = `${this.tracker.state.toUpperCase()} · ${d.featureCount} depth features\n${d.inliers} inliers · fit ${(d.residualMeters * 1000).toFixed(0)} mm\nWorker ${d.processingMs.toFixed(0)} ms · pose ${Number.isFinite(d.poseAgeMs) ? d.poseAgeMs.toFixed(0) : '—'} ms\nCamera timing: ${d.timing}`;
+    this.diagnosticText.text = `${this.tracker.state.toUpperCase()} · sees ${d.detectedLabel}
+${d.imageFeatureCount} image / ${d.featureCount} depth / ${d.inliers} fit points
+Capture ${d.captureMs.toFixed(0)} ms · depth index ${d.depthIndexMs.toFixed(0)} ms
+Worker ${d.processingMs.toFixed(0)} ms: detect ${d.recognitionMs.toFixed(0)} / flow ${d.opticalFlowMs.toFixed(0)}
+Image age ${d.observationAgeMs.toFixed(0)} ms
+Depth age ${Number.isFinite(d.depthAgeMs) ? d.depthAgeMs.toFixed(0) : '—'} ms · fit ${(d.residualMeters * 1000).toFixed(0)} mm
+Camera timing: ${d.timing}
+Last issue: ${d.lastFailure}`;
   }
 }
 

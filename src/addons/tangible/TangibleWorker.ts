@@ -25,7 +25,7 @@ let nextTargetId = 0;
 let labels: string[] = [];
 let lastRecognition = -Infinity;
 let recognitionIntervalMs = 1500;
-let lastFrameTime = -Infinity;
+let lastFrameEndTime = -Infinity;
 let disposed = false;
 
 function reset() {
@@ -36,7 +36,7 @@ function reset() {
   pointIds = [];
   target = null;
   lastRecognition = -Infinity;
-  lastFrameTime = -Infinity;
+  lastFrameEndTime = -Infinity;
 }
 
 function initialize(
@@ -85,7 +85,8 @@ function initialize(
 }
 
 function recognize(image: ImageData, gray: CvMat, timeMs: number) {
-  if (timeMs - lastRecognition < recognitionIntervalMs) return;
+  // Recognition selects a widget once. Optical flow owns tracking after that.
+  if (target || timeMs - lastRecognition < recognitionIntervalMs) return;
   lastRecognition = timeMs;
   const detections = detector!
     .detect(image)
@@ -93,29 +94,6 @@ function recognize(image: ImageData, gray: CvMat, timeMs: number) {
       (item) =>
         item.boundingBox && labels.includes(item.categories[0]?.categoryName)
     );
-  if (target && points) {
-    // Validate the current category and region, never silently switch identities.
-    const current = target;
-    const matching = detections.some((item) => {
-      if (item.categories[0].categoryName !== current.label) return false;
-      const box = item.boundingBox!;
-      let inside = 0;
-      for (let i = 0; i < points!.rows; i++) {
-        const x = points!.data32F[2 * i];
-        const y = points!.data32F[2 * i + 1];
-        if (
-          x >= box.originX &&
-          x <= box.originX + box.width &&
-          y >= box.originY &&
-          y <= box.originY + box.height
-        )
-          inside++;
-      }
-      return inside >= points!.rows * 0.65;
-    });
-    if (!matching) reset();
-    return;
-  }
   // Prefer a supported object near the centre, with a useful image footprint.
   detections.sort((a, b) => {
     const rank = (item: typeof a) => {
@@ -232,21 +210,30 @@ function processFrame(
   message: Extract<TangibleWorkerRequest, {type: 'frame'}>
 ) {
   const started = performance.now();
+  let opticalFlowMs = 0;
+  let recognitionMs = 0;
   if (!cv || !detector || disposed) return;
   if (
     previousGray &&
-    (message.timeMs - lastFrameTime > 600 ||
+    (message.timeMs - lastFrameEndTime > 600 ||
       previousGray.cols !== message.width ||
       previousGray.rows !== message.height)
   )
     reset();
-  const reply = (observation: TangibleObservation | null) =>
+  const reply = (observation: TangibleObservation | null) => {
+    const processingMs = performance.now() - started;
+    // Do not count our own inference time as an idle camera gap. A slow
+    // first detection must be allowed to feed the next optical-flow frame.
+    lastFrameEndTime = message.timeMs + processingMs;
     scope.postMessage({
       type: 'result',
       requestId: message.requestId,
       observation,
-      processingMs: performance.now() - started,
+      processingMs,
+      opticalFlowMs,
+      recognitionMs,
     });
+  };
   if (!target && message.timeMs - lastRecognition < recognitionIntervalMs) {
     reply(null);
     return;
@@ -260,9 +247,12 @@ function processFrame(
   let gray: CvMat | null = new cv.Mat();
   try {
     cv.cvtColor(rgba, gray, cv.COLOR_RGBA2GRAY);
+    const flowStarted = performance.now();
     track(gray);
+    opticalFlowMs = performance.now() - flowStarted;
+    const recognitionStarted = performance.now();
     recognize(image, gray, message.timeMs);
-    lastFrameTime = message.timeMs;
+    recognitionMs = performance.now() - recognitionStarted;
     previousGray?.delete();
     previousGray = target ? gray : null;
     if (target) gray = null; // Transfer ownership; avoid copying the full image.

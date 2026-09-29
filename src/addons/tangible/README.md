@@ -5,7 +5,8 @@ register its visible textured patch automatically, and attach an ordinary
 XR Blocks widget to it. No physical dimensions, printed marker, or AI key are
 needed. Both flat and curved **rigid** objects can supply the tracked points.
 
-Recognition chooses the widget; it does not run at display frequency. OpenCV
+Recognition chooses the widget while searching. It stops while image features
+are tracked and resumes after loss or manual reset. OpenCV
 WASM tracks image features in a worker. The SDK pairs those features with XR
 depth points and fits a rigid transform in metres. This version requires fresh
 depth throughout tracking. It does not implement the paper's depth-free IPPE
@@ -155,13 +156,14 @@ const tracker = new TangibleWidgets({
 ```
 
 One worker handles recognition and optical flow. There is at most one frame in
-flight; camera snapshots are capped at 640 pixels wide and 30 updates/second by
+flight; camera snapshots are capped at 480 pixels wide and 15 updates/second by
 default. While searching, captures run at the recognition interval (1.5 seconds
 by default). Duplicate media frames are skipped. Camera matrices are computed
 only for captures, and the worker retains the grayscale frame without copying it.
 Rigid pose fitting accepts an all-point fit immediately when every point agrees;
-outlier sampling is reserved for inconsistent measurements. GPU camera readback still occurs
-on the render thread, and depth indexing/rigid fitting run in TypeScript. Measure
+outlier sampling is reserved for inconsistent measurements. Raw XR camera images
+are resized on the GPU before readback. Camera readback still occurs on the render
+thread, and depth indexing/rigid fitting run in TypeScript. Measure
 end-to-end latency and sustained frame rate on the target headset; this is a
 working first implementation, not a certified performance result.
 
@@ -177,8 +179,7 @@ The demo provides a book reading widget, cup timer, and bottle tilt control.
 It also exposes a diagnostics panel and registration/neutral buttons.
 See [demo instructions](../../../demos/tangible_widgets/README.md).
 
-Run focused checks with `npx vitest run src/addons/tangible`. For an actual WASM
-optical-flow check, download the pinned `openCvUrl` to a local file, build the SDK,
+For an actual WASM optical-flow check, download the pinned `openCvUrl` to a local file, build the SDK,
 and run:
 
 ```sh
@@ -188,3 +189,18 @@ node tools/tangible/verify-worker.mjs /path/to/opencv.js
 That check runs the emitted worker and real OpenCV WASM on translated textured
 images, tests tracking loss, and closes the worker runtime. It injects category
 recognition and is not evidence of real-camera recognition or headset accuracy.
+
+## Device diagnosis
+
+The demo keeps the last tracking failure visible. Compare image features with
+depth features: image features with few depth matches point to depth coverage
+or camera alignment; no image features points to detection or texture.
+`captureMs` measures snapshot latency (including the XR-frame wait on the raw
+camera path), `depthIndexMs` measures depth indexing, and `processingMs` measures
+worker time. `recognitionMs` and `opticalFlowMs` separate detection from tracking
+inside that worker time. These are not a complete rendering profile. `observationAgeMs`
+shows why a result was rejected by the unchanged 500 ms freshness limit.
+
+Slow first recognition can be rejected as stale; the next frame can still use
+its image features to start fresh tracking. Worker processing time does not
+count toward the 600 ms idle-gap reset. Depth and rigid-fit checks still apply.

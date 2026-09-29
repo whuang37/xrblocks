@@ -53,3 +53,9 @@ on the attached cards; this addon does not add a monocular fingertip-touch detec
 
 With `?debug=1`, inspect `window.tangibleDemo.tracker` in the browser console.
 See [addon setup and limits](../../src/addons/tangible/README.md).
+
+For a failed device run, record **Last issue**, the detected category, image/depth
+feature counts, capture/depth-index/worker times, image age, and camera timing.
+The last failure stays visible after a new registration attempt. Recognition
+runs only while searching; tracking captures are capped at 15 fps and 480 pixels
+wide. Raw XR snapshots are resized before GPU readback.

@@ -35,10 +35,18 @@ export class TangibleWidgets extends Script {
   /** Extent of registered visible features; not the full physical object size. */
   readonly patchSize = new THREE.Vector3();
   readonly diagnostics = {
+    imageFeatureCount: 0,
+    detectedLabel: 'none',
+    captureMs: 0,
+    depthIndexMs: 0,
+    observationAgeMs: 0,
+    lastFailure: 'none',
     featureCount: 0,
     inliers: 0,
     residualMeters: 0,
     processingMs: 0,
+    opticalFlowMs: 0,
+    recognitionMs: 0,
     poseAgeMs: Infinity,
     depthAgeMs: Infinity,
     timing: 'estimated' as 'estimated' | 'xr-frame',
@@ -93,7 +101,7 @@ export class TangibleWidgets extends Script {
         'TangibleWidgets requires at least one category and widget factory.'
       );
     }
-    const fps = options.trackingFps ?? 30;
+    const fps = options.trackingFps ?? 15;
     this.recognitionInterval = options.recognitionIntervalMs ?? 1500;
     this.maxAge = options.maxPoseAgeMs ?? 500;
     this.maxResidual = options.maxResidualMeters ?? 0.025;
@@ -241,19 +249,21 @@ export class TangibleWidgets extends Script {
       return;
     }
     this.lastRequestAt = now;
-    const width = Math.min(640, camera.width);
+    const width = Math.min(480, camera.width);
     const height = Math.max(
       1,
       Math.round((camera.height * width) / camera.width)
     );
     const snapshotOptions = {width, height, outputFormat: 'imageData' as const};
     if (camera.isUsingXRCameraAccess) {
+      const captureStarted = performance.now();
       this.capturing = true;
       this.rawCaptureFrame = null;
       const epoch = this.epoch;
       void camera
         .captureSnapshot(snapshotOptions)
         .then((image) => {
+          this.diagnostics.captureMs = performance.now() - captureStarted;
           if (
             !this.stopped &&
             epoch === this.epoch &&
@@ -274,7 +284,9 @@ export class TangibleWidgets extends Script {
         const depth = this.freezeDepth(now, frame);
         if (!depth) return;
         this.lastVideoTime = camera.video.currentTime;
+        const captureStarted = performance.now();
         const image = camera.getSnapshot(snapshotOptions);
+        this.diagnostics.captureMs = performance.now() - captureStarted;
         if (image) this.submit(image, depth);
       } catch (error) {
         this.fail(String(error));
@@ -321,12 +333,15 @@ export class TangibleWidgets extends Script {
     const params = this.cameraParameters(frame);
     if (!mesh || !params || this.diagnostics.depthAgeMs > this.maxAge)
       return null;
-    return new DepthFrame(
+    const started = performance.now();
+    const snapshot = new DepthFrame(
       mesh,
       params.worldFromView,
       params.clipFromView,
       timeMs
     );
+    this.diagnostics.depthIndexMs = performance.now() - started;
+    return snapshot;
   }
 
   private submit(image: ImageData, depth: DepthFrame) {
@@ -378,10 +393,20 @@ export class TangibleWidgets extends Script {
     this.inFlight = null;
     if (request.epoch !== this.epoch) return;
     this.diagnostics.processingMs = reply.processingMs;
+    this.diagnostics.opticalFlowMs = reply.opticalFlowMs;
+    this.diagnostics.recognitionMs = reply.recognitionMs;
+    this.diagnostics.detectedLabel = reply.observation?.label ?? 'none';
+    this.diagnostics.imageFeatureCount =
+      reply.observation?.features.length ?? 0;
+    this.diagnostics.featureCount = 0;
+    this.diagnostics.inliers = 0;
+    this.diagnostics.residualMeters = 0;
+    this.diagnostics.observationAgeMs =
+      performance.now() - request.depth.timeMs;
     if (performance.now() - request.depth.timeMs > this.maxAge) {
       this.hide(
         'lost',
-        'The image is too old. Waiting for a fresh observation.'
+        `Image is ${Math.round(this.diagnostics.observationAgeMs)} ms old (limit ${this.maxAge} ms). Waiting for tracking.`
       );
       return;
     }
@@ -419,7 +444,10 @@ export class TangibleWidgets extends Script {
       );
     }
     if (!this.reference.size) {
-      if (samples.length < 12) return this.registrationFailed();
+      if (samples.length < 12)
+        return this.registrationFailed(
+          `${samples.length}/${observation.features.length} image features have depth; need 12.`
+        );
       const ranges = samples
         .map((item) => item.point.distanceTo(depth.cameraPosition))
         .sort((a, b) => a - b);
@@ -428,7 +456,10 @@ export class TangibleWidgets extends Script {
         (item) =>
           Math.abs(item.point.distanceTo(depth.cameraPosition) - median) < 0.15
       );
-      if (foreground.length < 12) return this.registrationFailed();
+      if (foreground.length < 12)
+        return this.registrationFailed(
+          `${foreground.length} depth points agree on object distance; need 12.`
+        );
       const center = new THREE.Vector3();
       for (const sample of foreground) center.add(sample.point);
       center.divideScalar(foreground.length);
@@ -448,7 +479,9 @@ export class TangibleWidgets extends Script {
       );
       if (!proof) {
         this.reference.clear();
-        return this.registrationFailed();
+        return this.registrationFailed(
+          'Depth points do not span a stable surface.'
+        );
       }
       this.worldQuaternion.copy(depth.cameraQuaternion);
       this.neutral.copy(depth.cameraQuaternion);
@@ -516,15 +549,15 @@ export class TangibleWidgets extends Script {
     this.status = `${observation.label}: attached and tracking`;
   }
 
-  private registrationFailed() {
-    this.hide(
-      'registering',
-      'Need more depth detail. Hold the printed surface still, closer to the camera.'
-    );
+  private registrationFailed(reason: string) {
+    this.diagnostics.lastFailure = reason;
+    this.hide('registering', reason);
     if (performance.now() - this.registrationStartedAt > 2500) this.reset();
   }
 
   private hide(state: TangibleState, status: string) {
+    if (state === 'lost' || state === 'error')
+      this.diagnostics.lastFailure = status;
     this.target.visible = false;
     this.target.xb!.interactionEnabled = false;
     this.tilt.set(0, 0);

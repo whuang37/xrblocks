@@ -31,9 +31,9 @@ export interface TangibleWidget {
 export interface TangibleWidgetsOptions {
   /** Model category names, for example `book`, `cup`, or `bottle`. */
   widgets: Record<string, TangibleWidget>;
-  /** Maximum processing rate. Rendering remains independent. @defaultValue 30 */
+  /** Maximum processing rate. Rendering remains independent. @defaultValue 15 */
   trackingFps?: number;
-  /** Recognition interval while searching or validating the current target. @defaultValue 1500 */
+  /** Recognition interval while searching. @defaultValue 1500 */
   recognitionIntervalMs?: number;
   /** Maximum usable observation age, including worker time. @defaultValue 500 */
   maxPoseAgeMs?: number;
@@ -90,4 +90,6 @@ export type TangibleWorkerReply =
       requestId: number;
       observation: TangibleObservation | null;
       processingMs: number;
+      opticalFlowMs: number;
+      recognitionMs: number;
     };

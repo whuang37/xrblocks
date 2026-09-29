@@ -17,6 +17,8 @@ const runtime = process.argv[2];
 if (!runtime) throw new Error('Pass a local OpenCV.js runtime path.');
 const cv = createRequire(import.meta.url)(resolve(runtime));
 const replies = [];
+let simulatedWorkMs = 0;
+let clockCalls = 0;
 let closed = false;
 const scope = {
   cv,
@@ -39,7 +41,14 @@ const script = await readFile(
 );
 vm.runInNewContext(
   script,
-  {self: scope, ImageData: TestImageData, Uint8ClampedArray, performance},
+  {
+    self: scope,
+    ImageData: TestImageData,
+    Uint8ClampedArray,
+    performance: {
+      now: () => performance.now() + (clockCalls++ ? simulatedWorkMs : 0),
+    },
+  },
   {
     importModuleDynamically: vm.constants.USE_MAIN_CONTEXT_DEFAULT_LOADER,
   }
@@ -47,11 +56,13 @@ vm.runInNewContext(
 const visionModuleUrl =
   'data:text/javascript,' +
   encodeURIComponent(`
+  export let calls = 0;
   export const FilesetResolver = {forVisionTasks: async () => ({})};
   export const ObjectDetector = {createFromOptions: async () => ({
-    detect: () => ({detections: [{boundingBox: {originX: 30, originY: 30, width: 240, height: 180}, categories: [{categoryName: 'book', score: 0.95}]}]}), close() {}
+    detect: () => { calls++; return ({detections: [{boundingBox: {originX: 30, originY: 30, width: 240, height: 180}, categories: [{categoryName: 'book', score: 0.95}]}]}); }, close() {}
   })};
 `);
+const vision = await import(visionModuleUrl);
 const send = (data) => scope.onmessage({data});
 try {
   send({
@@ -92,11 +103,20 @@ try {
       }
     return data.buffer;
   };
-  const frame = (id, dx, dy, blank = false) => {
+  const frame = (
+    id,
+    dx,
+    dy,
+    blank = false,
+    timeMs = 1000 + id * 33,
+    workMs = 0
+  ) => {
+    simulatedWorkMs = workMs;
+    clockCalls = 0;
     send({
       type: 'frame',
       requestId: id,
-      timeMs: 1000 + id * 33,
+      timeMs,
       width: 320,
       height: 240,
       pixels: image(dx, dy, blank),
@@ -122,8 +142,25 @@ try {
   const recovered = frame(60, 0, 0);
   assert.ok(recovered.features.length >= 12);
   assert.notEqual(recovered.targetId, first.targetId);
+  send({type: 'reset'});
+  const callsBefore = vision.calls;
+  const slow = frame(100, 0, 0, false, 4300, 900);
+  assert.ok(replies.at(-1).processingMs >= 900);
+  const fresh = frame(101, 6, 4, false, 5233);
+  assert.equal(
+    fresh.targetId,
+    slow.targetId,
+    'Inference time must not reset tracking'
+  );
+  frame(102, 6, 4, false, 5600);
+  assert.equal(frame(103, 6, 4, false, 6000).targetId, slow.targetId);
+  assert.equal(
+    vision.calls - callsBefore,
+    1,
+    'Do not rerun recognition during tracking'
+  );
   console.log(
-    `Actual WASM optical flow passed: ${next.features.length} features, shift ${mean(dx).toFixed(2)}, ${mean(dy).toFixed(2)} pixels; loss, idle throttling, and reacquisition passed.`
+    `Actual WASM optical flow passed: ${next.features.length} features, shift ${mean(dx).toFixed(2)}, ${mean(dy).toFixed(2)} pixels; loss, idle throttling, reacquisition, slow recognition recovery, and detection-free tracking passed.`
   );
 } finally {
   send({type: 'dispose'});

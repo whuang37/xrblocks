@@ -14,9 +14,9 @@
 * limitations under the License.
 *
 * @file xrblocks.js
-* @version v0.21.1
-* @commitid 999bf37
-* @builddate 2026-09-30T22:18:33.059Z
+* @version v0.23.0
+* @commitid 5cd7aed
+* @builddate 2026-10-19T19:45:15.070Z
 * @description XR Blocks SDK, built from source with the above commit ID.
 * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
 * and follow rules below:
@@ -40,8 +40,8 @@ physical world space, also add locomotion methods like pinch to teleport.
 or generate from primitive shapes of use vox formats for voxels or
 lego-styles.
 */
-import { r as BaseSimulatorCompositor } from "./Simulator.js";
-import { createWebGPUBackgroundVideoQuad } from "./WebGPUDirectCompositor.js";
+import { n as BaseSimulatorCompositor } from "./WebGLDirectCompositor.js";
+import { n as createWebGPUBackgroundVideoQuad } from "./WebGPUDirectCompositor2.js";
 import * as THREE from "three";
 import { MeshBasicNodeMaterial, QuadMesh } from "three/webgpu";
 //#region src/simulator/internal/compositing/WebGPURenderTargetCompositor.ts
@@ -82,7 +82,6 @@ var WebGPURenderTargetCompositor = class extends BaseSimulatorCompositor {
 			this.virtualSceneFullScreenQuad.material.map = this.virtualSceneRenderTarget.texture;
 		}
 		const renderer = this.deps.renderer;
-		this.setSparkEncodeLinear(true);
 		renderer.setRenderTarget(this.virtualSceneRenderTarget);
 		renderer.clear();
 		this.deps.renderMainScene(renderCamera);

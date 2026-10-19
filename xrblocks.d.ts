@@ -5,7 +5,6 @@ import { GLTF, GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { WebGPURenderer } from "three/webgpu";
 import { effect } from "@preact/signals-core";
 import * as GoogleGenAITypes from "@google/genai";
-import RAPIER from "rapier3d";
 import OpenAIType from "openai";
 import { SparkRenderer } from "@sparkjsdev/spark";
 //#region node_modules/@pmndrs/uikit/dist/events.d.ts
@@ -61,10 +60,86 @@ type PointerEventsProperties = {
   pointerEventsOrder?: number;
 };
 //#endregion
+//#region src/core/SerializerTypes.d.ts
+/**
+ * Minimal WebXR manager contract implemented by SplitEngineWebXrManager.
+ */
+interface SerializerXRManager {
+  enabled: boolean;
+  isPresenting: boolean;
+  getController(index: number): THREE.XRTargetRaySpace;
+  getControllerGrip(index: number): THREE.XRGripSpace;
+  getHand(index: number): THREE.XRHandSpace;
+  getFrame?(): XRFrame | undefined;
+  getCamera(): THREE.ArrayCamera;
+  updateCamera(camera: THREE.Camera): void;
+  getBinding?(): XRWebGLBinding | null;
+  getReferenceSpace?(): XRReferenceSpace | null;
+  setReferenceSpaceType(type: XRReferenceSpaceType): void;
+  setFramebufferScaleFactor(factor: number): void;
+  setSession(session: XRSession | null): Promise<void>;
+  getSession?(): XRSession | null;
+  addEventListener?: THREE.EventDispatcher['addEventListener'];
+  removeEventListener?: THREE.EventDispatcher['removeEventListener'];
+}
+/**
+ * Minimal renderer contract implemented by SplitEngineSerializer.
+ */
+interface SerializerRenderer {
+  readonly isSplitEngineSerializer: true;
+  readonly xr: SerializerXRManager;
+  domElement?: HTMLCanvasElement;
+  shadowMap?: {
+    enabled: boolean;
+    type?: THREE.ShadowMapType;
+    autoUpdate?: boolean;
+  };
+  render(scene: THREE.Object3D, camera: THREE.Camera): void;
+  setSize(width: number, height: number, updateStyle?: boolean): void;
+  getSize(target?: {
+    set?: (w: number, h: number) => void;
+    width?: number;
+    height?: number;
+  }): {
+    width: number;
+    height: number;
+  };
+  setPixelRatio(value: number): void;
+  getPixelRatio(): number;
+  setAnimationLoop(callback: ((time: number, frame?: XRFrame) => void) | null): void;
+  dispose(): void;
+}
+/**
+ * Factory function that returns or resolves to a `SerializerRenderer`.
+ */
+type SerializerRendererFactory = () => SerializerRenderer | Promise<SerializerRenderer>;
+/**
+ * Type guard to determine if a renderer instance is a SplitEngineSerializer
+ * (`SerializerRenderer`).
+ *
+ * @param renderer - The renderer instance to test.
+ * @returns True if the renderer is a SerializerRenderer, false otherwise.
+ */
+export declare function isSerializerRenderer(renderer?: unknown): renderer is SerializerRenderer;
+//#endregion
+//#region src/core/SerializerSupport.d.ts
+/**
+ * Resolves a `SerializerRenderer` from `Options.serializer` or from the global
+ * `ThreeSplitEngine.SplitEngineSerializer` runtime entrypoint.
+ */
+export declare function resolveSerializerRenderer(serializer?: SerializerRenderer | SerializerRendererFactory): Promise<SerializerRenderer>;
+//#endregion
 //#region src/ai/AIOptions.d.ts
 export declare const GEMINI_DEFAULT_FLASH_MODEL = "gemini-3.8-flash";
 export declare const GEMINI_DEFAULT_LIVE_MODEL = "gemini-3.1-flash-live-preview";
 export declare const GEMINI_DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image";
+/**
+ * Non-live configuration for the Gemini Interactions API
+ * (`client.interactions.create`). `model` and `input` come from each query
+ * and interactions always run statelessly (`store` is forced off), so
+ * history/state parameters are not accepted here.
+ */
+export type GeminiInteractionConfig = Omit<GoogleGenAITypes.Interactions.CreateModelInteractionParamsNonStreaming, 'model' | 'input' | 'stream' | 'store' | 'previous_interaction_id'>;
 export declare class GeminiOptions {
   apiKey: string;
   urlParam: string;
@@ -72,7 +147,7 @@ export declare class GeminiOptions {
   enabled: boolean;
   model: string;
   liveModel: string;
-  config: GoogleGenAITypes.GenerateContentConfig;
+  config: GeminiInteractionConfig;
 }
 export declare class OpenAIOptions {
   apiKey: string;
@@ -927,11 +1002,14 @@ export declare class DepthOptions {
   };
   occlusion: {
     enabled: boolean;
+    resolutionScale: number;
   };
   usagePreference: XRDepthUsage[];
   dataFormatPreference: XRDepthDataFormat[];
   depthTypeRequest: XRDepthType[];
   matchDepthView: boolean;
+  /** Whether to extract and upload CPU depth for all stereo views instead of only view 0. */
+  updateAllViews: boolean;
   constructor(options?: DeepReadonly<DeepPartial<DepthOptions>>);
 }
 export declare const xrDepthMeshOptions: {
@@ -963,11 +1041,13 @@ export declare const xrDepthMeshOptions: {
   };
   readonly occlusion: {
     enabled: boolean;
+    resolutionScale: number;
   };
   readonly usagePreference: readonly XRDepthUsage[];
   readonly dataFormatPreference: readonly XRDepthDataFormat[];
   readonly depthTypeRequest: readonly XRDepthType[];
   readonly matchDepthView: boolean;
+  readonly updateAllViews: boolean;
 };
 export declare const xrDepthMeshVisualizationOptions: {
   readonly debugging: boolean;
@@ -998,11 +1078,13 @@ export declare const xrDepthMeshVisualizationOptions: {
   };
   readonly occlusion: {
     enabled: boolean;
+    resolutionScale: number;
   };
   readonly usagePreference: readonly XRDepthUsage[];
   readonly dataFormatPreference: readonly XRDepthDataFormat[];
   readonly depthTypeRequest: readonly XRDepthType[];
   readonly matchDepthView: boolean;
+  readonly updateAllViews: boolean;
 };
 export declare const xrDepthMeshPhysicsOptions: {
   readonly debugging: boolean;
@@ -1033,11 +1115,13 @@ export declare const xrDepthMeshPhysicsOptions: {
   };
   readonly occlusion: {
     enabled: boolean;
+    resolutionScale: number;
   };
   readonly usagePreference: readonly XRDepthUsage[];
   readonly dataFormatPreference: readonly XRDepthDataFormat[];
   readonly depthTypeRequest: readonly XRDepthType[];
   readonly matchDepthView: boolean;
+  readonly updateAllViews: boolean;
 };
 //#endregion
 //#region src/input/HandsOptions.d.ts
@@ -1354,6 +1438,11 @@ interface ControllerEvent {
  */
 type WebGLOrWebGPURenderer = THREE.WebGLRenderer | WebGPURenderer;
 /**
+ * Union type representing any renderer supported by XR Blocks
+ * (`THREE.WebGLRenderer`, `THREE.WebGPURenderer`, or `SerializerRenderer`).
+ */
+type SupportedRenderer = WebGLOrWebGPURenderer | SerializerRenderer;
+/**
  * Type guard to determine if a renderer instance is a THREE.WebGPURenderer.
  *
  * @param renderer - The renderer instance to test.
@@ -1367,11 +1456,11 @@ export declare function isWebGPURenderer(renderer?: unknown): renderer is WebGPU
  * @param consumerName - The name of the subsystem or feature requiring WebGLRenderer.
  * @throws Error if the renderer is a WebGPURenderer.
  */
-export declare function assertWebGLRenderer(renderer: WebGLOrWebGPURenderer | undefined, consumerName: string): asserts renderer is THREE.WebGLRenderer;
+export declare function assertWebGLRenderer(renderer: SupportedRenderer | undefined, consumerName: string): asserts renderer is THREE.WebGLRenderer;
 /**
- * Dependency injection holder for the active Three.js renderer (`WebGLRenderer`
- * or `WebGPURenderer`), allowing scripts to request the renderer via `Registry`
- * in O(1) time without statically importing `three/webgpu`.
+ * Dependency injection holder for the active Three.js renderer (`WebGLRenderer`,
+ * `WebGPURenderer`, or `SerializerRenderer`), allowing scripts to request the
+ * renderer via `Registry` in O(1) time without statically importing `three/webgpu`.
  */
 declare class RendererHolder {
   readonly renderer: WebGLOrWebGPURenderer;
@@ -1747,11 +1836,17 @@ export declare class Input {
   gazeController: GazeController;
   mouseController: MouseController;
   gamepadController: GamepadController;
+  private readonly builtInControllers;
+  private readonly addonControllers;
+  private readonly removingControllers;
+  private nextControllerId;
   controllersEnabled: boolean;
   listeners: Map<any, any>;
   private dispatchControllerEvent;
   private pinchFilter;
   private releasedControllers;
+  private nativeSelectControllers;
+  private disconnectedTransientPointerControllers;
   private keyDownListeners;
   private keyUpListeners;
   activeControllers: ActiveControllers;
@@ -1771,14 +1866,14 @@ export declare class Input {
   init({ systemsGroup, options, renderer }: {
     systemsGroup: XRSystems;
     options: Options;
-    renderer: WebGLOrWebGPURenderer;
+    renderer: SupportedRenderer;
   }): void;
   /**
    * Retrieves the controller object by its ID.
    * @param id - The ID of the controller.
-   * @returns The controller with the specified ID.
+   * @returns The controller with the specified ID, or undefined after removal.
    */
-  get(id: number): THREE.Object3D;
+  get(id: number): Controller | undefined;
   /**
    * Adds an object to both controllers by creating a new group and cloning it.
    * @param obj - The object to add to each controller.
@@ -1813,6 +1908,9 @@ export declare class Input {
   defaultOnSqueezeEnd(event: ControllerEvent): void;
   defaultOnConnected(event: ControllerEvent): void;
   defaultOnDisconnected(event: ControllerEvent): void;
+  private captureNativeSelectEvent;
+  private setupNativeSelectTracking;
+  private removeNativeSelectTracking;
   /**
    * Binds a listener to both controllers.
    * @param listenerName - Event name
@@ -1864,6 +1962,12 @@ export declare class Input {
   private registerController;
   enableController(controller: Controller): void;
   disableController(controller: Controller): void;
+  /**
+   * Permanently unregisters a source added through enableController. Built-ins
+   * and already-removed sources are ignored. Capture is cancelled as source-lost
+   * next frame; terminal selectend/disconnected notifications are sent once.
+   */
+  removeController(controller: Controller): void;
   disableControllers(): void;
   enableControllers(): void;
   dispose(): void;
@@ -1934,6 +2038,7 @@ export declare class Interaction {
   /** Writes up to two internal cursor points in controller order. */
   writeCursorPointsAt(object: THREE.Object3D, first: THREE.Vector3, second: THREE.Vector3): 0 | 1 | 2;
   isManipulating(object: THREE.Object3D): boolean;
+  /** Explicit zoom also reaches a UI control's manipulable ancestor. */
   queueScaleIntent(controller: Controller, factor: number): boolean;
   /** Routes a normalized wheel delta using the next frame's resolved target. */
   queueWheelIntent(controller: Controller, delta: number): boolean;
@@ -2228,10 +2333,90 @@ export declare class LightingOptions {
   constructor(options?: DeepReadonly<DeepPartial<LightingOptions>>);
 }
 //#endregion
+//#region src/physics/RapierTypes.d.ts
+/** Structural Rapier contracts shared by the standard, compat and SIMD builds.
+ * Only the API used by the SDK is required; no package-private classes cross
+ * this boundary. Applications retain their chosen module for additional APIs.
+ */
+interface RapierVector {
+  x: number;
+  y: number;
+  z: number;
+}
+interface RapierRotation extends RapierVector {
+  w: number;
+}
+interface RapierRigidBodyDesc {
+  setTranslation(x: number, y: number, z: number): RapierRigidBodyDesc;
+  setRotation(rotation: RapierRotation): RapierRigidBodyDesc;
+  setCcdEnabled(enabled: boolean): RapierRigidBodyDesc;
+}
+interface RapierColliderDesc {
+  setDensity(density: number): RapierColliderDesc;
+  setFriction(friction: number): RapierColliderDesc;
+  setRestitution(restitution: number): RapierColliderDesc;
+}
+interface RapierRigidBody {
+  translation(): RapierVector;
+  rotation(): RapierRotation;
+  setTranslation(translation: RapierVector, wakeUp: boolean): void;
+  setRotation(rotation: RapierRotation, wakeUp: boolean): void;
+  setEnabled(enabled: boolean): void;
+}
+interface RapierCollider {
+  readonly handle: number;
+}
+interface RapierCharacterController {
+  computeColliderMovement(collider: RapierCollider, movement: RapierVector): void;
+  computedMovement(): RapierVector;
+  setSlideEnabled(enabled: boolean): void;
+  setApplyImpulsesToDynamicBodies(enabled: boolean): void;
+  setCharacterMass(mass: number): void;
+}
+interface RapierEventQueue {
+  free(): void;
+  drainCollisionEvents(callback: (handle1: number, handle2: number, started: boolean) => void): void;
+}
+interface RapierShape {
+  readonly type: number;
+}
+interface RapierWorld {
+  timestep: number;
+  step(eventQueue?: RapierEventQueue): void;
+  free(): void;
+  createRigidBody(desc: RapierRigidBodyDesc): RapierRigidBody;
+  removeRigidBody(body: RapierRigidBody): void;
+  createCollider(desc: RapierColliderDesc, parent?: RapierRigidBody): RapierCollider;
+  removeCollider(collider: RapierCollider, wakeUp: boolean): void;
+  createCharacterController(offset: number): RapierCharacterController;
+  removeCharacterController(controller: RapierCharacterController): void;
+  castShape(position: RapierVector, rotation: RapierRotation, velocity: RapierVector, shape: RapierShape, targetDistance: number, maxToi: number, stopAtPenetration: boolean, filterFlags?: number): {
+    time_of_impact: number;
+  } | null;
+}
+/** The module supplied by an application through options.physics.RAPIER. */
+interface RAPIERCompat {
+  init?(): Promise<void>;
+  World: new (gravity: RapierVector) => RapierWorld;
+  EventQueue: new (autoDrain: boolean) => RapierEventQueue;
+  Ball: new (radius: number) => RapierShape;
+  RigidBodyDesc: {
+    fixed(): RapierRigidBodyDesc;
+    dynamic(): RapierRigidBodyDesc;
+    kinematicPositionBased(): RapierRigidBodyDesc;
+  };
+  ColliderDesc: {
+    ball(radius: number): RapierColliderDesc;
+    cuboid(hx: number, hy: number, hz: number): RapierColliderDesc;
+    convexHull(vertices: Float32Array): RapierColliderDesc | null;
+    trimesh(vertices: Float32Array, indices: Uint32Array): RapierColliderDesc;
+  };
+  QueryFilterFlags: {
+    ONLY_FIXED: number;
+  };
+}
+//#endregion
 //#region src/physics/PhysicsOptions.d.ts
-export type RAPIERCompat = typeof RAPIER & {
-  init?: () => Promise<void>;
-};
 export declare class PhysicsOptions {
   /**
    * The target frames per second for the physics simulation loop.
@@ -2386,6 +2571,9 @@ export declare class SimulatorOptions {
     enabled: boolean;
     showAutomatically: boolean;
     element: string;
+    overlayEnabled: boolean;
+    overlayElement: string;
+    fadeInDelayMs: number;
     customInstructions: SimulatorCustomInstruction[];
   };
   handPosePanel: {
@@ -2413,6 +2601,8 @@ export declare class SimulatorOptions {
   };
   renderToRenderTexture: boolean;
   blendingMode: 'normal' | 'screen';
+  /** Optional diagonal field of view in degrees for a glasses display. */
+  displayDiagonalFov?: number;
   /** Shoulder/chest origin of the left hand in local camera space. */
   leftHandOrigin: {
     x: number;
@@ -2904,8 +3094,9 @@ export declare class XRTransitionOptions {
 }
 declare const FORM_FACTORS: readonly ['auto', 'xr', 'hud', 'vr', 'desktop', 'mobile'];
 export type FormFactor = (typeof FORM_FACTORS)[number];
-export declare const RENDERER_BACKENDS: readonly ['webgl', 'webgpu'];
+export declare const RENDERER_BACKENDS: readonly ['webgl', 'webgpu', 'serializer'];
 export type RendererBackend = (typeof RENDERER_BACKENDS)[number];
+export type FramebufferScaleFactor = number | 'native';
 export interface WebGPURendererOptions {
   forceWebGL?: boolean;
 }
@@ -2951,6 +3142,28 @@ export declare class Options {
    * Optional configuration for WebGPU renderer.
    */
   webgpuOptions?: WebGPURendererOptions;
+  /**
+   * Optional Split Engine serializer instance or factory function used when
+   * `rendererBackend` is `'serializer'`.
+   */
+  serializer?: SerializerRenderer | SerializerRendererFactory;
+  /**
+   * Optional WebXR framebuffer scale factor. Set to a number (e.g., `1.5`) or
+   * `'native'` to query `XRWebGLLayer.getNativeFramebufferScaleFactor(session)`
+   * before the XR session starts.
+   */
+  framebufferScaleFactor?: FramebufferScaleFactor;
+  /**
+   * Makes an alpha-blend passthrough session composite like an additive
+   * display by preserving destination RGB while forcing output alpha to zero.
+   * Has no effect in opaque or additive sessions.
+   */
+  simulateAdditiveDisplay: boolean;
+  /**
+   * Constant alpha written by additive display simulation. `0` preserves all
+   * passthrough; `1` fully dims it. Read every frame while simulation is active.
+   */
+  simulatedDimming: number;
   /**
    * Any additional required features when initializing webxr.
    */
@@ -3036,6 +3249,18 @@ export declare class Options {
    * @param options - Optional WebGPU renderer settings such as `forceWebGL`.
    */
   enableWebGPU(options?: WebGPURendererOptions): this;
+  /**
+   * Configures Core to use a SplitEngineSerializer renderer backend instead of
+   * THREE.WebGLRenderer.
+   * @param serializer - Optional SplitEngineSerializer instance or factory function.
+   */
+  enableSerializer(serializer?: SerializerRenderer | SerializerRendererFactory): this;
+  /**
+   * Alias for `enableSerializer` that configures Core to use a
+   * SplitEngineSerializer renderer backend.
+   * @param serializer - Optional SplitEngineSerializer instance or factory function.
+   */
+  useSerializer(serializer?: SerializerRenderer | SerializerRendererFactory): this;
   /**
    * Sets the session mode to VR and disables the simulator passthrough scene.
    */
@@ -3181,6 +3406,13 @@ export declare class Options {
    * @returns The instance for chaining.
    */
   setAppDescription(description: string): this;
+  /**
+   * Sets the WebXR framebuffer scale factor (a numeric multiplier or `'native'`
+   * to use `XRWebGLLayer.getNativeFramebufferScaleFactor(session)`).
+   * @param scaleFactor - Numeric scale factor or `'native'`.
+   * @returns The instance for chaining.
+   */
+  setFramebufferScaleFactor(scaleFactor: FramebufferScaleFactor): this;
 }
 //#endregion
 //#region src/utils/FaceCameraMath.d.ts
@@ -3449,8 +3681,8 @@ export declare class Physics {
   options?: PhysicsOptions;
   RAPIER: RAPIERCompat;
   fps: number;
-  blendedWorld: RAPIER.World;
-  eventQueue: RAPIER.EventQueue;
+  blendedWorld: RapierWorld;
+  eventQueue: RapierEventQueue;
   get timestep(): number;
   /**
    * Asynchronously initializes the RAPIER physics engine and creates the
@@ -4345,6 +4577,13 @@ export declare class Tool {
    * @returns A valid FunctionDeclaration object.
    */
   toJSON(): GoogleGenAITypes.FunctionDeclaration;
+  /**
+   * Returns the function tool shape for the non-live Interactions API (a
+   * `tools` entry on a query). `behavior` is a Live API concept and has no
+   * Interactions equivalent.
+   * @returns A valid Interactions function tool.
+   */
+  toInteractions(): GoogleGenAITypes.Interactions.Function;
 }
 //#endregion
 //#region src/ai/AITypes.d.ts
@@ -4938,6 +5177,57 @@ export declare class SpatialAudio extends Script {
    */
   updateAllVolumes(): void;
   destroy(): void;
+}
+//#endregion
+//#region src/sound/SpeechRecognitionTypes.d.ts
+type SpeechRecognitionErrorCode = 'aborted' | 'audio-capture' | 'bad-grammar' | 'language-not-supported' | 'network' | 'no-speech' | 'not-allowed' | 'service-not-allowed' | 'phrases-not-supported';
+interface SpeechRecognitionEvent extends Event {
+  readonly resultIndex: number;
+  readonly results: SpeechRecognitionResultList;
+}
+interface SpeechRecognitionErrorEvent extends Event {
+  readonly error: SpeechRecognitionErrorCode;
+  readonly message: string;
+}
+interface SpeechRecognitionEventMap {
+  audioend: Event;
+  audiostart: Event;
+  end: Event;
+  error: SpeechRecognitionErrorEvent;
+  nomatch: SpeechRecognitionEvent;
+  result: SpeechRecognitionEvent;
+  soundend: Event;
+  soundstart: Event;
+  speechend: Event;
+  speechstart: Event;
+  start: Event;
+}
+type SpeechRecognitionEventHandlers = { [K in keyof SpeechRecognitionEventMap as `on${K}`]: ((this: SpeechRecognition, event: SpeechRecognitionEventMap[K]) => void) | null; };
+interface SpeechGrammar {
+  src: string;
+  weight: number;
+}
+interface SpeechGrammarList {
+  readonly length: number;
+  addFromString(grammar: string, weight?: number): void;
+  addFromURI(src: string, weight?: number): void;
+  item(index: number): SpeechGrammar;
+  [index: number]: SpeechGrammar;
+}
+/** Browser speech recognizer returned by SpeechRecognizer.recognition. */
+interface SpeechRecognition extends EventTarget, SpeechRecognitionEventHandlers {
+  continuous: boolean;
+  grammars: SpeechGrammarList;
+  interimResults: boolean;
+  lang: string;
+  maxAlternatives: number;
+  abort(): void;
+  start(audioTrack?: MediaStreamTrack): void;
+  stop(): void;
+  addEventListener<K extends keyof SpeechRecognitionEventMap>(type: K, listener: (this: SpeechRecognition, event: SpeechRecognitionEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void;
+  removeEventListener<K extends keyof SpeechRecognitionEventMap>(type: K, listener: (this: SpeechRecognition, event: SpeechRecognitionEventMap[K]) => void, options?: boolean | EventListenerOptions): void;
+  removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void;
 }
 //#endregion
 //#region src/sound/SpeechRecognizer.d.ts
@@ -5675,16 +5965,27 @@ export declare class ScreenshotSynthesizer {
   private virtualRealBuffer;
   private virtualRealRenderTarget?;
   private fullScreenQuad?;
+  private webgpuQuad?;
   private renderTargetWidth;
   private virtualCaptureInFlight;
   private virtualRealCaptureInFlight;
-  onAfterRender(renderer: THREE.WebGLRenderer, renderSceneFn: () => void, deviceCamera?: XRDeviceCamera): void;
+  onAfterRender(renderer: WebGLOrWebGPURenderer, renderSceneFn: () => void, deviceCamera?: XRDeviceCamera): void;
   private createVirtualImageDataURL;
   private resolveVirtualOnlyRequests;
   private rejectVirtualOnlyRequests;
   private createVirtualRealImageDataURL;
   private resolveVirtualRealRequests;
   private rejectVirtualRealRequests;
+  private createRenderTarget;
+  /**
+   * Reads `target` into `buffer` as top-down RGBA8. WebGL readbacks are
+   * bottom-up, native WebGPU readbacks are top-down but row-padded to 256
+   * bytes, and the WebGPU renderer's WebGL2 fallback is bottom-up again (the
+   * same conventions as SimulatorDepthWebGPURenderer).
+   */
+  private readRenderTargetInto;
+  /** Full-screen textured quad for the WebGPU device-camera overlay path. */
+  private getWebGPUQuad;
   private getFullScreenQuad;
   /**
    * Requests a screenshot from the scene as a DataURL.
@@ -6026,6 +6327,73 @@ export declare class WaitFrame {
   waitFrame(): Promise<void>;
 }
 //#endregion
+//#region src/core/components/WebXRSessionManager.d.ts
+export declare enum WebXRSessionEventType {
+  UNSUPPORTED = "unsupported",
+  READY = "ready",
+  BEFORE_SESSION_START = "beforesessionstart",
+  SESSION_START = "sessionstart",
+  SESSION_END = "sessionend",
+  SESSION_ERROR = "sessionerror"
+}
+export type WebXRSessionManagerEventMap = THREE.Object3DEventMap & {
+  [WebXRSessionEventType.UNSUPPORTED]: object;
+  [WebXRSessionEventType.READY]: {
+    sessionOptions: XRSessionInit;
+  };
+  [WebXRSessionEventType.BEFORE_SESSION_START]: {
+    session: XRSession;
+  };
+  [WebXRSessionEventType.SESSION_START]: {
+    session: XRSession;
+  };
+  [WebXRSessionEventType.SESSION_END]: object;
+  [WebXRSessionEventType.SESSION_ERROR]: {
+    error: unknown;
+  };
+};
+/**
+ * Manages the WebXR session lifecycle by extending THREE.EventDispatcher
+ * to broadcast its state to any listener.
+ */
+export declare class WebXRSessionManager extends THREE.EventDispatcher<WebXRSessionManagerEventMap> {
+  private renderer;
+  private sessionInit;
+  private mode;
+  currentSession?: XRSession;
+  private sessionOptions?;
+  private xrModeSupported?;
+  private waitingForXRSession;
+  private disposed;
+  private disposalPromise?;
+  constructor(renderer: WebGLOrWebGPURenderer, sessionInit: XRSessionInit, mode: XRSessionMode);
+  /**
+   * Checks for WebXR support and availability of the requested session mode.
+   * This should be called to initialize the manager and trigger the first
+   * events.
+   */
+  initialize(): Promise<void>;
+  /**
+   * Requests and initializes a WebXR session.
+   */
+  startSession(): void;
+  /**
+   * Ends the WebXR session.
+   */
+  endSession(): Promise<void>;
+  /**
+   * Returns whether XR is supported. Will be undefined until initialize is
+   * complete.
+   */
+  isXRSupported(): boolean | undefined;
+  getSessionOptions(): XRSessionInit | undefined;
+  /** Internal callback for when a session successfully starts. */
+  private onSessionStartedInternal;
+  /** Internal callback for when the session ends. */
+  private onSessionEndedInternal;
+  dispose(): Promise<void>;
+}
+//#endregion
 //#region src/core/components/PermissionsManager.d.ts
 /**
  * Interface representing the result of a permission request.
@@ -6085,69 +6453,6 @@ declare class PermissionsManager {
    * * @param permissionName - 'geolocation', 'camera', or 'microphone'
    */
   checkPermissionStatus(permissionName: 'geolocation' | 'camera' | 'microphone'): Promise<PermissionState | 'unknown'>;
-}
-//#endregion
-//#region src/core/components/WebXRSessionManager.d.ts
-declare enum WebXRSessionEventType {
-  UNSUPPORTED = "unsupported",
-  READY = "ready",
-  SESSION_START = "sessionstart",
-  SESSION_END = "sessionend",
-  SESSION_ERROR = "sessionerror"
-}
-type WebXRSessionManagerEventMap = THREE.Object3DEventMap & {
-  [WebXRSessionEventType.UNSUPPORTED]: object;
-  [WebXRSessionEventType.READY]: {
-    sessionOptions: XRSessionInit;
-  };
-  [WebXRSessionEventType.SESSION_START]: {
-    session: XRSession;
-  };
-  [WebXRSessionEventType.SESSION_END]: object;
-  [WebXRSessionEventType.SESSION_ERROR]: {
-    error: unknown;
-  };
-};
-/**
- * Manages the WebXR session lifecycle by extending THREE.EventDispatcher
- * to broadcast its state to any listener.
- */
-declare class WebXRSessionManager extends THREE.EventDispatcher<WebXRSessionManagerEventMap> {
-  private renderer;
-  private sessionInit;
-  private mode;
-  currentSession?: XRSession;
-  private sessionOptions?;
-  private xrModeSupported?;
-  private waitingForXRSession;
-  private disposed;
-  private disposalPromise?;
-  constructor(renderer: WebGLOrWebGPURenderer, sessionInit: XRSessionInit, mode: XRSessionMode);
-  /**
-   * Checks for WebXR support and availability of the requested session mode.
-   * This should be called to initialize the manager and trigger the first
-   * events.
-   */
-  initialize(): Promise<void>;
-  /**
-   * Requests and initializes a WebXR session.
-   */
-  startSession(): void;
-  /**
-   * Ends the WebXR session.
-   */
-  endSession(): Promise<void>;
-  /**
-   * Returns whether XR is supported. Will be undefined until initialize is
-   * complete.
-   */
-  isXRSupported(): boolean | undefined;
-  getSessionOptions(): XRSessionInit | undefined;
-  /** Internal callback for when a session successfully starts. */
-  private onSessionStartedInternal;
-  /** Internal callback for when the session ends. */
-  private onSessionEndedInternal;
-  dispose(): Promise<void>;
 }
 //#endregion
 //#region src/core/components/XRButton.d.ts
@@ -6280,6 +6585,11 @@ interface SimulatorObjectDefinition {
   data?: unknown;
   physics?: SimulatorPhysicsMode;
 }
+interface SimulatorDayNightLightingDefinition {
+  kind: 'dayNight';
+  nightScenePath: string;
+  pairing: 'bake-crossfade-v1';
+}
 interface SimulatorSceneManifest {
   name?: string;
   scenePath?: string;
@@ -6291,13 +6601,15 @@ interface SimulatorSceneManifest {
   scale?: SimulatorVector3Tuple;
   locations?: SimulatorLocations;
   objects?: SimulatorObjectDefinition[];
+  lighting?: SimulatorDayNightLightingDefinition;
 }
-interface ResolvedSimulatorSceneManifest extends Omit<SimulatorSceneManifest, 'scenePath' | 'videoPath' | 'scenePlanesPath' | 'navMeshPath' | 'objects'> {
+interface ResolvedSimulatorSceneManifest extends Omit<SimulatorSceneManifest, 'scenePath' | 'videoPath' | 'scenePlanesPath' | 'navMeshPath' | 'objects' | 'lighting'> {
   scenePath?: string;
   videoPath?: string;
   scenePlanesPath?: string;
   navMeshPath?: string;
   objects: SimulatorObjectDefinition[];
+  lighting?: SimulatorDayNightLightingDefinition;
   manifestUrl: string;
 }
 //#endregion
@@ -6347,6 +6659,7 @@ export declare class DepthMesh extends MeshScript {
   private disposed;
   private readonly gridResolution;
   private readonly geometryUpdater;
+  private readonly gridRaycaster;
   constructor(depthOptions: DepthOptions, width: number, height: number, depthTextures?: DepthTextures | undefined);
   get depthTextureUniforms(): {
     uDepthTexture: {
@@ -6419,15 +6732,17 @@ export declare class DepthMesh extends MeshScript {
    * Optimizes collider updates to run periodically based on the specified FPS.
    */
   private updateColliderIfNeeded;
-  initRapierPhysics(RAPIER: typeof RAPIER, blendedWorld: RAPIER.World): void;
+  initRapierPhysics(rapier: RAPIERCompat, blendedWorld: RapierWorld): void;
   /**
    * Customizes raycasting to compute normals for intersections.
+   * Uses a 2D projective grid walk over the depth heightfield when depth
+   * data is available, avoiding brute-force tests across all grid triangles.
    * @param raycaster - The raycaster object.
    * @param intersects - Array to store intersections.
    * @returns - True if intersections are found.
    */
   raycast(raycaster: THREE.Raycaster, intersects: THREE.Intersection[]): boolean;
-  getColliderFromHandle(handle: RAPIER.ColliderHandle): RAPIER.Collider | undefined;
+  getColliderFromHandle(handle: number): RapierCollider | undefined;
   /** Called by Depth at terminal teardown, not on Script disconnection. */
   disposeResources(): void;
 }
@@ -6453,6 +6768,11 @@ export declare class Depth {
   width: number;
   height: number;
   get rawValueToMeters(): number;
+  /**
+   * Resolves the buffer and metadata for a query, falling back to view 0 only
+   * when the requested view has not produced CPU depth yet.
+   */
+  private getDepthBuffer;
   occludableShaders: Set<Shader>;
   private occlusionPass?;
   private depthClientsInitialized;
@@ -6470,6 +6790,10 @@ export declare class Depth {
   normDepthBufferFromNormViewMatrices: THREE.Matrix4[];
   /** Timestamp of the last depth mesh geometry update. */
   private lastDepthMeshUpdateTime;
+  /** Whether an app has requested depth data or textures for viewId > 0. */
+  private requestedSecondaryViews;
+  /** Whether a CPU depth query has requested GPU readback. */
+  private requestedDepth;
   /**
    * Depth is a lightweight manager based on three.js to simply prototyping
    * with Depth in WebXR.
@@ -6478,7 +6802,7 @@ export declare class Depth {
   /**
    * Initialize Depth manager.
    */
-  init(camera: THREE.PerspectiveCamera, options: DepthOptions, renderer: WebGLOrWebGPURenderer, registry: Registry, scene: THREE.Scene): void | Promise<void>;
+  init(camera: THREE.PerspectiveCamera, options: DepthOptions, renderer: SupportedRenderer, registry: Registry, scene: THREE.Scene): void | Promise<void>;
   /**
    * Converts bottom-origin view UVs into normalized depth buffer coordinates.
    *
@@ -6491,6 +6815,7 @@ export declare class Depth {
    * @param u - Normalized horizontal coordinate, origin at bottom left.
    * @param v - Normalized vertical coordinate, origin at bottom left.
    * @param target - Vector that receives the result.
+   * @param viewId - View index (default 0).
    * @returns The normalized depth buffer coordinates.
    */
   private normDepthBufferCoords;
@@ -6501,16 +6826,19 @@ export declare class Depth {
    * the view, growing right.
    * @param v - Normalized vertical coordinate, origin at the bottom left of
    * the view, growing up.
+   * @param viewId - View index to query (default 0). Requesting viewId > 0 enables secondary view updates.
    * @returns Depth value at the specified coordinates.
    */
-  getDepth(u: number, v: number): number;
+  getDepth(u: number, v: number, viewId?: number): number;
   /**
    * Projects the given world position to depth camera's clip space and then
    * to the depth camera's view space using the depth.
    * @param position - The world position to project.
+   * @param target - Optional target vector.
+   * @param viewId - View index to query (default 0).
    * @returns The depth camera view space position.
    */
-  getProjectedDepthViewPositionFromWorldPosition(position: THREE.Vector3, target?: THREE.Vector3): THREE.Vector3;
+  getProjectedDepthViewPositionFromWorldPosition(position: THREE.Vector3, target?: THREE.Vector3, viewId?: number): THREE.Vector3;
   /**
    * Retrieves the depth at normalized coordinates (u, v).
    * Note: The UV coordinates are with respect to the user's view, not the depth camera view.
@@ -6518,10 +6846,13 @@ export declare class Depth {
    * the view, growing right.
    * @param v - Normalized vertical coordinate, origin at the bottom left of
    * the view, growing up.
+   * @param viewId - View index to query (default 0). Requesting viewId > 0 enables secondary view updates.
    * @returns Vertex at (u, v)
    */
-  getVertex(u: number, v: number): THREE.Vector3 | null;
+  getVertex(u: number, v: number, viewId?: number): THREE.Vector3 | null;
   private updateDepthMatrices;
+  /** Records demand for CPU depth so GPU depth is read back on the next frame. */
+  private requestDepth;
   updateCPUDepthData(depthData: XRCPUDepthInformation, viewId: number, depthDataFormat: XRDepthDataFormat): void;
   updateGPUDepthData(depthData: XRWebGLDepthInformation, viewId: number): void;
   /**
@@ -6531,7 +6862,18 @@ export declare class Depth {
    * expensive geometry rebuild can be throttled.
    */
   private shouldUpdateDepthMesh;
+  /**
+   * Returns whether CPU depth data and textures should be extracted for the
+   * given view index. By default only view 0 is processed since DepthMesh and
+   * OcclusionPass only consume view 0, unless `options.updateAllViews`,
+   * `options.matchDepthView`, or a runtime `viewId > 0` request is active.
+   */
+  private shouldUpdateView;
   getTexture(viewId: number): THREE.DataTexture | THREE.ExternalTexture | undefined;
+  /**
+   * Updates the shadow opacity on the depth mesh material when active.
+   */
+  setShadowOpacity(opacity: number): void;
   update(frame?: XRFrame): void;
   updateLocalDepth(frame: XRFrame): void;
   renderOcclusionPass(): void;
@@ -6662,7 +7004,7 @@ export declare const SIMULATOR_HAND_POSE_NAMES: Readonly<Record<SimulatorHandPos
 declare class SimulatorPhysics {
   private handOptions;
   readonly RAPIER: RAPIERCompat;
-  readonly world: RAPIER.World;
+  readonly world: RapierWorld;
   private hands;
   constructor(physics: Physics, handOptions: SimulatorHandPhysicsOptions);
   constrainHand(index: number, position: THREE.Vector3, enabled: boolean, handOrigin?: THREE.Vector3): void;
@@ -6867,6 +7209,17 @@ declare class SimulatorControlMode {
 }
 //#endregion
 //#region src/simulator/SimulatorInterface.d.ts
+/**
+ * Callbacks that gate the lazily-loaded day/night lighting behind the
+ * simulator settings UI: nothing loads until the user enables it.
+ */
+interface SimulatorLightingBinding {
+  isAvailable: () => boolean;
+  isEnabled: () => boolean;
+  getTimeOfDay: () => number;
+  setEnabled: (enabled: boolean) => Promise<void> | void;
+  setTimeOfDay: (timeOfDay: number) => void;
+}
 type SimulatorElementsLoader = () => Promise<unknown>;
 declare class SimulatorInterface {
   private readonly simulatorElementsLoader;
@@ -6877,16 +7230,45 @@ declare class SimulatorInterface {
   private gamepadController?;
   private simulatorHands?;
   private elementsAvailable?;
+  private settingsElement?;
+  private lighting?;
+  private overlayInstructionsElement?;
+  private overlayFadeInTimer?;
+  private overlayRemoveTimer?;
+  private hasUserInteracted;
+  private simulatorOptions?;
   constructor(simulatorElementsLoader?: SimulatorElementsLoader);
   /**
    * Initialize the simulator interface.
    */
-  init(simulatorOptions: SimulatorOptions, simulatorControls: SimulatorControls, simulatorHands: SimulatorHands, input?: Input, setEnvironment?: (environment: SimulatorEnvironment) => Promise<void>, handPhysicsAvailable?: boolean): Promise<void>;
+  init(simulatorOptions: SimulatorOptions, simulatorControls: SimulatorControls, simulatorHands: SimulatorHands, input?: Input, setEnvironment?: (environment: SimulatorEnvironment) => Promise<void>, handPhysicsAvailable?: boolean, lighting?: SimulatorLightingBinding): Promise<void>;
   private ensureElementsAvailable;
-  createSimulatorSettingsPanel(simulatorOptions: SimulatorOptions, simulatorControls: SimulatorControls, setEnvironment: (environment: SimulatorEnvironment) => Promise<void>, handPhysicsAvailable: boolean): void;
+  createSimulatorSettingsPanel(simulatorOptions: SimulatorOptions, simulatorControls: SimulatorControls, setEnvironment: (environment: SimulatorEnvironment) => Promise<void>, handPhysicsAvailable: boolean, lighting?: SimulatorLightingBinding): void;
+  /**
+   * Re-reads the day/night lighting binding into the settings panel. Called
+   * after environment switches (the environment may declare lighting or not),
+   * after enable/disable, and after API-driven changes so the slider can
+   * never show a time of day the simulator is not actually at.
+   */
+  syncLightingState(): void;
   showInstructions(simulatorOptions: SimulatorOptions, simulatorMode?: SimulatorMode): void;
   showGeminiLivePanel(simulatorOptions: SimulatorOptions): void;
   createHandPosePanel(simulatorOptions: SimulatorOptions, simulatorHands: SimulatorHands): void;
+  createOverlayInstructions(simulatorOptions: SimulatorOptions, simulatorMode: SimulatorMode): void;
+  /**
+   * Starts the 5-second idle timer after the simulator finishes initializing.
+   * If no user interaction occurs before the timer expires, the overlay
+   * instructions fade in.
+   */
+  startOverlayInstructionsTimer(simulatorOptions?: SimulatorOptions, simulatorMode?: SimulatorMode): void;
+  /**
+   * Notifies the interface that the user has interacted with the simulator.
+   * Cancels the fade-in timer if the overlay has not yet appeared, or fades
+   * the overlay out immediately.
+   */
+  notifyUserInteraction(): void;
+  setSimulatorMode(mode: SimulatorMode): void;
+  private clearOverlayTimers;
   hideUiElements(): void;
   showUiElements(): void;
   getInterfaceVisible(): boolean;
@@ -6907,6 +7289,9 @@ interface ISimulatorSettingsPanelElement extends HTMLElement {
   instructionsEnabled?: boolean;
   handPhysicsAvailable: boolean;
   handPhysicsEnabled: boolean;
+  dayNightAvailable: boolean;
+  dayNightEnabled: boolean;
+  timeOfDay: number;
 }
 //#endregion
 //#region src/simulator/SimulatorControls.d.ts
@@ -7153,9 +7538,9 @@ export declare class DetectedMesh extends THREE.Mesh {
   private blendedWorld?;
   private lastChangedTime;
   semanticLabel?: string;
-  get getRigidBody(): RAPIER.RigidBody | undefined;
+  get getRigidBody(): RapierRigidBody | undefined;
   constructor(mesh: XRMesh | SimulatorMesh, material: THREE.Material);
-  initRapierPhysics(RAPIER: typeof RAPIER, blendedWorld: RAPIER.World): void;
+  initRapierPhysics(rapier: RAPIERCompat, blendedWorld: RapierWorld): void;
   updateVertices(mesh: XRMesh): void;
   dispose(): void;
 }
@@ -7182,7 +7567,7 @@ interface SimulatorObjectUpdate {
 }
 /** @internal */
 interface SimulatorObjectRecord extends SimulatorObject {
-  rigidBody?: RAPIER.RigidBody;
+  rigidBody?: RapierRigidBody;
   detectedMesh?: DetectedMesh;
   physicsGeometry?: THREE.BufferGeometry;
   ownsObject: boolean;
@@ -7258,6 +7643,21 @@ export interface SimulatorPlane {
    * Since +Y is normal, these points lie on the flat surface.
    */
   polygon: THREE.Vector2[];
+}
+//#endregion
+//#region src/utils/TemporalPolyfill.d.ts
+/** Duration fields accepted by placement timeouts, including native Temporal.Duration objects. */
+interface DurationLike {
+  years?: number;
+  months?: number;
+  weeks?: number;
+  days?: number;
+  hours?: number;
+  minutes?: number;
+  seconds?: number;
+  milliseconds?: number;
+  microseconds?: number;
+  nanoseconds?: number;
 }
 //#endregion
 //#region src/world/objects/DetectedObject.d.ts
@@ -7341,7 +7741,7 @@ export declare class ObjectDetector extends Script {
     deviceCamera: typeof XRDeviceCamera;
     depth: typeof Depth;
     camera: typeof THREE.Camera;
-    renderer: typeof THREE.WebGLRenderer;
+    rendererHolder: typeof RendererHolder;
   };
   /**
    * A map from the object's UUID to our custom `DetectedObject` instance.
@@ -7378,14 +7778,14 @@ export declare class ObjectDetector extends Script {
    * Initializes the ObjectDetector.
    * @override
    */
-  init({ options, ai, aiOptions, deviceCamera, depth, camera, renderer }: {
+  init({ options, ai, aiOptions, deviceCamera, depth, camera, rendererHolder }: {
     options: WorldOptions;
     ai: AI;
     aiOptions: AIOptions;
     deviceCamera: XRDeviceCamera;
     depth: Depth;
     camera: THREE.PerspectiveCamera;
-    renderer: THREE.WebGLRenderer;
+    rendererHolder: RendererHolder;
   }): void;
   /**
    * Starts continuous object detection for the given client.
@@ -7490,7 +7890,7 @@ export declare class DetectedPlane extends THREE.Mesh {
 export declare class PlaneDetector extends Script {
   static dependencies: {
     options: typeof WorldOptions;
-    renderer: typeof THREE.WebGLRenderer;
+    rendererHolder: typeof RendererHolder;
   };
   /**
    * A map from the WebXR `XRPlane` object to our custom `DetectedPlane` mesh.
@@ -7509,9 +7909,9 @@ export declare class PlaneDetector extends Script {
   /**
    * Initializes the PlaneDetector.
    */
-  init({ options, renderer }: {
+  init({ options, rendererHolder }: {
     options: WorldOptions;
-    renderer: THREE.WebGLRenderer;
+    rendererHolder: RendererHolder;
   }): void;
   /**
    * Processes the XRFrame to update plane information.
@@ -7770,7 +8170,7 @@ export declare class AnchorManager extends Script {
   private readonly injectedStore?;
   static dependencies: {
     options: typeof WorldOptions;
-    renderer: typeof THREE.WebGLRenderer;
+    rendererHolder: typeof RendererHolder;
     xrReferenceSpaceCache: typeof XRReferenceSpaceCache;
   };
   /** What the current platform supports; refreshed each frame. */
@@ -7801,9 +8201,9 @@ export declare class AnchorManager extends Script {
    *     the anchor settings, and the renderer supplying the reference space
    *     that anchor poses are expressed against.
    */
-  init({ options, renderer, xrReferenceSpaceCache }: {
+  init({ options, rendererHolder, xrReferenceSpaceCache }: {
     options: WorldOptions;
-    renderer?: THREE.WebGLRenderer;
+    rendererHolder?: RendererHolder;
     xrReferenceSpaceCache?: XRReferenceSpaceCache;
   }): void;
   /**
@@ -8030,7 +8430,7 @@ export declare class AnchorManager extends Script {
 export declare class MeshDetector extends Script {
   static readonly dependencies: {
     options: typeof MeshDetectionOptions;
-    renderer: typeof THREE.WebGLRenderer;
+    rendererHolder: typeof RendererHolder;
   };
   private debugMaterials;
   private fallbackDebugMaterial;
@@ -8049,9 +8449,9 @@ export declare class MeshDetector extends Script {
   private readonly kFOVCosThreshold;
   private lastCleanupTime;
   private frameCount;
-  init({ options, renderer }: {
+  init({ options, rendererHolder }: {
     options: MeshDetectionOptions;
-    renderer: THREE.WebGLRenderer;
+    rendererHolder: RendererHolder;
   }): void;
   initPhysics(physics: Physics): void;
   updateMeshes(_timestamp: number, frame?: XRFrame): void;
@@ -8280,7 +8680,7 @@ export declare class HumanRecognizer extends Script {
     deviceCamera: typeof XRDeviceCamera;
     depth: typeof Depth;
     camera: typeof THREE.Camera;
-    renderer: typeof THREE.WebGLRenderer;
+    rendererHolder: typeof RendererHolder;
   };
   private detectorBackends;
   private activeClients;
@@ -8297,12 +8697,12 @@ export declare class HumanRecognizer extends Script {
   private camera;
   private renderer;
   targetDevice: string;
-  init({ options, deviceCamera, depth, camera, renderer }: {
+  init({ options, deviceCamera, depth, camera, rendererHolder }: {
     options: WorldOptions;
     deviceCamera: XRDeviceCamera;
     depth: Depth;
     camera: THREE.PerspectiveCamera;
-    renderer: THREE.WebGLRenderer;
+    rendererHolder: RendererHolder;
   }): void;
   /**
    * Starts continuous pose detection for the given client.
@@ -8467,7 +8867,7 @@ export declare class FaceRecognizer extends Script {
     deviceCamera: typeof XRDeviceCamera;
     depth: typeof Depth;
     camera: typeof THREE.Camera;
-    renderer: typeof THREE.WebGLRenderer;
+    rendererHolder: typeof RendererHolder;
   };
   private _detectorBackends;
   private activeClients;
@@ -8484,12 +8884,12 @@ export declare class FaceRecognizer extends Script {
   private camera;
   private renderer;
   targetDevice: string;
-  init({ options, deviceCamera, depth, camera, renderer }: {
+  init({ options, deviceCamera, depth, camera, rendererHolder }: {
     options: WorldOptions;
     deviceCamera: XRDeviceCamera;
     depth: Depth;
     camera: THREE.PerspectiveCamera;
-    renderer: THREE.WebGLRenderer;
+    rendererHolder: RendererHolder;
   }): void;
   /**
    * Starts continuous face detection for the given client.
@@ -8751,7 +9151,7 @@ export declare class World extends Script {
    * @param gridSteps - Optional number of steps along each axis for grid sampling candidate positions (defaults to 5).
    * @returns A promise resolving to true if successfully placed, false otherwise.
    */
-  placeOnHorizontalSurface(objectToPlace: THREE.Object3D, timeout?: Temporal.Duration | Temporal.DurationLike, gridSteps?: number): Promise<boolean>;
+  placeOnHorizontalSurface(objectToPlace: THREE.Object3D, timeout?: DurationLike, gridSteps?: number): Promise<boolean>;
   /**
    * Toggles the visibility of all debug visualizations for world features.
    * @param visible - Whether the visualizations should be visible.
@@ -8817,6 +9217,7 @@ declare class Simulator extends Script {
   private objectDetectionSource?;
   private deviceCamera?;
   private useSimulatorObjectDetection;
+  private displayFov?;
   constructor(renderMainScene: (cameraOverride?: THREE.Camera) => void, renderer?: WebGLOrWebGPURenderer | undefined);
   get userMovementConstrained(): boolean;
   moveUser(desiredCameraPosition: THREE.Vector3): void;
@@ -8843,6 +9244,28 @@ declare class Simulator extends Script {
   get activeEnvironmentManifest(): ResolvedSimulatorSceneManifest | undefined;
   /** Returns the named world-space locations for the active environment. */
   getLocations(): SimulatorLocations;
+  /**
+   * Sets the time of day for the active environment's day/night lighting
+   * (0 = day endpoint, 1 = night endpoint). Initializes the lighting lazily
+   * on first use. No-op when the active environment declares no day/night
+   * lighting.
+   */
+  setTimeOfDay(t: number): Promise<void>;
+  /**
+   * Fetches the active environment's night bake ahead of first use so the
+   * day/night lighting can start without a visible delay. No-op when the
+   * active environment declares no day/night lighting.
+   */
+  preloadDayNight(): Promise<void>;
+  /**
+   * Enables or disables day/night lighting for the active environment. The
+   * DayNightCycle chunk and the night bake are only fetched on first enable,
+   * never at environment load. No-op when the active environment declares no
+   * day/night lighting.
+   */
+  setDayNightEnabled(enabled: boolean): Promise<void>;
+  /** True when day/night lighting is enabled for the active environment. */
+  get dayNightEnabled(): boolean;
   physicsStep(): void;
   onXRSessionStarted(): void;
   onXRSessionEnded(): void;
@@ -8954,12 +9377,16 @@ export declare class Lighting {
    * @param scene - Main scene.
    * @param depth - Depth manager.
    */
-  init(lightingOptions: LightingOptions, renderer: THREE.WebGLRenderer, scene: THREE.Scene, depth?: Depth): void;
+  init(lightingOptions: LightingOptions, renderer: SupportedRenderer, scene: THREE.Scene, depth?: Depth): void;
   /**
    * Updates the lighting and shadow setup used to render. Called every frame
    * in the render loop.
    */
   update(): void;
+  /**
+   * Releases lighting resources and resets the singleton instance.
+   */
+  dispose(): void;
   /**
    * Logs current estimate light parameters for debugging.
    */
@@ -8986,7 +9413,7 @@ declare class XRTransition extends MeshScript<THREE.SphereGeometry, THREE.MeshBa
     pointerEvents: 'none';
   };
   static dependencies: {
-    renderer: typeof THREE.WebGLRenderer;
+    rendererHolder: typeof RendererHolder;
     camera: typeof THREE.Camera;
     timer: typeof THREE.Timer;
     scene: typeof THREE.Scene;
@@ -9003,8 +9430,8 @@ declare class XRTransition extends MeshScript<THREE.SphereGeometry, THREE.MeshBa
   private targetAlpha;
   private defaultBackgroundColor;
   constructor();
-  init({ renderer, camera, timer, scene, options }: {
-    renderer: THREE.WebGLRenderer;
+  init({ rendererHolder, camera, timer, scene, options }: {
+    rendererHolder: RendererHolder;
     camera: THREE.Camera;
     timer: THREE.Timer;
     scene: THREE.Scene;
@@ -9090,10 +9517,13 @@ export declare class Core {
   /** A shared texture loader. */
   textureLoader: THREE.TextureLoader;
   private webXRSettings;
+  private _environmentBlendMode?;
+  private additiveDisplaySimulation?;
   private shouldAutostartSimulator;
   /** Whether the XR simulator is currently active. */
   simulatorRunning: boolean;
   private startingSimulator?;
+  private onBeforeWebXRSessionStart;
   private onWebXRSessionStarted;
   private onWebXRUnsupported;
   private _isPaused;
@@ -9113,17 +9543,19 @@ export declare class Core {
   transition?: XRTransition;
   get currentFrame(): XRFrame | null | undefined;
   scriptsManager: ScriptsManager;
-  renderSceneOverride?: (renderer: WebGLOrWebGPURenderer, scene: THREE.Scene, camera: THREE.Camera) => void;
+  renderSceneOverride?: (renderer: SupportedRenderer, scene: THREE.Scene, camera: THREE.Camera) => void;
   webXRSessionManager?: WebXRSessionManager;
   permissionsManager: PermissionsManager;
   /**
-   * The WebGL or WebGPU renderer, created during {@link Core.init}. Reading it
-   * before `init()` has run returns `undefined` and logs a one-time warning.
+   * The WebGL, WebGPU, or Serializer renderer, created during {@link Core.init}.
+   * Reading it before `init()` has run returns `undefined` and logs a one-time warning.
    */
-  get renderer(): WebGLOrWebGPURenderer;
-  set renderer(renderer: WebGLOrWebGPURenderer);
+  get renderer(): SupportedRenderer;
+  set renderer(renderer: SupportedRenderer);
   get isPaused(): boolean;
   get elapsedTime(): number;
+  /** The active XR session's environment blend mode, or undefined outside XR. */
+  get environmentBlendMode(): XRSession['environmentBlendMode'] | undefined;
   /** Current state of this terminal Core lifetime. */
   get lifecycle(): CoreLifecycleState;
   pause(): void;
@@ -9340,6 +9772,7 @@ export declare class OcclusionPass extends Pass implements OcclusionPassBackend 
   private camera;
   renderToScreen: boolean;
   private occludableItemsLayer;
+  resolutionScale: number;
   private depthTextures;
   private occlusionMeshMaterial;
   private occlusionMapUniforms;
@@ -9356,7 +9789,7 @@ export declare class OcclusionPass extends Pass implements OcclusionPassBackend 
   private lastKawaseBlurSize;
   private readonly renderDimensions;
   private disposed;
-  constructor(scene: THREE.Scene, camera: THREE.PerspectiveCamera, useFloatDepth?: boolean, renderToScreen?: boolean, occludableItemsLayer?: number);
+  constructor(scene: THREE.Scene, camera: THREE.PerspectiveCamera, useFloatDepth?: boolean, renderToScreen?: boolean, occludableItemsLayer?: number, resolutionScale?: number);
   private setupKawaseBlur;
   setDepthTexture(depthTexture: THREE.Texture, rawValueToMeters: number, viewId: number, depthNear?: number, depthViewMatrix?: THREE.Matrix4, depthProjectionMatrix?: THREE.Matrix4): void;
   /**
@@ -9370,6 +9803,7 @@ export declare class OcclusionPass extends Pass implements OcclusionPassBackend 
   renderOcclusionMapFromScene(renderer: THREE.WebGLRenderer, dimensions: THREE.Vector2, viewId: number): void;
   renderOcclusionMapFromReadBuffer(renderer: THREE.WebGLRenderer, readBuffer: THREE.RenderTarget, dimensions: THREE.Vector2, viewId: number): void;
   blurOcclusionMap(renderer: THREE.WebGLRenderer, dimensions: THREE.Vector2): void;
+  private getScaledDimensions;
   private resizeOcclusionMap;
   private resizeKawaseBlur;
   applyOcclusionMapToRenderedImage(renderer: THREE.WebGLRenderer, readBuffer?: THREE.WebGLRenderTarget, writeBuffer?: THREE.WebGLRenderTarget): void;
@@ -9407,6 +9841,89 @@ export declare class OcclusionUtils {
    */
   static addOcclusionToShader(shader: Shader): void;
 }
+//#endregion
+//#region src/generative/BackgroundKeyer.d.ts
+/** A raw RGBA image: `data` is width*height*4 bytes, row-major. */
+export interface RgbaImage {
+  data: Uint8ClampedArray;
+  width: number;
+  height: number;
+}
+/** Options for {@link keyOutBackground}. */
+export interface BackgroundKeyOptions {
+  /**
+   * Maximum Euclidean RGB distance (0-441) from the sampled background color
+   * for a pixel to be treated as background and made transparent.
+   */
+  tolerance?: number;
+}
+/**
+ * Estimates the background color of an image by averaging its four corner
+ * pixels. Generated images that place the subject on a plain, uniform
+ * background (the generative_object demo instructs the model to do so) have
+ * corners that are a reliable sample.
+ * @param image - The source RGBA image.
+ * @returns The estimated `[r, g, b]` background color (0-255).
+ */
+export declare function estimateBackgroundColor(image: RgbaImage): [number, number, number];
+/**
+ * Makes background-colored pixels transparent, turning a subject-on-a-plain-
+ * background image into a clean cutout. Operates on a copy; the input is not
+ * mutated.
+ * @param image - The source RGBA image.
+ * @param options - Keying options.
+ * @returns A new {@link RgbaImage} with background pixels set to alpha 0.
+ */
+export declare function keyOutBackground(image: RgbaImage, options?: BackgroundKeyOptions): RgbaImage;
+/**
+ * Builds a grayscale displacement map from a keyed image: background pixels
+ * (alpha 0) become black (no displacement) and subject pixels become their
+ * luminance. Masking by alpha keeps the transparent background from displacing
+ * into stray geometry. The result is opaque RGBA.
+ * @param image - A keyed RGBA image (background already at alpha 0).
+ * @returns A new opaque {@link RgbaImage} usable as a displacement/bump map.
+ */
+export declare function buildDisplacementMap(image: RgbaImage): RgbaImage;
+//#endregion
+//#region src/generative/GenerativeObjectUtils.d.ts
+/**
+ * Computes an aspect-ratio-preserving plane size whose largest side equals
+ * `maxSize`. Used to scale a generated image so it reads at a comfortable size
+ * regardless of the model's output resolution.
+ * @param imageWidth - Source image width in pixels.
+ * @param imageHeight - Source image height in pixels.
+ * @param maxSize - Largest dimension of the resulting plane, in meters.
+ * @param target - Optional output vector to write into.
+ * @returns `target` set to the plane's [width, height] in meters.
+ */
+export declare function computeBillboardScale(imageWidth: number, imageHeight: number, maxSize: number, target?: THREE.Vector2): THREE.Vector2;
+/**
+ * Computes a world-space pose `distance` meters in front of the camera,
+ * oriented so its front face (+Z) points back toward the user. Copy the result
+ * straight onto a direct child of the scene; for an object under a transformed
+ * parent, convert it into the parent's space first.
+ * @param camera - The user's camera.
+ * @param distance - Distance in front of the camera, in meters.
+ * @param position - Optional output world position.
+ * @param quaternion - Optional output world orientation.
+ * @returns The world position and orientation.
+ */
+export declare function poseInFrontOfCamera(camera: THREE.Camera, distance: number, position?: THREE.Vector3, quaternion?: THREE.Quaternion): {
+  position: THREE.Vector3;
+  quaternion: THREE.Quaternion;
+};
+/**
+ * Computes a world-space orientation that turns a plane's front face (+Z)
+ * toward the camera while keeping the object upright (yaw only). Used to
+ * billboard a generated cutout so it faces the user like a standee, without
+ * tilting. Apply it directly to a child of the scene; under a transformed
+ * parent, convert it into the parent's space first.
+ * @param objectPosition - World position of the object.
+ * @param cameraPosition - World position of the camera.
+ * @param target - Optional output world orientation.
+ * @returns `target` oriented so +Z points toward the camera, staying upright.
+ */
+export declare function quaternionFacingCamera(objectPosition: THREE.Vector3, cameraPosition: THREE.Vector3, target?: THREE.Quaternion): THREE.Quaternion;
 //#endregion
 //#region src/layers/LayerCapability.d.ts
 /**
@@ -10107,6 +10624,8 @@ interface UIThemeColors {
   readonly text: string;
   readonly secondaryText: string;
   readonly outline: string;
+  /** Unfilled slider track; falls back to outline when omitted. */
+  readonly sliderTrack?: string;
   readonly disabledSurface: string;
   readonly disabledText: string;
 }
@@ -10122,7 +10641,7 @@ interface UIThemeUpdate {
   readonly borderRadius?: number;
   readonly styles?: UIThemeStyles;
 }
-type UIThemePresetName = 'grayGlass' | 'colorful' | 'glimmer' | 'glimmerOpaque' | 'glimmerAmber' | 'glimmerGreen';
+type UIThemePresetName = 'grayGlass' | 'colorful' | 'glimmer' | 'glimmerOpaque' | 'glimmerAmber' | 'glimmerGreen' | 'highContrast';
 //#endregion
 //#region src/ui/UIValidation.d.ts
 type UIValidationCode = 'not-ready' | 'not-mounted' | 'invalid-layout' | 'content-overflow' | 'text-clipped' | 'outside-viewport';
@@ -10581,6 +11100,35 @@ export declare class UIButton<TEventMap extends THREE.Object3DEventMap = THREE.O
   add(...objects: THREE.Object3D[]): this;
   private assertConvenienceContent;
   private assertAccessibleName;
+}
+//#endregion
+//#region src/ui/components/UIExitButton.d.ts
+interface UIExitButtonOptions extends Omit<UIButtonOptions, 'label' | 'ariaLabel'> {
+  label?: string;
+  ariaLabel?: string;
+  /** Custom exit handler. If omitted, ends the active WebXR session via the injected WebXRSessionManager. */
+  onExit?: () => void | Promise<void>;
+  /** Optional explicit session manager instance (useful for testing or manual injection). */
+  sessionManager?: WebXRSessionManager;
+}
+export declare const DEFAULT_EXIT_BUTTON_STYLE: UIStyle;
+/**
+ * A standard circular exit button for XR overlays and cards.
+ * Uses dependency injection to resolve the active `WebXRSessionManager`
+ * and cleanly end the session when clicked.
+ */
+export declare class UIExitButton<TEventMap extends THREE.Object3DEventMap = THREE.Object3DEventMap> extends UIButton<TEventMap> {
+  static readonly dependencies: {
+    sessionManager: typeof WebXRSessionManager;
+  };
+  name: string;
+  private sessionManager?;
+  private readonly _onExit?;
+  constructor({ label, ariaLabel, pointerEvents, style, onClick, onExit, sessionManager, ...rest }?: UIExitButtonOptions);
+  init(dependencies?: {
+    sessionManager?: WebXRSessionManager;
+  }): void;
+  handleExit(customOnClick?: () => void): Promise<void>;
 }
 //#endregion
 //#region src/ui/components/UIIcon.d.ts
@@ -11454,7 +12002,7 @@ export declare class LocalStorageAnchorStore implements AnchorStore {
   private write;
 }
 declare namespace xrblocks_d_exports {
-  export { AI, AIModel, AIOptions, ActiveControllers, Agent, AgentLifecycleCallbacks, AnchorCapability, AnchorManager, AnchorRecord, AnchorRestoreResult, AnchorRestoreStatus, AnchorStorageLike, AnchorStore, AnchoredObjectFactory, AnchoredObjects, AnchorsOptions, AudioListener, AudioListenerOptions, AudioPlayer, AudioPlayerOptions, AutomationModeOptions, BACK, BackgroundMusic, BaseManipulationEvent, CameraParametersSnapshot, CameraSnapshot, CategoryVolumes, ColorStop, Constructor, Context, ContextOptions, Core, CoreLifecycleState, CoreSound, DEFAULT_DEVICE_CAMERA_HEIGHT, DEFAULT_DEVICE_CAMERA_WIDTH, DEFAULT_RGB_TO_DEPTH_PARAMS, DEVICE_CAMERA_PARAMETERS, DOWN, DeepPartial, DeepReadonly, Depth, DepthArray, DepthMesh, DepthMeshOptions, DepthOptions, DepthTextures, DetectedBodyPose, DetectedFace, DetectedMesh, DetectedObject, DetectedPlane, DeviceCameraOptions, DeviceCameraParameters, DigitName, FINGER_ORDER, FORWARD, FaceBlendshape, FaceCamera, FaceCameraMode, FaceCameraOptions, FaceLandmark, FaceLandmarkName, FaceRecognizer, FacesOptions, FingerName, FollowHead, FollowHeadOptions, FollowObject, FollowObjectMode, FollowObjectOptions, FormFactor, GEMINI_DEFAULT_FLASH_MODEL, GEMINI_DEFAULT_IMAGE_MODEL, GEMINI_DEFAULT_LIVE_MODEL, GamepadAction, GamepadBindings, GamepadController, GazeController, Gemini, GeminiOptions, GeminiQueryInput, GenerateSkyboxTool, GestureConfiguration, GestureDetectionResult, GestureEvent, GestureEventDetail, GestureEventType, GestureHandedness, GestureRecognition, GestureRecognitionOptions, GestureRecognizer, GestureScoreMap, GetWeatherArgs, GetWeatherTool, GradientPaint, GradientType, HAND_BONE_IDX_CONNECTION_MAP, HAND_INDEX_TO_LABEL, HAND_JOINT_COUNT, HAND_JOINT_IDX_CONNECTION_MAP, HAND_JOINT_NAMES, HandContext, HandLabel, Handedness, Hands, HandsOptions, HeadGestureConfiguration, HeadGestureContext, HeadGestureDetectionResult, HeadGestureEvent, HeadGestureEventDetail, HeadGestureEventMap, HeadGestureRecognition, HeadGestureRecognitionOptions, HeadGestureRecognizer, HeadGestureScoreMap, HeadPoseSample, HeuristicGestureDetector, HeuristicGestureRecognizer, HeuristicHeadGestureDetector, HeuristicHeadGestureRecognizer, HeuristicHeadGestureRecognizerOptions, HitSurfaceOptions, HoverEvent, HumanRecognizer, HumansOptions, Injectable, InjectableConstructor, Input, InputOptions, Interaction, InteractionOptions, InteractionSource, InteractionSourceType, JointName, JointPositions, KeyEvent, Keycodes, KeysJson, LEFT, LEFT_VIEW_ONLY_LAYER, LayerCapability, LayerManager, LayersOptions, Lighting, LightingOptions, LipMetrics, LiveSessionState, LoadingSpinnerManager, LocalStorageAnchorStore, LongSelectEvent, ManipulationAction, ManipulationEvent, ManipulationHandleOptions, ManipulationOptions, ManipulationPhase, MediaOrSimulatorMediaDeviceInfo, MediaPipeHandContext, MediaPipeHandLandmark, MediaPipeHandPoseEstimator, MeshDetectionOptions, MeshDetector, MeshScript, ModelClass, ModelLoader, ModelLoaderLoadGLTFOptions, ModelLoaderLoadOptions, ModelOptions, ModelSource, ModelViewer, ModelViewerOptions, ModelViewerOrigin, MouseController, NUM_HANDS, NormalizedDetectedObject, OCCLUDABLE_ITEMS_LAYER, ObjectDetectionOptions, ObjectDetector, ObjectGrabEvent, ObjectTouchEvent, ObjectTouchStartEvent, ObjectsOptions, OcclusionPass, OcclusionPassBackend, OcclusionUtils, OpenAI, OpenAIOptions, Options, Orbit, OrbitDirection, OrbitFrame, OrbitOptions, OrbitPath, Paint, PalmPose, Physics, PhysicsOptions, PlaneDetector, PlanesOptions, PlayModelAnimationOptions, PlaySoundOptions, PointerEvents, PoseEstimator, PoseJointName, PoseLandmark, PushPullOptions, QuatTuple, RAPIERCompat, RENDERER_BACKENDS, RIGHT, RIGHT_VIEW_ONLY_LAYER, RaycastMode, Registry, RendererBackend, ResizeManipulationEvent, ResizeOptions, ResizeSize, ResolvedSimulatorSceneManifest, ReticleMode, ReticleOptions, Reticles, RgbToDepthParams, RotateManipulationEvent, RotateOptions, SIMULATOR_HAND_COMMON_BIOMECHANICAL_CONSTRAINTS_DEGREES, SIMULATOR_HAND_POSE_NAMES, SIMULATOR_HAND_POSE_ROTATIONS, SOUND_PRESETS, ScaleManipulationEvent, ScaleOptions, SceneContextDetectionOptions, SceneContextDetectionResult, SceneDetector, SceneOptions, SceneSetOfMarkOptions, SceneVisibilityOptions, ScreenshotSynthesizer, Script, ScriptMixin, ScriptsManager, ScriptsManagerEventMap, ScriptsManagerEventType, SegmentCategory, SegmentationMask, SegmentationOptions, Segmenter, SelectEndEvent, SelectEvent, SelectionEndReason, SemanticBounds, SemanticMetadata, SemanticNode, SemanticScrollInfo, SemanticSource, SemanticTree, SemanticViewData, SetOfMark, SetOfMarkContext, SetSimulatorEnvironmentEvent, SetSimulatorHandPhysicsEvent, SetSimulatorModeEvent, Shader, ShaderUniforms, ShowSimulatorInstructionsEvent, Simulator, SimulatorAnchor, SimulatorCamera, SimulatorControlMode, SimulatorControllerState, SimulatorControls, SimulatorCustomInstruction, SimulatorDepth, SimulatorDepthMaterial, SimulatorDetectedObjectInput, SimulatorEnvironment, SimulatorHandJointRotationArray, SimulatorHandPhysicsOptions, SimulatorHandPose, SimulatorHandPoseChangeRequestEvent, SimulatorHandPoseJoints, SimulatorHandPoseRotationConstraintsDegrees, SimulatorHandPoseRotationRangeDegrees, SimulatorHandPoseRotations, SimulatorHands, SimulatorLocationDefinition, SimulatorLocations, SimulatorMediaDeviceInfo, SimulatorMesh, SimulatorMode, SimulatorObject, SimulatorObjectDefinition, SimulatorObjectDetectionSource, SimulatorObjectUpdate, SimulatorObjects, SimulatorOptions, SimulatorPhysicsMode, SimulatorPlane, SimulatorPlaneType, SimulatorPointerLockController, SimulatorQuaternionTuple, SimulatorScene, SimulatorSceneManifest, SimulatorUser, SimulatorUserPath, SimulatorVector3Tuple, SkyboxAgent, SolidPaint, SoundOptions, SoundSynthesizer, SparkRendererHolder, SpatialAudio, SpeechRecognizer, SpeechRecognizerOptions, SpeechSynthesizer, SpeechSynthesizerOptions, StorablePose, StreamState, StrokeEventMap, StrokeRecognizer, StylizedFace, StylizedFaceOptions, TensorFlowHandPoseEstimator, Tool, ToolCall, ToolOptions, ToolResult, ToolSchema, TrackedAnchor, TrackedAnchorLike, TransformScript, TranslateManipulationEvent, TranslateOptions, UIAppearance, UIButton, UIButtonOptions, UICard, UICardAnchorX, UICardAnchorY, UICardEdgeOptions, UICardOptions, UIColor, UIElement, UIElementOptions, UIIcon, UIIconOptions, UIIconVariant, UIIconWeight, UIImage, UIImageOptions, UILineHeight, UIOverlay, UIOverlayOptions, UIPanel, UIPanelOptions, UIPosition, UIResolvedSize, UIScrollView, UIScrollViewOptions, UISize, UISlider, UISliderOptions, UIStateStyle, UIStyle, UIText, UITextInput, UITextInputKeyModifiers, UITextInputOptions, UITextInputSelection, UITextInputSelectionDirection, UITextOptions, UITheme, UIThemeColors, UIThemePresetName, UIThemeStyleRole, UIThemeStyles, UIThemeUpdate, UITransform, UIUnit, UIValidationBounds, UIValidationCode, UIValidationIssue, UIValidationReport, UIVector2, UP, User, VIEW_DEPTH_GAP, Vec2Tuple, Vec3Tuple, VideoFileStream, VideoFileStreamOptions, VideoFrameMetadata, VideoLayer, VideoLayerPath, VideoLayerPlacement, VideoLayerState, VideoStream, VideoStreamDetails, VideoStreamEventMap, VideoStreamGetSnapshotBase64Options, VideoStreamGetSnapshotBlobOptions, VideoStreamGetSnapshotImageDataOptions, VideoStreamGetSnapshotOptions, VideoStreamGetSnapshotTextureOptions, VideoStreamOptions, VisemeWeights, VisibilityTransition, VisibilityTransitionOptions, VisibleObjectsContext, VolumeCategory, WaitFrame, WeatherData, WebGLOrWebGPURenderer, WebGPURendererOptions, WebXRHandContext, WebXRHandPoseEstimator, WebXRJointRotations, World, WorldOptions, XBObjectOptions, XRButton, XRDeviceCamera, XREffects, XRPass, XRReferenceSpaceCache, XRTransitionOptions, XR_BLOCKS_ASSETS_PATH, ZERO_VECTOR3, ZERO_VISEME, _getBvhImportStatus, add, ai$1 as ai, anchorCapability, applyBVH, applySimulatorHandPoseRotationConstraints, aspectRatioOf, assertWebGLRenderer, average, callInitWithDependencyInjection, camera$1 as camera, clamp, clamp01, clampRotationToAngle, context, core, cropImage, defaultAnchorStorageKey, depth$1 as depth, detectDeviceCameraTarget, disposeBVH, disposeMaterial, disposeMeshResources, disposeObjectChildren, disposeObjectTree, disposeRenderableResources, enableAcceleratedRaycast, estimateHandScale, extractYaw, getAdjacentFingerSpreads, getBoneVectors, getCameraParametersSnapshot, getColorHex, getDeltaTime, getDeviceCameraClipFromView, getDeviceCameraWorldFromClip, getDeviceCameraWorldFromView, getElapsedTime, getFingerBendAngles, getFingerCurl, getFingerDirection, getFingerJoint, getFingerPalmAlignment, getFingerSpread, getFingerStraightness, getFingertipDistance, getFingertipPalmDistance, getObjectTargetPoint, getPalmNormal, getPalmPose, getPalmRight, getPalmUp, getPalmWidth, getRelativeBoneAngles, getThumbBendAngles, getThumbCurl, getThumbDirection, getThumbOpposition, getThumbStraightness, getThumbVerticalDirection, getUIPresentationObject, getUrlParamBool, getUrlParamFloat, getUrlParamInt, getUrlParameter, getVec4ByColorString, getXrCameraLeft, getXrCameraRight, init, initScript, input$1 as input, intrinsicsToProjectionMatrix, isBVHReady, isDeviceCameraPoseAvailable, isLayerCapable, isWebGPURenderer, layerCapability, lerp, loadStereoImageAsTextures, loadingSpinnerManager, lookAtRotation, objectIsDescendantOf, parseBase64DataURL, parseSimulatorHandPoseRotations, placeObjectAtIntersectionFacingTarget, print, resolveSimulatorHandPoseRotations, resolveSimulatorRotationsFromKeypoints, scene$1 as scene, showOnlyInLeftEye, showOnlyInRightEye, sound, timer$1 as timer, transformRgbUvToWorld, traverseUtil, ui, urlParams, user$1 as user, visualizeDepth, visualizeDepthMap, world$1 as world, xrDepthMeshOptions, xrDepthMeshPhysicsOptions, xrDepthMeshVisualizationOptions, xrDeviceCameraEnvironmentContinuousOptions, xrDeviceCameraEnvironmentOptions, xrDeviceCameraUserContinuousOptions, xrDeviceCameraUserOptions };
+  export { AI, AIModel, AIOptions, ActiveControllers, Agent, AgentLifecycleCallbacks, AnchorCapability, AnchorManager, AnchorRecord, AnchorRestoreResult, AnchorRestoreStatus, AnchorStorageLike, AnchorStore, AnchoredObjectFactory, AnchoredObjects, AnchorsOptions, AudioListener, AudioListenerOptions, AudioPlayer, AudioPlayerOptions, AutomationModeOptions, BACK, BackgroundKeyOptions, BackgroundMusic, BaseManipulationEvent, CameraParametersSnapshot, CameraSnapshot, CategoryVolumes, ColorStop, Constructor, Context, ContextOptions, Controller, ControllerEventMap, Core, CoreLifecycleState, CoreSound, DEFAULT_DEVICE_CAMERA_HEIGHT, DEFAULT_DEVICE_CAMERA_WIDTH, DEFAULT_EXIT_BUTTON_STYLE, DEFAULT_RGB_TO_DEPTH_PARAMS, DEVICE_CAMERA_PARAMETERS, DOWN, DeepPartial, DeepReadonly, Depth, DepthArray, DepthMesh, DepthMeshOptions, DepthOptions, DepthTextures, DetectedBodyPose, DetectedFace, DetectedMesh, DetectedObject, DetectedPlane, DeviceCameraOptions, DeviceCameraParameters, DigitName, DurationLike, FINGER_ORDER, FORWARD, FaceBlendshape, FaceCamera, FaceCameraMode, FaceCameraOptions, FaceLandmark, FaceLandmarkName, FaceRecognizer, FacesOptions, FingerName, FollowHead, FollowHeadOptions, FollowObject, FollowObjectMode, FollowObjectOptions, FormFactor, FramebufferScaleFactor, GEMINI_DEFAULT_FLASH_MODEL, GEMINI_DEFAULT_IMAGE_MODEL, GEMINI_DEFAULT_LIVE_MODEL, GamepadAction, GamepadBindings, GamepadController, GazeController, Gemini, GeminiInteractionConfig, GeminiOptions, GeminiQueryInput, GenerateSkyboxTool, GestureConfiguration, GestureDetectionResult, GestureEvent, GestureEventDetail, GestureEventType, GestureHandedness, GestureRecognition, GestureRecognitionOptions, GestureRecognizer, GestureScoreMap, GetWeatherArgs, GetWeatherTool, GradientPaint, GradientType, HAND_BONE_IDX_CONNECTION_MAP, HAND_INDEX_TO_LABEL, HAND_JOINT_COUNT, HAND_JOINT_IDX_CONNECTION_MAP, HAND_JOINT_NAMES, HandContext, HandLabel, Handedness, Hands, HandsOptions, HeadGestureConfiguration, HeadGestureContext, HeadGestureDetectionResult, HeadGestureEvent, HeadGestureEventDetail, HeadGestureEventMap, HeadGestureRecognition, HeadGestureRecognitionOptions, HeadGestureRecognizer, HeadGestureScoreMap, HeadPoseSample, HeuristicGestureDetector, HeuristicGestureRecognizer, HeuristicHeadGestureDetector, HeuristicHeadGestureRecognizer, HeuristicHeadGestureRecognizerOptions, HitSurfaceOptions, HoverEvent, HumanRecognizer, HumansOptions, Injectable, InjectableConstructor, Input, InputOptions, Interaction, InteractionOptions, InteractionSource, InteractionSourceType, JointName, JointPositions, KeyEvent, Keycodes, KeysJson, LEFT, LEFT_VIEW_ONLY_LAYER, LayerCapability, LayerManager, LayersOptions, Lighting, LightingOptions, LipMetrics, LiveSessionState, LoadingSpinnerManager, LocalStorageAnchorStore, LongSelectEvent, ManipulationAction, ManipulationEvent, ManipulationHandleOptions, ManipulationOptions, ManipulationPhase, MediaOrSimulatorMediaDeviceInfo, MediaPipeHandContext, MediaPipeHandLandmark, MediaPipeHandPoseEstimator, MeshDetectionOptions, MeshDetector, MeshScript, ModelClass, ModelLoader, ModelLoaderLoadGLTFOptions, ModelLoaderLoadOptions, ModelOptions, ModelSource, ModelViewer, ModelViewerOptions, ModelViewerOrigin, MouseController, NUM_HANDS, NormalizedDetectedObject, OCCLUDABLE_ITEMS_LAYER, ObjectDetectionOptions, ObjectDetector, ObjectGrabEvent, ObjectTouchEvent, ObjectTouchStartEvent, ObjectsOptions, OcclusionPass, OcclusionPassBackend, OcclusionUtils, OpenAI, OpenAIOptions, Options, Orbit, OrbitDirection, OrbitFrame, OrbitOptions, OrbitPath, Paint, PalmPose, Physics, PhysicsOptions, PlaneDetector, PlanesOptions, PlayModelAnimationOptions, PlaySoundOptions, PointerEvents, PoseEstimator, PoseJointName, PoseLandmark, PushPullOptions, QuatTuple, RAPIERCompat, RENDERER_BACKENDS, RIGHT, RIGHT_VIEW_ONLY_LAYER, RapierCharacterController, RapierCollider, RapierColliderDesc, RapierEventQueue, RapierRigidBody, RapierRigidBodyDesc, RapierRotation, RapierShape, RapierVector, RapierWorld, RaycastMode, Registry, RendererBackend, ResizeManipulationEvent, ResizeOptions, ResizeSize, ResolvedSimulatorSceneManifest, ReticleMode, ReticleOptions, Reticles, RgbToDepthParams, RgbaImage, RotateManipulationEvent, RotateOptions, SIMULATOR_HAND_COMMON_BIOMECHANICAL_CONSTRAINTS_DEGREES, SIMULATOR_HAND_POSE_NAMES, SIMULATOR_HAND_POSE_ROTATIONS, SOUND_PRESETS, ScaleManipulationEvent, ScaleOptions, SceneContextDetectionOptions, SceneContextDetectionResult, SceneDetector, SceneOptions, SceneSetOfMarkOptions, SceneVisibilityOptions, ScreenshotSynthesizer, Script, ScriptMixin, ScriptsManager, ScriptsManagerEventMap, ScriptsManagerEventType, SegmentCategory, SegmentationMask, SegmentationOptions, Segmenter, SelectEndEvent, SelectEvent, SelectionEndReason, SemanticBounds, SemanticMetadata, SemanticNode, SemanticScrollInfo, SemanticSource, SemanticTree, SemanticViewData, SerializerRenderer, SerializerRendererFactory, SerializerXRManager, SetOfMark, SetOfMarkContext, SetSimulatorEnvironmentEvent, SetSimulatorHandPhysicsEvent, SetSimulatorModeEvent, Shader, ShaderUniforms, ShowSimulatorInstructionsEvent, Simulator, SimulatorAnchor, SimulatorCamera, SimulatorControlMode, SimulatorControllerState, SimulatorControls, SimulatorCustomInstruction, SimulatorDayNightLightingDefinition, SimulatorDepth, SimulatorDepthMaterial, SimulatorDetectedObjectInput, SimulatorEnvironment, SimulatorHandJointRotationArray, SimulatorHandPhysicsOptions, SimulatorHandPose, SimulatorHandPoseChangeRequestEvent, SimulatorHandPoseJoints, SimulatorHandPoseRotationConstraintsDegrees, SimulatorHandPoseRotationRangeDegrees, SimulatorHandPoseRotations, SimulatorHands, SimulatorLocationDefinition, SimulatorLocations, SimulatorMediaDeviceInfo, SimulatorMesh, SimulatorMode, SimulatorObject, SimulatorObjectDefinition, SimulatorObjectDetectionSource, SimulatorObjectUpdate, SimulatorObjects, SimulatorOptions, SimulatorPhysicsMode, SimulatorPlane, SimulatorPlaneType, SimulatorPointerLockController, SimulatorQuaternionTuple, SimulatorScene, SimulatorSceneManifest, SimulatorUser, SimulatorUserPath, SimulatorVector3Tuple, SkyboxAgent, SolidPaint, SoundOptions, SoundSynthesizer, SparkRendererHolder, SpatialAudio, SpeechRecognition, SpeechRecognitionErrorCode, SpeechRecognitionErrorEvent, SpeechRecognitionEvent, SpeechRecognizer, SpeechRecognizerOptions, SpeechSynthesizer, SpeechSynthesizerOptions, StorablePose, StreamState, StrokeEventMap, StrokeRecognizer, StylizedFace, StylizedFaceOptions, SupportedRenderer, TensorFlowHandPoseEstimator, Tool, ToolCall, ToolOptions, ToolResult, ToolSchema, TrackedAnchor, TrackedAnchorLike, TransformScript, TranslateManipulationEvent, TranslateOptions, UIAppearance, UIButton, UIButtonOptions, UICard, UICardAnchorX, UICardAnchorY, UICardEdgeOptions, UICardOptions, UIColor, UIElement, UIElementOptions, UIExitButton, UIExitButtonOptions, UIIcon, UIIconOptions, UIIconVariant, UIIconWeight, UIImage, UIImageOptions, UILineHeight, UIOverlay, UIOverlayOptions, UIPanel, UIPanelOptions, UIPosition, UIResolvedSize, UIScrollView, UIScrollViewOptions, UISize, UISlider, UISliderOptions, UIStateStyle, UIStyle, UIText, UITextInput, UITextInputKeyModifiers, UITextInputOptions, UITextInputSelection, UITextInputSelectionDirection, UITextOptions, UITheme, UIThemeColors, UIThemePresetName, UIThemeStyleRole, UIThemeStyles, UIThemeUpdate, UITransform, UIUnit, UIValidationBounds, UIValidationCode, UIValidationIssue, UIValidationReport, UIVector2, UP, User, VIEW_DEPTH_GAP, Vec2Tuple, Vec3Tuple, VideoFileStream, VideoFileStreamOptions, VideoFrameMetadata, VideoLayer, VideoLayerPath, VideoLayerPlacement, VideoLayerState, VideoStream, VideoStreamDetails, VideoStreamEventMap, VideoStreamGetSnapshotBase64Options, VideoStreamGetSnapshotBlobOptions, VideoStreamGetSnapshotImageDataOptions, VideoStreamGetSnapshotOptions, VideoStreamGetSnapshotTextureOptions, VideoStreamOptions, VisemeWeights, VisibilityTransition, VisibilityTransitionOptions, VisibleObjectsContext, VolumeCategory, WaitFrame, WeatherData, WebGLOrWebGPURenderer, WebGPURendererOptions, WebXRHandContext, WebXRHandPoseEstimator, WebXRJointRotations, WebXRSessionEventType, WebXRSessionManager, WebXRSessionManagerEventMap, World, WorldOptions, XBObjectOptions, XRButton, XRDeviceCamera, XREffects, XRPass, XRReferenceSpaceCache, XRTransitionOptions, XR_BLOCKS_ASSETS_PATH, ZERO_VECTOR3, ZERO_VISEME, _getBvhImportStatus, add, ai$1 as ai, anchorCapability, applyBVH, applySimulatorHandPoseRotationConstraints, aspectRatioOf, assertWebGLRenderer, average, buildDisplacementMap, callInitWithDependencyInjection, camera$1 as camera, clamp, clamp01, clampRotationToAngle, computeBillboardScale, context, core, cropImage, defaultAnchorStorageKey, depth$1 as depth, detectDeviceCameraTarget, disposeBVH, disposeMaterial, disposeMeshResources, disposeObjectChildren, disposeObjectTree, disposeRenderableResources, enableAcceleratedRaycast, estimateBackgroundColor, estimateHandScale, extractYaw, getAdjacentFingerSpreads, getBoneVectors, getCameraParametersSnapshot, getColorHex, getDeltaTime, getDeviceCameraClipFromView, getDeviceCameraWorldFromClip, getDeviceCameraWorldFromView, getElapsedTime, getFingerBendAngles, getFingerCurl, getFingerDirection, getFingerJoint, getFingerPalmAlignment, getFingerSpread, getFingerStraightness, getFingertipDistance, getFingertipPalmDistance, getObjectTargetPoint, getPalmNormal, getPalmPose, getPalmRight, getPalmUp, getPalmWidth, getRelativeBoneAngles, getThumbBendAngles, getThumbCurl, getThumbDirection, getThumbOpposition, getThumbStraightness, getThumbVerticalDirection, getUIPresentationObject, getUrlParamBool, getUrlParamFloat, getUrlParamInt, getUrlParameter, getVec4ByColorString, getXrCameraLeft, getXrCameraRight, init, initScript, input$1 as input, intrinsicsToProjectionMatrix, isBVHReady, isDeviceCameraPoseAvailable, isLayerCapable, isSerializerRenderer, isWebGPURenderer, keyOutBackground, layerCapability, lerp, loadStereoImageAsTextures, loadingSpinnerManager, lookAtRotation, objectIsDescendantOf, parseBase64DataURL, parseSimulatorHandPoseRotations, placeObjectAtIntersectionFacingTarget, poseInFrontOfCamera, print, quaternionFacingCamera, resolveSerializerRenderer, resolveSimulatorHandPoseRotations, resolveSimulatorRotationsFromKeypoints, scene$1 as scene, showOnlyInLeftEye, showOnlyInRightEye, sound, timer$1 as timer, transformRgbUvToWorld, traverseUtil, ui, urlParams, user$1 as user, visualizeDepth, visualizeDepthMap, world$1 as world, xrDepthMeshOptions, xrDepthMeshPhysicsOptions, xrDepthMeshVisualizationOptions, xrDeviceCameraEnvironmentContinuousOptions, xrDeviceCameraEnvironmentOptions, xrDeviceCameraUserContinuousOptions, xrDeviceCameraUserOptions };
 }
 //#endregion
 //#region src/entry.d.ts
@@ -11465,5 +12013,5 @@ declare global {
   }
 }
 //#endregion
-export { BackgroundMusic, type ColorStop, type FaceCameraMode, type GradientPaint, type GradientType, type HeuristicHeadGestureRecognizerOptions, type HitSurfaceOptions, type InteractionSource, type InteractionSourceType, type ModelSource, type ModelViewerOptions, type ModelViewerOrigin, type Paint, type PlayModelAnimationOptions, type PointerEvents, type ResolvedSimulatorSceneManifest, type ReticleMode, type Simulator, type SimulatorCamera, type SimulatorControlMode, type SimulatorControllerState, type SimulatorControls, type SimulatorDepth, type SimulatorDepthMaterial, type SimulatorHands, type SimulatorLocationDefinition, type SimulatorLocations, type SimulatorMediaDeviceInfo, type SimulatorObject, type SimulatorObjectDefinition, type SimulatorObjectUpdate, type SimulatorObjects, type SimulatorPhysicsMode, type SimulatorPointerLockController, type SimulatorQuaternionTuple, type SimulatorScene, type SimulatorSceneManifest, type SimulatorUser, type SimulatorUserPath, type SimulatorVector3Tuple, type SolidPaint, type UIAppearance, type UIButtonOptions, type UICardAnchorX, type UICardAnchorY, type UICardEdgeOptions, type UICardOptions, type UIColor, type UIElementOptions, type UIIconOptions, type UIIconVariant, type UIIconWeight, type UIImageOptions, type UILineHeight, type UIOverlayOptions, type UIPanelOptions, type UIPosition, type UIResolvedSize, type UIScrollViewOptions, type UISize, type UISliderOptions, type UIStateStyle, type UIStyle, type UITextInputKeyModifiers, type UITextInputOptions, type UITextInputSelection, type UITextInputSelectionDirection, type UITextOptions, type UITheme, type UIThemeColors, type UIThemePresetName, type UIThemeStyleRole, type UIThemeStyles, type UIThemeUpdate, type UITransform, type UIUnit, type UIValidationBounds, type UIValidationCode, type UIValidationIssue, type UIValidationReport, type UIVector2, type WebGLOrWebGPURenderer, type XBObjectOptions, ai$1 as ai, camera$1 as camera, depth$1 as depth, input$1 as input, scene$1 as scene, timer$1 as timer, user$1 as user, world$1 as world };
+export { BackgroundMusic, type ColorStop, type Controller, type ControllerEventMap, type DurationLike, type FaceCameraMode, type GradientPaint, type GradientType, type HeuristicHeadGestureRecognizerOptions, type HitSurfaceOptions, type InteractionSource, type InteractionSourceType, type ModelSource, type ModelViewerOptions, type ModelViewerOrigin, type Paint, type PlayModelAnimationOptions, type PointerEvents, type RAPIERCompat, type RapierCharacterController, type RapierCollider, type RapierColliderDesc, type RapierEventQueue, type RapierRigidBody, type RapierRigidBodyDesc, type RapierRotation, type RapierShape, type RapierVector, type RapierWorld, type ResolvedSimulatorSceneManifest, type ReticleMode, type SerializerRenderer, type SerializerRendererFactory, type SerializerXRManager, type Simulator, type SimulatorCamera, type SimulatorControlMode, type SimulatorControllerState, type SimulatorControls, type SimulatorDayNightLightingDefinition, type SimulatorDepth, type SimulatorDepthMaterial, type SimulatorHands, type SimulatorLocationDefinition, type SimulatorLocations, type SimulatorMediaDeviceInfo, type SimulatorObject, type SimulatorObjectDefinition, type SimulatorObjectUpdate, type SimulatorObjects, type SimulatorPhysicsMode, type SimulatorPointerLockController, type SimulatorQuaternionTuple, type SimulatorScene, type SimulatorSceneManifest, type SimulatorUser, type SimulatorUserPath, type SimulatorVector3Tuple, type SolidPaint, type SpeechRecognition, type SpeechRecognitionErrorCode, type SpeechRecognitionErrorEvent, type SpeechRecognitionEvent, type SupportedRenderer, type UIAppearance, type UIButtonOptions, type UICardAnchorX, type UICardAnchorY, type UICardEdgeOptions, type UICardOptions, type UIColor, type UIElementOptions, type UIExitButtonOptions, type UIIconOptions, type UIIconVariant, type UIIconWeight, type UIImageOptions, type UILineHeight, type UIOverlayOptions, type UIPanelOptions, type UIPosition, type UIResolvedSize, type UIScrollViewOptions, type UISize, type UISliderOptions, type UIStateStyle, type UIStyle, type UITextInputKeyModifiers, type UITextInputOptions, type UITextInputSelection, type UITextInputSelectionDirection, type UITextOptions, type UITheme, type UIThemeColors, type UIThemePresetName, type UIThemeStyleRole, type UIThemeStyles, type UIThemeUpdate, type UITransform, type UIUnit, type UIValidationBounds, type UIValidationCode, type UIValidationIssue, type UIValidationReport, type UIVector2, type WebGLOrWebGPURenderer, type XBObjectOptions, ai$1 as ai, camera$1 as camera, depth$1 as depth, input$1 as input, scene$1 as scene, timer$1 as timer, user$1 as user, world$1 as world };
 //# sourceMappingURL=xrblocks.d.ts.map

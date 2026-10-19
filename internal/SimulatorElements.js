@@ -14,9 +14,9 @@
 * limitations under the License.
 *
 * @file xrblocks.js
-* @version v0.21.1
-* @commitid 999bf37
-* @builddate 2026-09-30T22:18:33.059Z
+* @version v0.23.0
+* @commitid 5cd7aed
+* @builddate 2026-10-19T19:45:15.070Z
 * @description XR Blocks SDK, built from source with the above commit ID.
 * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
 * and follow rules below:
@@ -42,6 +42,7 @@ lego-styles.
 */
 import { d as XR_BLOCKS_ASSETS_PATH } from "./constants.js";
 import { a as SetSimulatorModeEvent, i as ShowSimulatorInstructionsEvent, n as SimulatorHandPose, o as SimulatorHandPoseChangeRequestEvent, r as SetSimulatorHandPhysicsEvent, s as SetSimulatorEnvironmentEvent, t as SIMULATOR_HAND_POSE_NAMES } from "./HandPoses.js";
+import { n as SetSimulatorTimeOfDayEvent, t as SetSimulatorDayNightEvent } from "./SimulatorLightingEvents.js";
 import { LitElement, css, html } from "lit";
 import { customElement } from "lit/decorators/custom-element.js";
 import { property } from "lit/decorators/property.js";
@@ -93,40 +94,46 @@ let SimulatorInstructionsCard = class SimulatorInstructionsCard extends LitEleme
       box-sizing: border-box;
       background: #ffffff;
       display: flex;
+      /* Fixed popup size shared by every instruction card, sized to fit the
+         tallest card's content without a scrollbar; scrolling remains only
+         as a fallback for very short windows. */
+      height: 36rem;
+      width: 30rem;
       max-height: 100%;
       overflow-y: auto;
-      height: 40rem;
-      width: min-content;
-      min-width: 30rem;
+      overflow-wrap: break-word;
       border-radius: 1.6rem;
       color: #000000;
       font-family:
         system-ui,
         -apple-system,
         sans-serif;
-      padding: 1.5rem;
+      font-size: 0.875rem;
+      line-height: 1.35;
+      padding: 1.25rem;
       flex-direction: column;
     }
 
     h1 {
       margin-top: 0px;
-      font-size: 1.375rem;
+      font-size: 1.25rem;
     }
 
     h2 {
       margin-top: 0px;
       margin-bottom: 0px;
-      font-size: 1.125rem;
+      font-size: 1rem;
     }
 
     ul {
-      margin-top: 0px;
+      margin-top: 0.2rem;
       margin-bottom: 0px;
+      padding-left: 1.25rem;
     }
 
     .image-div {
-      margin-top: 0.5rem;
-      margin-bottom: 0.5rem;
+      margin-top: 0.4rem;
+      margin-bottom: 0.4rem;
     }
 
     .description-div {
@@ -153,6 +160,11 @@ let SimulatorInstructionsCard = class SimulatorInstructionsCard extends LitEleme
     }
 
     video {
+      display: block;
+      /* Fixed demo-video size shared by every instruction card. */
+      width: 20.25rem;
+      height: auto;
+      margin: 0 auto;
       max-width: 100%;
       aspect-ratio: 16/9;
     }
@@ -394,6 +406,192 @@ __decorate([property()], SimulatorInstructions.prototype, "simulatorMode", void 
 __decorate([property()], SimulatorInstructions.prototype, "customInstructions", void 0);
 __decorate([property()], SimulatorInstructions.prototype, "step", void 0);
 SimulatorInstructions = __decorate([customElement("xrblocks-simulator-instructions")], SimulatorInstructions);
+//#endregion
+//#region src/simulator/internal/interface/instructions/SimulatorOverlayInstructions.ts
+function getOverlayInstructionsForMode(mode) {
+	switch (mode) {
+		case "Navigation": return [[{
+			keys: [
+				"W",
+				"A",
+				"S",
+				"D"
+			],
+			label: "Move"
+		}], [{
+			keys: ["Mouse"],
+			label: "Click and drag to look around"
+		}]];
+		case "PointerLock": return [[{
+			keys: [
+				"W",
+				"A",
+				"S",
+				"D"
+			],
+			label: "Move"
+		}], [{
+			keys: ["Mouse"],
+			label: "Click the screen, then move the mouse to look around"
+		}]];
+		case "Hands": return [
+			[{
+				keys: [
+					"W",
+					"A",
+					"S",
+					"D"
+				],
+				label: "Move hand"
+			}, {
+				keys: [
+					"Shift",
+					"W",
+					"A",
+					"S",
+					"D"
+				],
+				label: "Move"
+			}],
+			[{
+				keys: ["Right Click"],
+				label: "Look"
+			}, {
+				keys: ["Left Click"],
+				label: "Rotate hand"
+			}],
+			[{
+				keys: ["Space"],
+				label: "Pinch"
+			}, {
+				keys: ["T"],
+				label: "Switch hand"
+			}]
+		];
+		default: return [[{
+			keys: [
+				"W",
+				"A",
+				"S",
+				"D"
+			],
+			label: "Move"
+		}], [{
+			keys: ["Right Click"],
+			label: "Drag to look around"
+		}, {
+			keys: ["Left Click"],
+			label: "Select"
+		}]];
+	}
+}
+let SimulatorOverlayInstructions = class SimulatorOverlayInstructions extends LitElement {
+	constructor(..._args) {
+		super(..._args);
+		this.simulatorMode = "User";
+		this.visible = false;
+	}
+	static {
+		this.styles = css`
+    :host {
+      position: fixed;
+      bottom: 4.75rem;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 9999;
+      pointer-events: none;
+      user-select: none;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.65rem;
+      font-family:
+        system-ui,
+        -apple-system,
+        sans-serif;
+      opacity: 0;
+      transition: opacity 0.5s ease;
+    }
+
+    :host([visible]) {
+      opacity: 1;
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 1.25rem;
+    }
+
+    .group {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+
+    .keys {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
+    .key {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
+      min-width: 2rem;
+      height: 2rem;
+      padding: 0 0.55rem;
+      border-radius: 0.45rem;
+      border: 1.5px solid rgba(255, 255, 255, 0.85);
+      background: rgba(0, 0, 0, 0.45);
+      backdrop-filter: blur(4px);
+      color: #fff;
+      font-size: 0.85rem;
+      font-weight: 600;
+      line-height: 1;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+    }
+
+    .label {
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      text-shadow: 0 1px 4px rgba(0, 0, 0, 0.85);
+      white-space: nowrap;
+    }
+  `;
+	}
+	renderGroup(item) {
+		return html`
+      <div class="group">
+        <div class="keys">
+          ${item.keys.map((key) => html`<kbd class="key">${key}</kbd>`)}
+        </div>
+        <span class="label">${item.label}</span>
+      </div>
+    `;
+	}
+	render() {
+		const rows = getOverlayInstructionsForMode(this.simulatorMode);
+		return html`
+      ${rows.map((row) => html`<div class="row">
+            ${row.map((item) => this.renderGroup(item))}
+          </div>`)}
+    `;
+	}
+};
+__decorate([property({ type: String })], SimulatorOverlayInstructions.prototype, "simulatorMode", void 0);
+__decorate([property({
+	type: Boolean,
+	reflect: true
+})], SimulatorOverlayInstructions.prototype, "visible", void 0);
+SimulatorOverlayInstructions = __decorate([customElement("xrblocks-simulator-overlay-instructions")], SimulatorOverlayInstructions);
 //#endregion
 //#region src/simulator/internal/interface/ui/GamepadToast.ts
 const BUTTON_NAMES = {
@@ -843,7 +1041,7 @@ let HandPosePanel = class HandPosePanel extends LitElement {
 		super(..._args);
 		this.posePanelRef = createRef();
 		this.handPose = Object.values(SimulatorHandPose)[0];
-		this.visible = true;
+		this.visible = false;
 	}
 	static {
 		this.styles = css`
@@ -968,6 +1166,9 @@ let SimulatorSettingsPanel = class SimulatorSettingsPanel extends LitElement {
 		this.instructionsEnabled = false;
 		this.handPhysicsAvailable = false;
 		this.handPhysicsEnabled = false;
+		this.dayNightAvailable = false;
+		this.dayNightEnabled = false;
+		this.timeOfDay = 0;
 		this._isOpen = false;
 	}
 	static {
@@ -1087,6 +1288,20 @@ let SimulatorSettingsPanel = class SimulatorSettingsPanel extends LitElement {
       cursor: inherit;
     }
 
+    input[type='range'] {
+      width: 100%;
+      margin: 0;
+      accent-color: #8ab4f8;
+      cursor: pointer;
+    }
+
+    .time-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.75rem;
+      color: #999;
+    }
+
     select {
       appearance: none;
       -webkit-appearance: none;
@@ -1161,6 +1376,17 @@ let SimulatorSettingsPanel = class SimulatorSettingsPanel extends LitElement {
 		this.handPhysicsEnabled = input.checked;
 		this.dispatchEvent(new SetSimulatorHandPhysicsEvent(this.handPhysicsEnabled));
 	}
+	_onDayNightChange(e) {
+		const input = e.target;
+		this.dayNightEnabled = input.checked;
+		if (!input.checked) this.timeOfDay = 0;
+		this.dispatchEvent(new SetSimulatorDayNightEvent(this.dayNightEnabled));
+	}
+	_onTimeOfDayChange(e) {
+		const input = e.target;
+		this.timeOfDay = parseFloat(input.value);
+		this.dispatchEvent(new SetSimulatorTimeOfDayEvent(this.timeOfDay));
+	}
 	_onShowInstructions() {
 		this._isOpen = false;
 		this.dispatchEvent(new ShowSimulatorInstructionsEvent(this.simulatorMode));
@@ -1231,6 +1457,35 @@ let SimulatorSettingsPanel = class SimulatorSettingsPanel extends LitElement {
           </select>
         </div>
 
+        ${this.dayNightAvailable ? html`
+              <div class="form-group">
+                <label class="checkbox-label">
+                  <span>Day / Night Lighting</span>
+                  <input
+                    type="checkbox"
+                    .checked=${this.dayNightEnabled}
+                    @change=${this._onDayNightChange}
+                  />
+                </label>
+              </div>
+              <div class="form-group">
+                <label>Time of Day</label>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  .value=${String(this.timeOfDay)}
+                  ?disabled=${!this.dayNightEnabled}
+                  @input=${this._onTimeOfDayChange}
+                />
+                <div class="time-labels">
+                  <span>Day</span>
+                  <span>Night</span>
+                </div>
+              </div>
+            ` : ""}
+
         <div class="form-group">
           <label class="checkbox-label">
             <span>Hand Physics</span>
@@ -1263,6 +1518,9 @@ __decorate([property({ type: String })], SimulatorSettingsPanel.prototype, "simu
 __decorate([property({ type: Boolean })], SimulatorSettingsPanel.prototype, "instructionsEnabled", void 0);
 __decorate([property({ type: Boolean })], SimulatorSettingsPanel.prototype, "handPhysicsAvailable", void 0);
 __decorate([property({ type: Boolean })], SimulatorSettingsPanel.prototype, "handPhysicsEnabled", void 0);
+__decorate([property({ type: Boolean })], SimulatorSettingsPanel.prototype, "dayNightAvailable", void 0);
+__decorate([property({ type: Boolean })], SimulatorSettingsPanel.prototype, "dayNightEnabled", void 0);
+__decorate([property({ type: Number })], SimulatorSettingsPanel.prototype, "timeOfDay", void 0);
 __decorate([state()], SimulatorSettingsPanel.prototype, "_isOpen", void 0);
 SimulatorSettingsPanel = __decorate([customElement("xrblocks-simulator-settings")], SimulatorSettingsPanel);
 //#endregion

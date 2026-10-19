@@ -14,9 +14,9 @@
 * limitations under the License.
 *
 * @file xrblocks.js
-* @version v0.21.1
-* @commitid 999bf37
-* @builddate 2026-09-30T22:18:33.059Z
+* @version v0.23.0
+* @commitid 5cd7aed
+* @builddate 2026-10-19T19:45:15.070Z
 * @description XR Blocks SDK, built from source with the above commit ID.
 * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
 * and follow rules below:
@@ -597,6 +597,11 @@ const DEFAULT_MANIFESTS = [
 		scenePath: `${SIMULATOR_SCENES_PATH}XREmulatorsceneV5.glb`,
 		scenePlanesPath: `${SIMULATOR_SCENES_PATH}XREmulatorsceneV5_planes.json`,
 		navMeshPath: `${SIMULATOR_SCENES_PATH}XREmulatorsceneV5_navmesh.glb`,
+		lighting: {
+			kind: "dayNight",
+			nightScenePath: `${SIMULATOR_SCENES_PATH}XREmulatorscene_Dark.glb`,
+			pairing: "bake-crossfade-v1"
+		},
 		position: [
 			-1.6,
 			.3,
@@ -665,6 +670,9 @@ var SimulatorOptions = class {
 			enabled: true,
 			showAutomatically: false,
 			element: "xrblocks-simulator-instructions",
+			overlayEnabled: true,
+			overlayElement: "xrblocks-simulator-overlay-instructions",
+			fadeInDelayMs: 5e3,
 			customInstructions: []
 		};
 		this.handPosePanel = {

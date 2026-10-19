@@ -14,9 +14,9 @@
 * limitations under the License.
 *
 * @file xrblocks.js
-* @version v0.21.1
-* @commitid 999bf37
-* @builddate 2026-09-30T22:18:33.059Z
+* @version v0.23.0
+* @commitid 5cd7aed
+* @builddate 2026-10-19T19:45:15.070Z
 * @description XR Blocks SDK, built from source with the above commit ID.
 * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
 * and follow rules below:
@@ -42,10 +42,12 @@ lego-styles.
 */
 import { t as __exportAll } from "./internal/rolldown-runtime.js";
 import { C as getUIPresentationBounds, D as isUIElement, F as Script, I as ScriptMixin, L as isDefaultScriptMethod, P as MeshScript, S as getUIElementKind, b as cloneUIStyle, f as normalizeManipulationConfig, h as getSemanticControl, j as TransformScript, m as ManipulationAction, n as getResolvedUICardSize, t as UICard, v as registerSemanticControl, w as getUIPresentationObject, x as collectUIRoots, y as UIElement } from "./internal/UICard.js";
-import { $ as disposeMeshResources, $n as xrDeviceCameraUserContinuousOptions, $t as getAdjacentFingerSpreads, A as DetectedObject, An as SceneOptions, At as FacesOptions, B as GazeController, Bn as cropImage, Bt as StrokeRecognitionOptions, C as AnchorManager, Cn as HandsOptions, Ct as RENDERER_BACKENDS, D as PlaneDetector, Dn as xrDepthMeshPhysicsOptions, Dt as AnchorsOptions, E as anchorCapability, En as xrDepthMeshOptions, Et as WorldOptions, F as ActiveControllers, Fn as VideoStream, Ft as SoundOptions, G as OcclusionUtils, Gn as getDeviceCameraWorldFromView, Gt as WebXRHandContext, H as GamepadBindings, Hn as getCameraParametersSnapshot, Ht as HeadGestureRecognitionOptions, I as Input, In as RendererHolder, It as SpeechRecognizerOptions, J as XRReferenceSpaceCache, Jn as intrinsicsToProjectionMatrix, Jt as HeuristicGestureRecognizer, K as OcclusionPass, Kn as isDeviceCameraPoseAvailable, Kt as WebXRHandPoseEstimator, L as Reticles, Ln as assertWebGLRenderer, Lt as SpeechSynthesizerOptions, M as callInitWithDependencyInjection, Mn as SceneVisibilityOptions, Mt as PlanesOptions, N as AudioListener, Nn as XRDeviceCamera, Nt as ObjectsOptions, O as DetectedPlane, On as xrDepthMeshVisualizationOptions, Ot as defaultAnchorStorageKey, P as Physics, Pn as StreamState, Pt as MeshDetectionOptions, Q as disposeMaterial, Qn as xrDeviceCameraEnvironmentOptions, Qt as estimateHandScale, R as MouseController, Rn as isWebGPURenderer, Rt as PhysicsOptions, S as DetectedMesh, Sn as LayersOptions, St as Options, T as LocalStorageAnchorStore, Tn as DepthOptions, Tt as XRTransitionOptions, Un as getDeviceCameraClipFromView, Ut as HeuristicHeadGestureRecognizer, V as GamepadController, Vn as detectDeviceCameraTarget, Vt as OneDollarUnistrokeRecognizer, W as Depth, Wn as getDeviceCameraWorldFromClip, Wt as GestureRecognitionOptions, X as Registry, Xn as DeviceCameraOptions, Xt as average, Y as WaitFrame, Yn as DEFAULT_RGB_TO_DEPTH_PARAMS, Yt as FINGER_ORDER, Z as DepthMesh, Zn as xrDeviceCameraEnvironmentContinuousOptions, Zt as clamp01, _ as isBVHReady, _n as getThumbCurl, _r as lerp, _t as getObjectTargetPoint, a as resolveSimulatorRotationsFromKeypoints, an as getFingerPalmAlignment, ar as GEMINI_DEFAULT_FLASH_MODEL, b as PoseJointName, bn as getThumbStraightness, br as urlParams, bt as InputOptions, c as World, cn as getFingertipDistance, cr as GeminiOptions, ct as BACK, d as DetectedFace, dn as getPalmPose, dr as getColorHex, dt as LEFT, en as getBoneVectors, er as xrDeviceCameraUserOptions, et as disposeObjectChildren, f as FaceLandmarkName, fn as getPalmRight, fr as getUrlParamBool, ft as RIGHT, g as enableAcceleratedRaycast, gn as getThumbBendAngles, gr as getVec4ByColorString, gt as getInteractionSource, h as disposeBVH, hn as getRelativeBoneAngles, hr as getUrlParameter, ht as ReticlePresenter, i as resolveSimulatorHandPoseRotations, in as getFingerJoint, ir as AIOptions, j as placeObjectAtIntersectionFacingTarget, jn as SceneSetOfMarkOptions, jt as HumansOptions, k as ObjectDetector, kn as ContextOptions, kt as SegmentationOptions, l as Segmenter, ln as getFingertipPalmDistance, lr as OpenAIOptions, lt as DOWN, m as applyBVH, mn as getPalmWidth, mr as getUrlParamInt, mt as ZERO_VECTOR3, n as SIMULATOR_HAND_POSE_ROTATIONS, nn as getFingerCurl, nr as OpenAI, nt as disposeRenderableResources, o as SIMULATOR_HAND_COMMON_BIOMECHANICAL_CONSTRAINTS_DEGREES, on as getFingerSpread, or as GEMINI_DEFAULT_IMAGE_MODEL, ot as faceCameraQuaternion, p as _getBvhImportStatus, pn as getPalmUp, pr as getUrlParamFloat, pt as UP, q as DepthTextures, qn as transformRgbUvToWorld, qt as HAND_INDEX_TO_LABEL, r as applySimulatorHandPoseRotationConstraints, rn as getFingerDirection, rr as Gemini, rt as Interaction, s as parseSimulatorHandPoseRotations, sn as getFingerStraightness, sr as GEMINI_DEFAULT_LIVE_MODEL, st as faceCameraSlerpAlpha, t as ModelLoader, tn as getFingerBendAngles, tr as AI, tt as disposeObjectTree, u as FaceRecognizer, un as getPalmNormal, ur as clamp, ut as FORWARD, v as HumanRecognizer, vn as getThumbDirection, vr as parseBase64DataURL, vt as objectIsDescendantOf, w as SimulatorAnchor, wn as DepthMeshOptions, wt as ReticleOptions, x as MeshDetector, xn as getThumbVerticalDirection, xt as InteractionOptions, y as DetectedBodyPose, yn as getThumbOpposition, yr as print, yt as traverseUtil, z as HeadGestureRecognition, zn as DEVICE_CAMERA_PARAMETERS, zt as LightingOptions } from "./internal/ModelLoader.js";
+import { $n as GEMINI_DEFAULT_LIVE_MODEL, $t as getFingerJoint, A as DetectedObject, An as VideoStream, At as SoundOptions, B as GazeController, Bn as intrinsicsToProjectionMatrix, Bt as WebXRHandContext, C as AnchorManager, Cn as xrDepthMeshVisualizationOptions, Ct as defaultAnchorStorageKey, D as PlaneDetector, Dn as SceneVisibilityOptions, Dt as PlanesOptions, E as anchorCapability, En as SceneSetOfMarkOptions, Et as HumansOptions, F as ActiveControllers, Fn as getDeviceCameraClipFromView, Ft as StrokeRecognitionOptions, G as OcclusionUtils, Gn as xrDeviceCameraUserContinuousOptions, Gt as average, H as GamepadBindings, Hn as DeviceCameraOptions, Ht as HAND_INDEX_TO_LABEL, I as Input, In as getDeviceCameraWorldFromClip, It as OneDollarUnistrokeRecognizer, J as XRReferenceSpaceCache, Jn as OpenAI, Jt as getAdjacentFingerSpreads, K as OcclusionPass, Kn as xrDeviceCameraUserOptions, Kt as clamp01, L as Reticles, Ln as getDeviceCameraWorldFromView, Lt as HeadGestureRecognitionOptions, M as callInitWithDependencyInjection, Mn as cropImage, Mt as SpeechSynthesizerOptions, N as AudioListener, Nn as detectDeviceCameraTarget, Nt as PhysicsOptions, O as DetectedPlane, On as XRDeviceCamera, Ot as ObjectsOptions, P as Physics, Pn as getCameraParametersSnapshot, Pt as LightingOptions, Q as Interaction, Qn as GEMINI_DEFAULT_IMAGE_MODEL, Qt as getFingerDirection, R as MouseController, Rn as isDeviceCameraPoseAvailable, Rt as HeuristicHeadGestureRecognizer, S as DetectedMesh, Sn as xrDepthMeshPhysicsOptions, St as AnchorsOptions, T as LocalStorageAnchorStore, Tn as SceneOptions, Tt as FacesOptions, Un as xrDeviceCameraEnvironmentContinuousOptions, Ut as HeuristicGestureRecognizer, V as GamepadController, Vn as DEFAULT_RGB_TO_DEPTH_PARAMS, Vt as WebXRHandPoseEstimator, W as Depth, Wn as xrDeviceCameraEnvironmentOptions, Wt as FINGER_ORDER, X as Registry, Xn as AIOptions, Xt as getFingerBendAngles, Y as WaitFrame, Yn as Gemini, Yt as getBoneVectors, Z as DepthMesh, Zn as GEMINI_DEFAULT_FLASH_MODEL, Zt as getFingerCurl, _ as isBVHReady, _n as LayersOptions, _t as Options, a as resolveSimulatorRotationsFromKeypoints, an as getPalmNormal, ar as getUrlParamFloat, at as FORWARD, b as PoseJointName, bn as DepthOptions, bt as XRTransitionOptions, c as World, cn as getPalmUp, cr as getVec4ByColorString, ct as UP, d as DetectedFace, dn as getThumbBendAngles, dr as print, dt as getInteractionSource, en as getFingerPalmAlignment, er as GeminiOptions, f as FaceLandmarkName, fn as getThumbCurl, fr as urlParams, ft as getObjectTargetPoint, g as enableAcceleratedRaycast, gn as getThumbVerticalDirection, gt as InteractionOptions, h as disposeBVH, hn as getThumbStraightness, ht as InputOptions, i as resolveSimulatorHandPoseRotations, in as getFingertipPalmDistance, ir as getUrlParamBool, it as DOWN, j as placeObjectAtIntersectionFacingTarget, jn as DEVICE_CAMERA_PARAMETERS, jt as SpeechRecognizerOptions, k as ObjectDetector, kn as StreamState, kt as MeshDetectionOptions, l as Segmenter, ln as getPalmWidth, lr as lerp, lt as ZERO_VECTOR3, m as applyBVH, mn as getThumbOpposition, mt as traverseUtil, n as SIMULATOR_HAND_POSE_ROTATIONS, nn as getFingerStraightness, nr as clamp, nt as faceCameraSlerpAlpha, o as SIMULATOR_HAND_COMMON_BIOMECHANICAL_CONSTRAINTS_DEGREES, on as getPalmPose, or as getUrlParamInt, ot as LEFT, p as _getBvhImportStatus, pn as getThumbDirection, pt as objectIsDescendantOf, q as DepthTextures, qn as AI, qt as estimateHandScale, r as applySimulatorHandPoseRotationConstraints, rn as getFingertipDistance, rr as getColorHex, rt as BACK, s as parseSimulatorHandPoseRotations, sn as getPalmRight, sr as getUrlParameter, st as RIGHT, t as ModelLoader, tn as getFingerSpread, tr as OpenAIOptions, tt as faceCameraQuaternion, u as FaceRecognizer, un as getRelativeBoneAngles, ur as parseBase64DataURL, ut as ReticlePresenter, v as HumanRecognizer, vn as HandsOptions, vt as RENDERER_BACKENDS, w as SimulatorAnchor, wn as ContextOptions, wt as SegmentationOptions, x as MeshDetector, xn as xrDepthMeshOptions, xt as WorldOptions, y as DetectedBodyPose, yn as DepthMeshOptions, yt as ReticleOptions, z as HeadGestureRecognition, zn as transformRgbUvToWorld, zt as GestureRecognitionOptions } from "./internal/ModelLoader.js";
 import { a as HAND_JOINT_IDX_CONNECTION_MAP, c as OCCLUDABLE_ITEMS_LAYER, d as XR_BLOCKS_ASSETS_PATH, i as HAND_JOINT_COUNT, l as RIGHT_VIEW_ONLY_LAYER, n as DEFAULT_DEVICE_CAMERA_WIDTH, o as LEFT_VIEW_ONLY_LAYER, r as HAND_BONE_IDX_CONNECTION_MAP, s as NUM_HANDS, t as DEFAULT_DEVICE_CAMERA_HEIGHT, u as VIEW_DEPTH_GAP } from "./internal/constants.js";
 import { a as SetSimulatorModeEvent, c as SimulatorMode, d as Handedness, f as Hands, i as ShowSimulatorInstructionsEvent, l as SimulatorOptions, n as SimulatorHandPose, o as SimulatorHandPoseChangeRequestEvent, p as HAND_JOINT_NAMES, r as SetSimulatorHandPhysicsEvent, s as SetSimulatorEnvironmentEvent, t as SIMULATOR_HAND_POSE_NAMES, u as Keycodes } from "./internal/HandPoses.js";
-import { a as UIOverlay, i as UIText, o as UIScrollView, t as UITextInput } from "./internal/UITextInput.js";
+import { a as disposeRenderableResources, c as isWebGPURenderer, i as disposeObjectTree, l as isSerializerRenderer, n as disposeMeshResources, o as RendererHolder, r as disposeObjectChildren, s as assertWebGLRenderer, t as disposeMaterial } from "./internal/ThreeDisposal.js";
+import { a as UIOverlay, c as UIScrollView, i as UIText, s as updatePanelBackfaceVisibility, t as UITextInput } from "./internal/UITextInput.js";
+import { i as ensureWebGPUUIMaterials } from "./internal/PanelMaterialFactory.js";
 import * as THREE from "three";
 import { FullScreenQuad, Pass } from "three/addons/postprocessing/Pass.js";
 import { XREstimatedLight } from "three/addons/webxr/XREstimatedLight.js";
@@ -251,6 +253,21 @@ var Tool = class {
 		if (this.description) result.description = this.description;
 		if (this.parameters) result.parameters = this.parameters;
 		if (this.behavior) result.behavior = this.behavior;
+		return result;
+	}
+	/**
+	* Returns the function tool shape for the non-live Interactions API (a
+	* `tools` entry on a query). `behavior` is a Live API concept and has no
+	* Interactions equivalent.
+	* @returns A valid Interactions function tool.
+	*/
+	toInteractions() {
+		const result = {
+			type: "function",
+			name: this.name
+		};
+		if (this.description) result.description = this.description;
+		if (this.parameters) result.parameters = this.parameters;
 		return result;
 	}
 };
@@ -587,6 +604,13 @@ function flipBufferVertically(buffer, width, height) {
 		buffer.set(tempRow, bottomRowOffset);
 	}
 }
+/**
+* Writes `renderer.xr.isPresenting`. Both backends expose it, but the WebGPU
+* renderer's type marks the accessor read-only.
+*/
+function setXrPresenting(renderer, value) {
+	renderer.xr.isPresenting = value;
+}
 var PendingScreenshotRequest = class {
 	constructor(resolve, reject, overlayOnCamera) {
 		this.resolve = resolve;
@@ -637,22 +661,21 @@ var ScreenshotSynthesizer = class {
 		const scaledHeight = Math.round(mainRenderTargetSize.y * (this.renderTargetWidth / mainRenderTargetSingleViewWidth));
 		if (!this.virtualRenderTarget || this.virtualRenderTarget.width != this.renderTargetWidth) {
 			this.virtualRenderTarget?.dispose();
-			this.virtualRenderTarget = new THREE.WebGLRenderTarget(this.renderTargetWidth, scaledHeight, { colorSpace: THREE.SRGBColorSpace });
+			this.virtualRenderTarget = this.createRenderTarget(renderer, this.renderTargetWidth, scaledHeight);
 		}
 		const xrIsPresenting = renderer.xr.isPresenting;
-		renderer.xr.isPresenting = false;
+		setXrPresenting(renderer, false);
 		const virtualRenderTarget = this.virtualRenderTarget;
 		renderer.setRenderTarget(virtualRenderTarget);
 		renderer.clearColor();
 		renderer.clearDepth();
 		renderSceneFn();
 		renderer.setRenderTarget(mainRenderTarget);
-		renderer.xr.isPresenting = xrIsPresenting;
+		setXrPresenting(renderer, xrIsPresenting);
 		const expectedBufferLength = virtualRenderTarget.width * virtualRenderTarget.height * 4;
 		if (this.virtualBuffer.length != expectedBufferLength) this.virtualBuffer = new Uint8Array(expectedBufferLength);
 		const buffer = this.virtualBuffer;
-		await renderer.readRenderTargetPixelsAsync(virtualRenderTarget, 0, 0, virtualRenderTarget.width, virtualRenderTarget.height, buffer);
-		flipBufferVertically(buffer, virtualRenderTarget.width, virtualRenderTarget.height);
+		await this.readRenderTargetInto(renderer, virtualRenderTarget, buffer);
 		const canvas = this.virtualCanvas || (this.virtualCanvas = document.createElement("canvas"));
 		canvas.width = virtualRenderTarget.width;
 		canvas.height = virtualRenderTarget.height;
@@ -694,22 +717,27 @@ var ScreenshotSynthesizer = class {
 		const scaledHeight = Math.round(mainRenderTargetSize.y * (this.renderTargetWidth / mainRenderTargetSingleViewWidth));
 		if (!this.virtualRealRenderTarget || this.virtualRealRenderTarget.height != scaledHeight) {
 			this.virtualRealRenderTarget?.dispose();
-			this.virtualRealRenderTarget = new THREE.WebGLRenderTarget(this.renderTargetWidth, scaledHeight, { colorSpace: THREE.SRGBColorSpace });
+			this.virtualRealRenderTarget = this.createRenderTarget(renderer, this.renderTargetWidth, scaledHeight);
 		}
 		const renderTarget = this.virtualRealRenderTarget;
 		renderer.setRenderTarget(renderTarget);
 		const xrIsPresenting = renderer.xr.isPresenting;
-		renderer.xr.isPresenting = false;
-		const quad = this.getFullScreenQuad();
-		quad.material.map = deviceCamera.texture;
-		quad.render(renderer);
+		setXrPresenting(renderer, false);
+		if (isWebGPURenderer(renderer)) {
+			const quad = await this.getWebGPUQuad();
+			quad.mesh.material.map = deviceCamera.texture;
+			renderer.render(quad.mesh, quad.camera);
+		} else {
+			const quad = this.getFullScreenQuad();
+			quad.material.map = deviceCamera.texture;
+			quad.render(renderer);
+		}
 		renderSceneFn();
-		renderer.xr.isPresenting = xrIsPresenting;
+		setXrPresenting(renderer, xrIsPresenting);
 		renderer.setRenderTarget(mainRenderTarget);
 		if (this.virtualRealBuffer.length != renderTarget.width * renderTarget.height * 4) this.virtualRealBuffer = new Uint8Array(renderTarget.width * renderTarget.height * 4);
 		const buffer = this.virtualRealBuffer;
-		await renderer.readRenderTargetPixelsAsync(renderTarget, 0, 0, renderTarget.width, renderTarget.height, buffer);
-		flipBufferVertically(buffer, renderTarget.width, renderTarget.height);
+		await this.readRenderTargetInto(renderer, renderTarget, buffer);
 		const canvas = this.virtualRealCanvas || (this.virtualRealCanvas = document.createElement("canvas"));
 		canvas.width = renderTarget.width;
 		canvas.height = renderTarget.height;
@@ -736,6 +764,43 @@ var ScreenshotSynthesizer = class {
 			else this.pendingScreenshotRequests[remainingRequests++] = request;
 		}
 		this.pendingScreenshotRequests.length = remainingRequests;
+	}
+	createRenderTarget(renderer, width, height) {
+		return isWebGPURenderer(renderer) ? new THREE.RenderTarget(width, height, { colorSpace: THREE.SRGBColorSpace }) : new THREE.WebGLRenderTarget(width, height, { colorSpace: THREE.SRGBColorSpace });
+	}
+	/**
+	* Reads `target` into `buffer` as top-down RGBA8. WebGL readbacks are
+	* bottom-up, native WebGPU readbacks are top-down but row-padded to 256
+	* bytes, and the WebGPU renderer's WebGL2 fallback is bottom-up again (the
+	* same conventions as SimulatorDepthWebGPURenderer).
+	*/
+	async readRenderTargetInto(renderer, target, buffer) {
+		const width = target.width;
+		const height = target.height;
+		if (!isWebGPURenderer(renderer)) {
+			await renderer.readRenderTargetPixelsAsync(target, 0, 0, width, height, buffer);
+			flipBufferVertically(buffer, width, height);
+			return;
+		}
+		const readback = await renderer.readRenderTargetPixelsAsync(target, 0, 0, width, height);
+		const rowBytes = width * 4;
+		const srcStride = readback.length > buffer.length ? Math.ceil(rowBytes / 256) * 256 : rowBytes;
+		const isWebGLFallback = "isWebGLBackend" in renderer.backend && renderer.backend.isWebGLBackend === true;
+		for (let y = 0; y < height; y++) {
+			const srcOffset = (isWebGLFallback ? height - 1 - y : y) * srcStride;
+			buffer.set(readback.subarray(srcOffset, srcOffset + rowBytes), y * rowBytes);
+		}
+	}
+	/** Full-screen textured quad for the WebGPU device-camera overlay path. */
+	async getWebGPUQuad() {
+		if (!this.webgpuQuad) {
+			const { MeshBasicNodeMaterial } = await import("three/webgpu");
+			this.webgpuQuad = {
+				mesh: new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new MeshBasicNodeMaterial({ transparent: true })),
+				camera: new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
+			};
+		}
+		return this.webgpuQuad;
 	}
 	getFullScreenQuad() {
 		if (!this.fullScreenQuad) this.fullScreenQuad = new FullScreenQuad(new THREE.MeshBasicMaterial({ transparent: true }));
@@ -777,6 +842,28 @@ var SimulationTimer = class {
 		this.previousFrameTimeMs = void 0;
 	}
 };
+//#endregion
+//#region src/core/SerializerSupport.ts
+/**
+* Returns true when running inside a Split Engine host environment where a
+* global `SplitEngineSerializer` instance or constructor is registered.
+*/
+function isSplitEngineEnvironment() {
+	const globalScope = globalThis;
+	return Boolean(globalScope.__splitEngineSerializer || typeof globalScope.ThreeSplitEngine?.SplitEngineSerializer === "function");
+}
+/**
+* Resolves a `SerializerRenderer` from `Options.serializer` or from the global
+* `ThreeSplitEngine.SplitEngineSerializer` runtime entrypoint.
+*/
+async function resolveSerializerRenderer(serializer) {
+	if (typeof serializer === "function") return await serializer();
+	if (serializer != null) return serializer;
+	const globalScope = globalThis;
+	if (globalScope.__splitEngineSerializer) return globalScope.__splitEngineSerializer;
+	if (typeof globalScope.ThreeSplitEngine?.SplitEngineSerializer === "function") return new globalScope.ThreeSplitEngine.SplitEngineSerializer();
+	throw new Error("Options.rendererBackend is \"serializer\", but no serializer instance or factory was provided in Options.serializer and globalThis.ThreeSplitEngine.SplitEngineSerializer is unavailable.");
+}
 //#endregion
 //#region src/context/shared/ContextNumberUtils.ts
 const CONTEXT_NUMBER_SCALE = 1e4;
@@ -1833,6 +1920,7 @@ var ScriptsManager = class extends THREE.EventDispatcher {
 			} catch (error) {
 				failed = true;
 				initializationError = error;
+				console.error(`An error occurred in script ${entry.script.name || entry.script.constructor.name} [init]:`, error);
 				if (entry.connection === "connected") this.failedScripts.add(entry.script);
 			}
 			if (entry.connection !== "connected") this.disposeScript(entry.script);
@@ -1991,6 +2079,15 @@ function eventForTarget(argument, currentTarget) {
 }
 //#endregion
 //#region src/core/components/WebXRSessionManager.ts
+let WebXRSessionEventType = /* @__PURE__ */ function(WebXRSessionEventType) {
+	WebXRSessionEventType["UNSUPPORTED"] = "unsupported";
+	WebXRSessionEventType["READY"] = "ready";
+	WebXRSessionEventType["BEFORE_SESSION_START"] = "beforesessionstart";
+	WebXRSessionEventType["SESSION_START"] = "sessionstart";
+	WebXRSessionEventType["SESSION_END"] = "sessionend";
+	WebXRSessionEventType["SESSION_ERROR"] = "sessionerror";
+	return WebXRSessionEventType;
+}({});
 /**
 * Manages the WebXR session lifecycle by extending THREE.EventDispatcher
 * to broadcast its state to any listener.
@@ -2010,6 +2107,15 @@ var WebXRSessionManager = class extends THREE.EventDispatcher {
 			}
 			session.addEventListener("end", this.onSessionEndedInternal);
 			try {
+				this.dispatchEvent({
+					type: "beforesessionstart",
+					session
+				});
+				if (this.disposed) {
+					session.removeEventListener("end", this.onSessionEndedInternal);
+					await session.end();
+					return;
+				}
 				await this.renderer.xr.setSession(session);
 			} catch (error) {
 				session.removeEventListener("end", this.onSessionEndedInternal);
@@ -2777,7 +2883,8 @@ const COLOR_PROPERTIES = [
 	"disabledSurface",
 	"disabledText"
 ];
-const COLOR_PROPERTY_SET = new Set(COLOR_PROPERTIES);
+const OPTIONAL_COLOR_PROPERTIES = ["sliderTrack"];
+const COLOR_PROPERTY_SET = /* @__PURE__ */ new Set([...COLOR_PROPERTIES, ...OPTIONAL_COLOR_PROPERTIES]);
 const THEME_PROPERTIES = /* @__PURE__ */ new Set([
 	"colors",
 	"borderRadius",
@@ -2986,13 +3093,86 @@ const glimmerGreenTheme = createGlimmerTheme({
 	buttonActive: "#047857",
 	buttonDisabledSurface: "rgba(255, 255, 255, 0.08)"
 });
+const HIGH_CONTRAST_THEME_COLORS = Object.freeze({
+	surface: "#173a3a",
+	raisedSurface: "#245252",
+	accent: "#7ffff0",
+	sliderTrack: "#4f8f89",
+	buttonSurface: "#006b62",
+	buttonHover: "#007b70",
+	buttonActive: "#008579",
+	text: "#ffffff",
+	secondaryText: "#d5ffff",
+	disabledSurface: "#315858",
+	disabledText: "#c2d7d7",
+	buttonOutline: "#a2fff4"
+});
+const HIGH_CONTRAST_THEME_LAYOUT = Object.freeze({
+	borderRadius: 20,
+	surfaceBorderWidth: 2,
+	surfacePadding: 24,
+	surfaceGap: 16,
+	buttonHeight: 48,
+	buttonGap: 10,
+	buttonHorizontalPadding: 20,
+	buttonBorderWidth: 2,
+	buttonBorderRadius: 16
+});
+/** High-contrast surfaces for optical see-through displays. */
+const highContrastTheme = createThemeSnapshot({
+	colors: {
+		surface: HIGH_CONTRAST_THEME_COLORS.surface,
+		raisedSurface: HIGH_CONTRAST_THEME_COLORS.raisedSurface,
+		primary: HIGH_CONTRAST_THEME_COLORS.accent,
+		primaryText: HIGH_CONTRAST_THEME_COLORS.text,
+		text: HIGH_CONTRAST_THEME_COLORS.text,
+		secondaryText: HIGH_CONTRAST_THEME_COLORS.secondaryText,
+		outline: HIGH_CONTRAST_THEME_COLORS.accent,
+		sliderTrack: HIGH_CONTRAST_THEME_COLORS.sliderTrack,
+		disabledSurface: HIGH_CONTRAST_THEME_COLORS.disabledSurface,
+		disabledText: HIGH_CONTRAST_THEME_COLORS.disabledText
+	},
+	borderRadius: HIGH_CONTRAST_THEME_LAYOUT.borderRadius,
+	styles: {
+		surface: {
+			backgroundColor: HIGH_CONTRAST_THEME_COLORS.surface,
+			borderColor: HIGH_CONTRAST_THEME_COLORS.accent,
+			borderWidth: HIGH_CONTRAST_THEME_LAYOUT.surfaceBorderWidth,
+			borderRadius: HIGH_CONTRAST_THEME_LAYOUT.borderRadius,
+			padding: HIGH_CONTRAST_THEME_LAYOUT.surfacePadding,
+			gap: HIGH_CONTRAST_THEME_LAYOUT.surfaceGap
+		},
+		button: {
+			height: HIGH_CONTRAST_THEME_LAYOUT.buttonHeight,
+			flexDirection: "row",
+			justifyContent: "center",
+			alignItems: "center",
+			gap: HIGH_CONTRAST_THEME_LAYOUT.buttonGap,
+			paddingLeft: HIGH_CONTRAST_THEME_LAYOUT.buttonHorizontalPadding,
+			paddingRight: HIGH_CONTRAST_THEME_LAYOUT.buttonHorizontalPadding,
+			backgroundColor: HIGH_CONTRAST_THEME_COLORS.buttonSurface,
+			color: HIGH_CONTRAST_THEME_COLORS.text,
+			borderColor: HIGH_CONTRAST_THEME_COLORS.buttonOutline,
+			borderWidth: HIGH_CONTRAST_THEME_LAYOUT.buttonBorderWidth,
+			borderRadius: HIGH_CONTRAST_THEME_LAYOUT.buttonBorderRadius,
+			":hover": { backgroundColor: HIGH_CONTRAST_THEME_COLORS.buttonHover },
+			":active": { backgroundColor: HIGH_CONTRAST_THEME_COLORS.buttonActive },
+			":disabled": {
+				backgroundColor: HIGH_CONTRAST_THEME_COLORS.disabledSurface,
+				color: HIGH_CONTRAST_THEME_COLORS.disabledText
+			}
+		},
+		text: { color: HIGH_CONTRAST_THEME_COLORS.text }
+	}
+});
 const uiThemePresets = Object.freeze({
 	grayGlass: grayGlassTheme,
 	colorful: colorfulTheme,
 	glimmer: glimmerTheme,
 	glimmerOpaque: glimmerOpaqueTheme,
 	glimmerAmber: glimmerAmberTheme,
-	glimmerGreen: glimmerGreenTheme
+	glimmerGreen: glimmerGreenTheme,
+	highContrast: highContrastTheme
 });
 const defaultTheme = grayGlassTheme;
 /** Creates a detached, deeply frozen theme snapshot. */
@@ -3327,7 +3507,7 @@ var UIRenderer = class {
 				throw STALE_UI_LOAD;
 			}
 			try {
-				if (this.renderer instanceof THREE.WebGLRenderer) backend.configureRenderer?.(this.renderer);
+				if (this.renderer instanceof THREE.WebGLRenderer || isWebGPURenderer(this.renderer)) backend.configureRenderer?.(this.renderer);
 			} catch (error) {
 				backend.dispose();
 				throw error;
@@ -3395,6 +3575,7 @@ var UIRenderer = class {
 				for (const mapping of mappings) record.unregisterHits.push(this.registerHit(mapping, overlay));
 			}
 			record.mount.update(deltaSeconds);
+			updatePanelBackfaceVisibility(record.mount.object, camera);
 		}
 	}
 	registerHit(mapping, overlay) {
@@ -3454,7 +3635,8 @@ function syncRootTransform(root, renderRoot, camera) {
 	renderRoot.matrixWorldNeedsUpdate = true;
 }
 async function defaultLoader() {
-	return import("./internal/UIKitBackend.js").then((n) => n.t);
+	await ensureWebGPUUIMaterials();
+	return import("./internal/UIKitBackend.js");
 }
 //#endregion
 //#region src/lighting/Lighting.ts
@@ -3491,8 +3673,8 @@ var Lighting = class Lighting {
 		this.options = lightingOptions;
 		this.depth = depth;
 		if (this.options.enabled) {
-			this.xrLight = new XREstimatedLight(renderer);
-			if (this.options.castDirectionalLightShadow) {
+			this.xrLight = new XREstimatedLight(renderer, false);
+			if (this.options.castDirectionalLightShadow && renderer.shadowMap) {
 				renderer.shadowMap.enabled = true;
 				renderer.shadowMap.type = THREE.PCFShadowMap;
 			}
@@ -3576,13 +3758,27 @@ var Lighting = class Lighting {
 				const ambientLightIntensity = this.ambientLight;
 				const ambientMonoIntensity = .21 * ambientLightIntensity.x + .72 * ambientLightIntensity.y + .07 * ambientLightIntensity.z;
 				const mainLightIntensity = new THREE.Vector3(this.dirLight.color.r, this.dirLight.color.g, this.dirLight.color.b).multiplyScalar(this.dirLight.intensity);
-				const ambientToMain = ambientMonoIntensity / (.21 * mainLightIntensity.x + .72 * mainLightIntensity.y + .07 * mainLightIntensity.z);
+				const mainMonoIntensity = .21 * mainLightIntensity.x + .72 * mainLightIntensity.y + .07 * mainLightIntensity.z;
+				const ambientToMain = mainMonoIntensity > 1e-6 ? ambientMonoIntensity / mainMonoIntensity : 1;
 				this.dirLight.shadow.radius = Math.min(Math.max(1, ambientToMain * 30), 10);
 				this.shadowOpacity = Math.max(Math.min((10 - ambientToMain * 30) * .7, .7), .3);
-				if (this.depth?.options?.enabled && this.depth.options.depthMesh.enabled && this.depth.depthMesh?.material instanceof THREE.ShadowMaterial) this.depth.depthMesh.material.opacity = this.shadowOpacity;
+				this.depth?.setShadowOpacity(this.shadowOpacity);
 			}
 		}
 		if (this.options.debugging || DEBUGGING) this.debugLog();
+	}
+	/**
+	* Releases lighting resources and resets the singleton instance.
+	*/
+	dispose() {
+		this.lightGroup.removeFromParent();
+		this.lightGroup.clear();
+		if (this.xrLight) {
+			this.xrLight.removeFromParent?.();
+			this.xrLight.dispose?.();
+			this.xrLight = void 0;
+		}
+		if (Lighting.instance === this) Lighting.instance = void 0;
 	}
 	/**
 	* Logs current estimate light parameters for debugging.
@@ -4477,7 +4673,8 @@ var CoreSound = class extends Script {
 };
 //#endregion
 //#region src/utils/CreateLoadingSpinner.ts
-var LoadingSpinner = class LoadingSpinner extends HTMLElement {
+const BaseHTMLElement = typeof HTMLElement !== "undefined" ? HTMLElement : class {};
+var LoadingSpinner = class LoadingSpinner extends BaseHTMLElement {
 	static {
 		this.style = `
     /* Styles for the wrapper that covers the screen */
@@ -4527,8 +4724,9 @@ var LoadingSpinner = class LoadingSpinner extends HTMLElement {
 		shadowRoot.innerHTML = LoadingSpinner.innerHTML;
 	}
 };
-if (!customElements.get("xb-blocks-loading-spinner")) customElements.define("xb-blocks-loading-spinner", LoadingSpinner);
+if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" && !customElements.get("xb-blocks-loading-spinner")) customElements.define("xb-blocks-loading-spinner", LoadingSpinner);
 function createLoadingSpinner() {
+	if (typeof document === "undefined" || !document.body) return;
 	return document.body.appendChild(document.createElement("xb-blocks-loading-spinner"));
 }
 //#endregion
@@ -4567,7 +4765,7 @@ var LoadingSpinnerManager = class {
 		*/
 		THREE.DefaultLoadingManager.onStart = (_url, itemsLoaded, itemsTotal) => {
 			this.isLoading = true;
-			window.parent.postMessage({
+			if (typeof window !== "undefined") window.parent?.postMessage({
 				type: "XR_LOADING_PROGRESS",
 				payload: {
 					progress: itemsLoaded / itemsTotal,
@@ -4584,7 +4782,7 @@ var LoadingSpinnerManager = class {
 		* @param itemsTotal - The total number of items to load.
 		*/
 		THREE.DefaultLoadingManager.onProgress = (_url, itemsLoaded, itemsTotal) => {
-			window.parent.postMessage({
+			if (typeof window !== "undefined") window.parent?.postMessage({
 				type: "XR_LOADING_PROGRESS",
 				payload: {
 					progress: itemsLoaded / itemsTotal,
@@ -4600,7 +4798,7 @@ var LoadingSpinnerManager = class {
 		THREE.DefaultLoadingManager.onLoad = () => {
 			this.isLoading = false;
 			this.hideSpinner();
-			window.parent.postMessage({ type: "XR_LOADING_COMPLETE" }, "*");
+			if (typeof window !== "undefined") window.parent?.postMessage({ type: "XR_LOADING_COMPLETE" }, "*");
 		};
 		/**
 		* Callback function for when a loading item encounters an error.
@@ -4612,7 +4810,7 @@ var LoadingSpinnerManager = class {
 			this.isLoading = false;
 			console.warn("XRBlocks: Error loading: " + url);
 			this.hideSpinner();
-			window.parent.postMessage({
+			if (typeof window !== "undefined") window.parent?.postMessage({
 				type: "XR_LOADING_ERROR",
 				payload: {
 					url,
@@ -4624,6 +4822,69 @@ var LoadingSpinnerManager = class {
 };
 const loadingSpinnerManager = new LoadingSpinnerManager();
 //#endregion
+//#region src/core/components/AdditiveDisplaySimulation.ts
+const NAME = "XR Blocks additive display simulation";
+const RADIUS = 1;
+const WIDTH_SEGMENTS = 8;
+const HEIGHT_SEGMENTS = 4;
+const RENDER_ORDER = Number.MAX_SAFE_INTEGER;
+const MIN_DIMMING = 0;
+const MAX_DIMMING = 1;
+/** Simulates additive output while an alpha-blend XR session is presenting. */
+var AdditiveDisplaySimulation = class extends THREE.Mesh {
+	constructor(scene, camera, options) {
+		super(new THREE.SphereGeometry(RADIUS, WIDTH_SEGMENTS, HEIGHT_SEGMENTS), new THREE.MeshBasicMaterial({
+			transparent: true,
+			premultipliedAlpha: true,
+			blending: THREE.CustomBlending,
+			blendEquation: THREE.AddEquation,
+			blendSrc: THREE.ZeroFactor,
+			blendDst: THREE.OneFactor,
+			blendEquationAlpha: THREE.AddEquation,
+			blendSrcAlpha: THREE.OneFactor,
+			blendDstAlpha: THREE.ZeroFactor,
+			depthTest: false,
+			depthWrite: false,
+			side: THREE.BackSide,
+			toneMapped: false
+		}));
+		this.scene = scene;
+		this.camera = camera;
+		this.options = options;
+		this.name = NAME;
+		this.renderOrder = RENDER_ORDER;
+		this.frustumCulled = false;
+		this.userData.xrblocksPrivate = true;
+		this.userData.xrblocksAdditiveDisplaySimulation = true;
+		this.raycast = () => {};
+	}
+	onXRSessionStarted(session) {
+		this.onXRSessionEnded();
+		if (!this.options.simulateAdditiveDisplay || session.environmentBlendMode !== "alpha-blend") return;
+		this.material.opacity = this.validateDimming();
+		this.position.setFromMatrixPosition(this.camera.matrixWorld);
+		this.scene.add(this);
+	}
+	onXRSessionEnded() {
+		this.removeFromParent();
+	}
+	update() {
+		if (!this.parent) return;
+		this.material.opacity = this.validateDimming();
+		this.position.setFromMatrixPosition(this.camera.matrixWorld);
+	}
+	validateDimming() {
+		const dimming = this.options.simulatedDimming;
+		if (!Number.isFinite(dimming) || dimming < MIN_DIMMING || dimming > MAX_DIMMING) throw new RangeError(`Options.simulatedDimming must be between ${MIN_DIMMING} and ${MAX_DIMMING}.`);
+		return dimming;
+	}
+	dispose() {
+		this.onXRSessionEnded();
+		this.geometry.dispose();
+		this.material.dispose();
+	}
+};
+//#endregion
 //#region src/core/components/XRTransition.ts
 /**
 * Manages smooth transitions between AR (transparent) and VR (colored)
@@ -4632,7 +4893,7 @@ const loadingSpinnerManager = new LoadingSpinnerManager();
 var XRTransition = class extends MeshScript {
 	static {
 		this.dependencies = {
-			renderer: THREE.WebGLRenderer,
+			rendererHolder: RendererHolder,
 			camera: THREE.Camera,
 			timer: THREE.Timer,
 			scene: THREE.Scene,
@@ -4656,8 +4917,8 @@ var XRTransition = class extends MeshScript {
 		this.defaultBackgroundColor = new THREE.Color(16777215);
 		this.renderOrder = -Infinity;
 	}
-	init({ renderer, camera, timer, scene, options }) {
-		this.renderer = renderer;
+	init({ rendererHolder, camera, timer, scene, options }) {
+		this.renderer = rendererHolder.renderer;
 		this.sceneCamera = camera;
 		this.timer = timer;
 		this.scene = scene;
@@ -4889,7 +5150,7 @@ var PermissionsManager = class {
 //#region src/core/Core.ts
 const EPSILON$1 = 1e-9;
 function loadSimulatorModule() {
-	return import("./internal/Simulator.js").then((n) => n.t);
+	return import("./internal/Simulator.js");
 }
 /**
 * Core is the central engine of the XR Blocks framework, acting as a
@@ -4899,11 +5160,11 @@ function loadSimulatorModule() {
 */
 var Core = class Core {
 	get currentFrame() {
-		return this._renderer?.xr.getFrame();
+		return this._renderer?.xr.getFrame?.();
 	}
 	/**
-	* The WebGL or WebGPU renderer, created during {@link Core.init}. Reading it
-	* before `init()` has run returns `undefined` and logs a one-time warning.
+	* The WebGL, WebGPU, or Serializer renderer, created during {@link Core.init}.
+	* Reading it before `init()` has run returns `undefined` and logs a one-time warning.
 	*/
 	get renderer() {
 		if (!this._renderer) console.warn("xb.core.renderer is not available until xb.init() creates it. Access it in or after your Script's init() method.");
@@ -4917,6 +5178,10 @@ var Core = class Core {
 	}
 	get elapsedTime() {
 		return this.simulationTimer.getElapsedMs() / 1e3;
+	}
+	/** The active XR session's environment blend mode, or undefined outside XR. */
+	get environmentBlendMode() {
+		return this._environmentBlendMode;
 	}
 	/** Current state of this terminal Core lifetime. */
 	get lifecycle() {
@@ -4978,6 +5243,12 @@ var Core = class Core {
 		this.webXRSettings = {};
 		this.shouldAutostartSimulator = false;
 		this.simulatorRunning = false;
+		this.onBeforeWebXRSessionStart = (event) => {
+			if (this.options?.framebufferScaleFactor === "native" && typeof XRWebGLLayer !== "undefined") {
+				const maxScale = XRWebGLLayer.getNativeFramebufferScaleFactor(event.session);
+				this.renderer.xr.setFramebufferScaleFactor(maxScale);
+			}
+		};
 		this.onWebXRSessionStarted = (event) => {
 			this.onXRSessionStarted(event.session);
 		};
@@ -5007,6 +5278,7 @@ var Core = class Core {
 			if (this.deviceCamera?.isUsingXRCameraAccess) this.deviceCamera.updateXRCamera(frame);
 			if (this.lighting) this.lighting.update();
 			if (this.renderer.xr.isPresenting) this.renderer.xr.updateCamera(this.camera);
+			this.additiveDisplaySimulation?.update();
 			this.input.sampleSources();
 			this.scriptsManager.syncScriptsWithScene(this.scene);
 			this.waitFrame.onFrame();
@@ -5019,7 +5291,7 @@ var Core = class Core {
 			this.interaction.update(this.input.getFrame(), deltaSeconds);
 			this.uiRenderer.present();
 			this.renderSimulatorAndScene();
-			if (this.renderer instanceof THREE.WebGLRenderer) this.screenshotSynthesizer.onAfterRender(this.renderer, this.renderSceneCallback, this.deviceCamera);
+			if (!isSerializerRenderer(this.renderer)) this.screenshotSynthesizer.onAfterRender(this.renderer, this.renderSceneCallback, this.deviceCamera);
 		};
 		this.physicsStep = () => {
 			if (this._isPaused && !this.isSteppingFrame) return;
@@ -5063,6 +5335,8 @@ var Core = class Core {
 			}
 		};
 		this.onXRSessionEnded = () => {
+			this.additiveDisplaySimulation?.onXRSessionEnded();
+			this._environmentBlendMode = void 0;
 			if (!this.isLifecycleActive()) return;
 			this.deviceCamera?.onXRSessionEnded();
 			this.scriptsManager.onXRSessionEnded();
@@ -5120,6 +5394,11 @@ var Core = class Core {
 		let firstError;
 		const cleanups = [
 			() => {
+				this._environmentBlendMode = void 0;
+				this.additiveDisplaySimulation?.dispose();
+				this.additiveDisplaySimulation = void 0;
+			},
+			() => {
 				if (this.physicsInterval === void 0) return;
 				clearInterval(this.physicsInterval);
 				this.physicsInterval = void 0;
@@ -5127,7 +5406,9 @@ var Core = class Core {
 			() => {
 				if (typeof this._renderer?.setAnimationLoop === "function") this._renderer.setAnimationLoop(null);
 			},
-			() => window.removeEventListener("resize", this.onWindowResize),
+			() => {
+				if (typeof window !== "undefined") window.removeEventListener("resize", this.onWindowResize);
+			},
 			() => {
 				const button = this.xrButton;
 				this.xrButton = void 0;
@@ -5147,6 +5428,11 @@ var Core = class Core {
 			() => this.uiRenderer.dispose(),
 			() => this.input.dispose(),
 			() => this.depth.dispose(),
+			() => {
+				const lighting = this.lighting;
+				this.lighting = void 0;
+				lighting?.dispose();
+			},
 			() => {
 				const camera = this.deviceCamera;
 				this.deviceCamera = void 0;
@@ -5184,6 +5470,8 @@ var Core = class Core {
 		const manager = this.webXRSessionManager;
 		if (!manager) return;
 		this.webXRSessionManager = void 0;
+		this.registry.unregister(WebXRSessionManager);
+		manager.removeEventListener("beforesessionstart", this.onBeforeWebXRSessionStart);
 		manager.removeEventListener("sessionstart", this.onWebXRSessionStarted);
 		manager.removeEventListener("sessionend", this.onXRSessionEnded);
 		manager.removeEventListener("unsupported", this.onWebXRUnsupported);
@@ -5238,10 +5526,15 @@ var Core = class Core {
 			this.user.add(this.transition);
 			this.registry.register(this.transition);
 		}
-		this.camera.copy(new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, options.camera.near, options.camera.far));
+		const aspect = typeof window !== "undefined" && window.innerHeight > 0 ? window.innerWidth / window.innerHeight : 1;
+		this.camera.copy(new THREE.PerspectiveCamera(90, aspect, options.camera.near, options.camera.far));
 		this.registry.register(this.camera, THREE.Camera);
 		this.registry.register(this.camera, THREE.PerspectiveCamera);
-		if (options.rendererBackend === "webgpu") {
+		if (options.rendererBackend === "serializer" || isSplitEngineEnvironment()) {
+			this.renderer = await resolveSerializerRenderer(options.serializer);
+			this.assertInitializing();
+			this.renderer.xr.enabled = true;
+		} else if (options.rendererBackend === "webgpu") {
 			const { WebGPURenderer } = await import("three/webgpu");
 			this.assertInitializing();
 			this.renderer = new WebGPURenderer({
@@ -5251,36 +5544,46 @@ var Core = class Core {
 				alpha: true,
 				forceWebGL: options.webgpuOptions?.forceWebGL
 			});
+			this.renderer.xr.enabled = true;
 			await this.renderer.init();
 			this.assertInitializing();
-		} else this.renderer = new THREE.WebGLRenderer({
-			canvas: options.canvas,
-			antialias: options.antialias,
-			stencil: options.stencil,
-			alpha: true,
-			logarithmicDepthBuffer: options.logarithmicDepthBuffer
-		});
-		if (isWebGPURenderer(this.renderer)) {
+		} else {
+			this.renderer = new THREE.WebGLRenderer({
+				canvas: options.canvas,
+				antialias: options.antialias,
+				stencil: options.stencil,
+				alpha: true,
+				logarithmicDepthBuffer: options.logarithmicDepthBuffer
+			});
+			this.renderer.xr.enabled = true;
+		}
+		if (isWebGPURenderer(this.renderer) || isSerializerRenderer(this.renderer)) {
 			const { applyWebGPUReticleMaterial } = await import("./internal/ReticleWebGPUMaterial.js");
 			this.assertInitializing();
 			this.input.setReticleConfigurer(applyWebGPUReticleMaterial);
+			const { setWebGPUUIMaterialLoader } = await import("./internal/PanelMaterialFactory2.js");
+			this.assertInitializing();
+			setWebGPUUIMaterialLoader(() => import("./internal/WebGPUUIMaterials.js"));
 		}
-		this.renderer.setPixelRatio(window.devicePixelRatio);
-		this.renderer.setSize(window.innerWidth, window.innerHeight);
-		this.renderer.xr.enabled = true;
+		if (typeof window !== "undefined") {
+			this.renderer.setPixelRatio(window.devicePixelRatio);
+			this.renderer.setSize(window.innerWidth, window.innerHeight);
+		}
 		if ("getDepthSensingMesh" in this.renderer.xr) this.renderer.xr.getDepthSensingMesh = function() {
 			return null;
 		};
 		this.registry.register(this.renderer);
 		this.registry.register(new RendererHolder(this.renderer));
 		this.renderer.xr.setReferenceSpaceType(options.referenceSpaceType);
-		window.addEventListener("resize", this.onWindowResize);
-		if (!options.canvas) {
+		if (typeof options.framebufferScaleFactor === "number") this.renderer.xr.setFramebufferScaleFactor(options.framebufferScaleFactor);
+		if (typeof window !== "undefined") window.addEventListener("resize", this.onWindowResize);
+		if (!options.canvas && this.renderer.domElement && typeof document !== "undefined") {
 			this.rendererContainer = document.createElement("div");
 			document.body.appendChild(this.rendererContainer);
 			this.rendererContainer.appendChild(this.renderer.domElement);
 		}
 		this.options = options;
+		this.additiveDisplaySimulation = new AdditiveDisplaySimulation(this.scene, this.camera, options);
 		this.reticleOptions.maxDistance = options.reticles.maxDistance;
 		this.reticleOptions.defaultRenderDistance = options.reticles.defaultRenderDistance;
 		this.scriptsManager.catchExceptions = options.catchScriptExceptions;
@@ -5300,13 +5603,14 @@ var Core = class Core {
 		}
 		if (options.deviceCamera?.enabled) {
 			this.deviceCamera = new XRDeviceCamera(options.deviceCamera);
-			this.deviceCamera.setRenderer(this.renderer);
+			if (!isSerializerRenderer(this.renderer)) this.deviceCamera.setRenderer(this.renderer);
 			this.registry.register(this.deviceCamera);
 			this.context.setDeviceCamera(this.deviceCamera);
 		}
 		const webXRRequiredFeatures = options.webxrRequiredFeatures;
 		const webXROptionalFeatures = options.webxrOptionalFeatures;
 		if (!webXROptionalFeatures.includes(options.referenceSpaceType)) webXROptionalFeatures.push(options.referenceSpaceType);
+		if (options.rendererBackend === "webgpu" && !isSerializerRenderer(this.renderer) && !webXROptionalFeatures.includes("webgpu")) webXROptionalFeatures.push("webgpu");
 		if (options.deviceCamera?.enabled) webXROptionalFeatures.push("camera-access");
 		this.webXRSettings.requiredFeatures = webXRRequiredFeatures;
 		this.webXRSettings.optionalFeatures = webXROptionalFeatures;
@@ -5343,7 +5647,6 @@ var Core = class Core {
 		if (options.layers.enabled) webXROptionalFeatures.push("layers");
 		if (options.world.anchors.enabled) webXROptionalFeatures.push("anchors");
 		if (options.lighting.enabled) {
-			assertWebGLRenderer(this.renderer, "Lighting");
 			webXROptionalFeatures.push("light-estimation");
 			this.lighting = new Lighting();
 			this.lighting.init(options.lighting, this.renderer, this.scene, this.depth);
@@ -5355,18 +5658,22 @@ var Core = class Core {
 			this.assertInitializing();
 			if (options.depth.enabled) this.depth.depthMesh?.initRapierPhysics(this.physics.RAPIER, this.physics.blendedWorld);
 		}
-		this.webXRSessionManager = new WebXRSessionManager(this.renderer, this.webXRSettings, options.xrSessionMode);
-		this.webXRSessionManager.addEventListener("sessionstart", this.onWebXRSessionStarted);
-		this.webXRSessionManager.addEventListener("sessionend", this.onXRSessionEnded);
 		this.shouldAutostartSimulator = this.options.xrButton.alwaysAutostartSimulator;
-		if (!this.shouldAutostartSimulator && options.xrButton.enabled) {
-			this.xrButton = new XRButton(this.webXRSessionManager, this.permissionsManager, options.xrButton?.appTitle, options.xrButton?.appDescription, options.xrButton?.startText, options.xrButton?.endText, options.xrButton?.invalidText, options.xrButton?.startSimulatorText, options.xrButton?.showEnterSimulatorButton, this.startSimulator, options.permissions);
-			document.body.appendChild(this.xrButton.domElement);
+		if (!isSerializerRenderer(this.renderer)) {
+			this.webXRSessionManager = new WebXRSessionManager(this.renderer, this.webXRSettings, options.xrSessionMode);
+			this.registry.register(this.webXRSessionManager, WebXRSessionManager);
+			this.webXRSessionManager.addEventListener("beforesessionstart", this.onBeforeWebXRSessionStart);
+			this.webXRSessionManager.addEventListener("sessionstart", this.onWebXRSessionStarted);
+			this.webXRSessionManager.addEventListener("sessionend", this.onXRSessionEnded);
+			if (!this.shouldAutostartSimulator && options.xrButton.enabled) {
+				this.xrButton = new XRButton(this.webXRSessionManager, this.permissionsManager, options.xrButton?.appTitle, options.xrButton?.appDescription, options.xrButton?.startText, options.xrButton?.endText, options.xrButton?.invalidText, options.xrButton?.startSimulatorText, options.xrButton?.showEnterSimulatorButton, this.startSimulator, options.permissions);
+				document.body.appendChild(this.xrButton.domElement);
+			}
+			this.webXRSessionManager.addEventListener("unsupported", this.onWebXRUnsupported);
+			await this.webXRSessionManager.initialize();
+			this.assertInitializing();
 		}
-		this.webXRSessionManager.addEventListener("unsupported", this.onWebXRUnsupported);
-		await this.webXRSessionManager.initialize();
-		this.assertInitializing();
-		if (options.usePostprocessing) this.effects = new XREffects(this.renderer, this.scene, this.timer);
+		if (options.usePostprocessing && !isSerializerRenderer(this.renderer)) this.effects = new XREffects(this.renderer, this.scene, this.timer);
 		if (options.ai.enabled) {
 			this.registry.register(this.ai);
 			this.xrSystemsGroup.add(this.ai);
@@ -5375,6 +5682,7 @@ var Core = class Core {
 		}
 		await Promise.all([this.uiRenderer.initialize(this.scene, this.renderer), this.scriptsManager.syncScriptsWithScene(this.scene)]);
 		this.assertInitializing();
+		if (isSerializerRenderer(this.renderer) && this.renderer.xr.isPresenting) await this.onXRSessionStarted(this.renderer.xr.getSession?.() ?? void 0);
 		this.uiRenderer.reconcile(0, this.camera);
 		this.uiRenderer.present();
 		this.renderer.setAnimationLoop(this.update);
@@ -5393,7 +5701,10 @@ var Core = class Core {
 	*/
 	async onXRSessionStarted(session) {
 		if (!this.isLifecycleActive()) return;
-		this.xrReferenceSpaceCache.onXRSessionStart(session);
+		this._environmentBlendMode = session?.environmentBlendMode;
+		if (session) this.additiveDisplaySimulation?.onXRSessionStarted(session);
+		if (session?.enabledFeatures?.includes("webgpu")) console.debug("WebXR session is using WebGPU");
+		if (session) this.xrReferenceSpaceCache.onXRSessionStart(session);
 		if (this.options.deviceCamera?.enabled) {
 			await this.deviceCamera.init();
 			if (!this.isLifecycleActive()) return;
@@ -5657,6 +5968,195 @@ function visualizeDepthMap(depthArray, width, height) {
 	link.download = `depth_debug_${timestamp}.png`;
 	link.href = canvas.toDataURL("image/png");
 	link.click();
+}
+//#endregion
+//#region src/generative/BackgroundKeyer.ts
+const DEFAULT_TOLERANCE = 48;
+/**
+* Estimates the background color of an image by averaging its four corner
+* pixels. Generated images that place the subject on a plain, uniform
+* background (the generative_object demo instructs the model to do so) have
+* corners that are a reliable sample.
+* @param image - The source RGBA image.
+* @returns The estimated `[r, g, b]` background color (0-255).
+*/
+function estimateBackgroundColor(image) {
+	const { data, width, height } = image;
+	const corners = [
+		0,
+		(width - 1) * 4,
+		(height - 1) * width * 4,
+		((height - 1) * width + (width - 1)) * 4
+	];
+	let r = 0;
+	let g = 0;
+	let b = 0;
+	for (const offset of corners) {
+		r += data[offset];
+		g += data[offset + 1];
+		b += data[offset + 2];
+	}
+	return [
+		r / corners.length,
+		g / corners.length,
+		b / corners.length
+	];
+}
+/**
+* Makes background-colored pixels transparent, turning a subject-on-a-plain-
+* background image into a clean cutout. Operates on a copy; the input is not
+* mutated.
+* @param image - The source RGBA image.
+* @param options - Keying options.
+* @returns A new {@link RgbaImage} with background pixels set to alpha 0.
+*/
+function keyOutBackground(image, options = {}) {
+	const tolerance = options.tolerance ?? DEFAULT_TOLERANCE;
+	const [bgR, bgG, bgB] = estimateBackgroundColor(image);
+	const toleranceSquared = tolerance * tolerance;
+	const out = new Uint8ClampedArray(image.data);
+	for (let i = 0; i < out.length; i += 4) {
+		const dr = out[i] - bgR;
+		const dg = out[i + 1] - bgG;
+		const db = out[i + 2] - bgB;
+		if (dr * dr + dg * dg + db * db <= toleranceSquared) out[i + 3] = 0;
+	}
+	return {
+		data: out,
+		width: image.width,
+		height: image.height
+	};
+}
+/**
+* Builds a grayscale displacement map from a keyed image: background pixels
+* (alpha 0) become black (no displacement) and subject pixels become their
+* luminance. Masking by alpha keeps the transparent background from displacing
+* into stray geometry. The result is opaque RGBA.
+* @param image - A keyed RGBA image (background already at alpha 0).
+* @returns A new opaque {@link RgbaImage} usable as a displacement/bump map.
+*/
+function buildDisplacementMap(image) {
+	const { data, width, height } = image;
+	const out = new Uint8ClampedArray(data.length);
+	for (let i = 0; i < data.length; i += 4) {
+		const luminance = data[i + 3] === 0 ? 0 : Math.round(.2126 * data[i] + .7152 * data[i + 1] + .0722 * data[i + 2]);
+		out[i] = luminance;
+		out[i + 1] = luminance;
+		out[i + 2] = luminance;
+		out[i + 3] = 255;
+	}
+	return {
+		data: out,
+		width,
+		height
+	};
+}
+//#endregion
+//#region src/utils/RotationUtils.ts
+const euler = new THREE.Euler();
+const matrix4 = new THREE.Matrix4();
+const v1 = new THREE.Vector3();
+/**
+* Extracts only the yaw (Y-axis rotation) from a quaternion.
+* This is useful for making an object face a certain direction horizontally
+* without tilting up or down.
+*
+* @param rotation - The source quaternion from which to
+*     extract the yaw.
+* @param target - The target
+*     quaternion to store the result.
+* If not provided, a new quaternion will be created.
+* @returns The resulting quaternion containing only the yaw
+*     rotation.
+*/
+function extractYaw(rotation, target = new THREE.Quaternion()) {
+	euler.setFromQuaternion(rotation, "YXZ");
+	return target.setFromAxisAngle(UP, euler.y);
+}
+/**
+* Creates a rotation such that forward (0, 0, -1) points towards the forward
+* vector and the up direction is the normalized projection of the provided up
+* vector onto the plane orthogonal to the target.
+* @param forward - Forward vector
+* @param up - Up vector
+* @param target - Output
+* @returns
+*/
+function lookAtRotation(forward, up = UP, target = new THREE.Quaternion()) {
+	matrix4.lookAt(ZERO_VECTOR3, forward, up);
+	return target.setFromRotationMatrix(matrix4);
+}
+/**
+* Clamps the provided rotation's angle.
+* The rotation is modified in place.
+* @param rotation - The quaternion to clamp.
+* @param angle - The maximum allowed angle in radians.
+*/
+function clampRotationToAngle(rotation, angle) {
+	let currentAngle = 2 * Math.acos(rotation.w);
+	currentAngle = (currentAngle + Math.PI) % (2 * Math.PI) - Math.PI;
+	if (Math.abs(currentAngle) <= angle) return;
+	const axis = v1.set(rotation.x, rotation.y, rotation.z).multiplyScalar(1 / Math.sqrt(1 - rotation.w * rotation.w));
+	axis.normalize();
+	rotation.setFromAxisAngle(axis, angle * Math.sign(currentAngle));
+}
+//#endregion
+//#region src/generative/GenerativeObjectUtils.ts
+const tempForward = new THREE.Vector3();
+const tempAwayFromCamera = new THREE.Vector3();
+/**
+* Computes an aspect-ratio-preserving plane size whose largest side equals
+* `maxSize`. Used to scale a generated image so it reads at a comfortable size
+* regardless of the model's output resolution.
+* @param imageWidth - Source image width in pixels.
+* @param imageHeight - Source image height in pixels.
+* @param maxSize - Largest dimension of the resulting plane, in meters.
+* @param target - Optional output vector to write into.
+* @returns `target` set to the plane's [width, height] in meters.
+*/
+function computeBillboardScale(imageWidth, imageHeight, maxSize, target = new THREE.Vector2()) {
+	if (imageWidth <= 0 || imageHeight <= 0 || maxSize <= 0) return target.set(maxSize, maxSize);
+	const aspect = imageWidth / imageHeight;
+	if (aspect >= 1) return target.set(maxSize, maxSize / aspect);
+	return target.set(maxSize * aspect, maxSize);
+}
+/**
+* Computes a world-space pose `distance` meters in front of the camera,
+* oriented so its front face (+Z) points back toward the user. Copy the result
+* straight onto a direct child of the scene; for an object under a transformed
+* parent, convert it into the parent's space first.
+* @param camera - The user's camera.
+* @param distance - Distance in front of the camera, in meters.
+* @param position - Optional output world position.
+* @param quaternion - Optional output world orientation.
+* @returns The world position and orientation.
+*/
+function poseInFrontOfCamera(camera, distance, position = new THREE.Vector3(), quaternion = new THREE.Quaternion()) {
+	camera.getWorldDirection(tempForward);
+	camera.getWorldPosition(position);
+	position.addScaledVector(tempForward, distance);
+	lookAtRotation(tempForward, void 0, quaternion);
+	return {
+		position,
+		quaternion
+	};
+}
+/**
+* Computes a world-space orientation that turns a plane's front face (+Z)
+* toward the camera while keeping the object upright (yaw only). Used to
+* billboard a generated cutout so it faces the user like a standee, without
+* tilting. Apply it directly to a child of the scene; under a transformed
+* parent, convert it into the parent's space first.
+* @param objectPosition - World position of the object.
+* @param cameraPosition - World position of the camera.
+* @param target - Optional output world orientation.
+* @returns `target` oriented so +Z points toward the camera, staying upright.
+*/
+function quaternionFacingCamera(objectPosition, cameraPosition, target = new THREE.Quaternion()) {
+	const awayFromCamera = tempAwayFromCamera.subVectors(objectPosition, cameraPosition);
+	awayFromCamera.y = 0;
+	if (awayFromCamera.lengthSq() === 0) return target.identity();
+	return lookAtRotation(awayFromCamera, void 0, target);
 }
 //#endregion
 //#region src/layers/LayerCapability.ts
@@ -7015,6 +7515,69 @@ var UIButton = class extends UIElement {
 	}
 };
 //#endregion
+//#region src/ui/components/UIExitButton.ts
+const DEFAULT_EXIT_BUTTON_STYLE = Object.freeze({
+	position: "absolute",
+	top: -48,
+	left: 0,
+	width: 36,
+	height: 36,
+	borderRadius: 18,
+	backgroundColor: "rgba(30, 30, 36, 0.92)",
+	borderColor: "rgba(255, 255, 255, 0.25)",
+	borderWidth: 1.5,
+	color: "#ffffff",
+	fontSize: 16,
+	fontWeight: "bold",
+	justifyContent: "center",
+	alignItems: "center"
+});
+/**
+* A standard circular exit button for XR overlays and cards.
+* Uses dependency injection to resolve the active `WebXRSessionManager`
+* and cleanly end the session when clicked.
+*/
+var UIExitButton = class extends UIButton {
+	static {
+		this.dependencies = { sessionManager: WebXRSessionManager };
+	}
+	constructor({ label = "X", ariaLabel = "Exit XR", pointerEvents = "auto", style, onClick, onExit, sessionManager, ...rest } = {}) {
+		const mergedStyle = {
+			...DEFAULT_EXIT_BUTTON_STYLE,
+			...style
+		};
+		super({
+			label,
+			ariaLabel,
+			pointerEvents,
+			style: mergedStyle,
+			onClick: () => {
+				this.handleExit(onClick);
+			},
+			...rest
+		});
+		this.name = "UIExitButton";
+		this.sessionManager = sessionManager;
+		this._onExit = onExit;
+	}
+	init(dependencies = {}) {
+		if (dependencies.sessionManager) this.sessionManager = dependencies.sessionManager;
+	}
+	async handleExit(customOnClick) {
+		if (this._onExit) {
+			await this._onExit();
+			return;
+		}
+		if (customOnClick) {
+			customOnClick();
+			return;
+		}
+		if (this.sessionManager) try {
+			await this.sessionManager.endSession();
+		} catch {}
+	}
+};
+//#endregion
 //#region src/ui/components/UIIcon.ts
 /** One Material Symbol icon. */
 var UIIcon = class extends UIElement {
@@ -7761,55 +8324,6 @@ function asMaterials(material) {
 	return Array.isArray(material) ? material : [material];
 }
 //#endregion
-//#region src/utils/RotationUtils.ts
-const euler = new THREE.Euler();
-const matrix4 = new THREE.Matrix4();
-const v1 = new THREE.Vector3();
-/**
-* Extracts only the yaw (Y-axis rotation) from a quaternion.
-* This is useful for making an object face a certain direction horizontally
-* without tilting up or down.
-*
-* @param rotation - The source quaternion from which to
-*     extract the yaw.
-* @param target - The target
-*     quaternion to store the result.
-* If not provided, a new quaternion will be created.
-* @returns The resulting quaternion containing only the yaw
-*     rotation.
-*/
-function extractYaw(rotation, target = new THREE.Quaternion()) {
-	euler.setFromQuaternion(rotation, "YXZ");
-	return target.setFromAxisAngle(UP, euler.y);
-}
-/**
-* Creates a rotation such that forward (0, 0, -1) points towards the forward
-* vector and the up direction is the normalized projection of the provided up
-* vector onto the plane orthogonal to the target.
-* @param forward - Forward vector
-* @param up - Up vector
-* @param target - Output
-* @returns
-*/
-function lookAtRotation(forward, up = UP, target = new THREE.Quaternion()) {
-	matrix4.lookAt(ZERO_VECTOR3, forward, up);
-	return target.setFromRotationMatrix(matrix4);
-}
-/**
-* Clamps the provided rotation's angle.
-* The rotation is modified in place.
-* @param rotation - The quaternion to clamp.
-* @param angle - The maximum allowed angle in radians.
-*/
-function clampRotationToAngle(rotation, angle) {
-	let currentAngle = 2 * Math.acos(rotation.w);
-	currentAngle = (currentAngle + Math.PI) % (2 * Math.PI) - Math.PI;
-	if (Math.abs(currentAngle) <= angle) return;
-	const axis = v1.set(rotation.x, rotation.y, rotation.z).multiplyScalar(1 / Math.sqrt(1 - rotation.w * rotation.w));
-	axis.normalize();
-	rotation.setFromAxisAngle(axis, angle * Math.sign(currentAngle));
-}
-//#endregion
 //#region src/video/VideoFileStream.ts
 /**
 * VideoFileStream handles video playback from a file source.
@@ -8055,6 +8569,7 @@ registerDebugGlobals(/* @__PURE__ */ __exportAll({
 	CoreSound: () => CoreSound,
 	DEFAULT_DEVICE_CAMERA_HEIGHT: () => 720,
 	DEFAULT_DEVICE_CAMERA_WIDTH: () => DEFAULT_DEVICE_CAMERA_WIDTH,
+	DEFAULT_EXIT_BUTTON_STYLE: () => DEFAULT_EXIT_BUTTON_STYLE,
 	DEFAULT_RGB_TO_DEPTH_PARAMS: () => DEFAULT_RGB_TO_DEPTH_PARAMS,
 	DEVICE_CAMERA_PARAMETERS: () => DEVICE_CAMERA_PARAMETERS,
 	DOWN: () => DOWN,
@@ -8189,6 +8704,7 @@ registerDebugGlobals(/* @__PURE__ */ __exportAll({
 	UIButton: () => UIButton,
 	UICard: () => UICard,
 	UIElement: () => UIElement,
+	UIExitButton: () => UIExitButton,
 	UIIcon: () => UIIcon,
 	UIImage: () => UIImage,
 	UIOverlay: () => UIOverlay,
@@ -8208,6 +8724,8 @@ registerDebugGlobals(/* @__PURE__ */ __exportAll({
 	WaitFrame: () => WaitFrame,
 	WebXRHandContext: () => WebXRHandContext,
 	WebXRHandPoseEstimator: () => WebXRHandPoseEstimator,
+	WebXRSessionEventType: () => WebXRSessionEventType,
+	WebXRSessionManager: () => WebXRSessionManager,
 	World: () => World,
 	WorldOptions: () => WorldOptions,
 	XRButton: () => XRButton,
@@ -8228,11 +8746,13 @@ registerDebugGlobals(/* @__PURE__ */ __exportAll({
 	aspectRatioOf: () => aspectRatioOf,
 	assertWebGLRenderer: () => assertWebGLRenderer,
 	average: () => average,
+	buildDisplacementMap: () => buildDisplacementMap,
 	callInitWithDependencyInjection: () => callInitWithDependencyInjection,
 	camera: () => camera,
 	clamp: () => clamp,
 	clamp01: () => clamp01,
 	clampRotationToAngle: () => clampRotationToAngle,
+	computeBillboardScale: () => computeBillboardScale,
 	context: () => context,
 	core: () => core,
 	cropImage: () => cropImage,
@@ -8246,6 +8766,7 @@ registerDebugGlobals(/* @__PURE__ */ __exportAll({
 	disposeObjectTree: () => disposeObjectTree,
 	disposeRenderableResources: () => disposeRenderableResources,
 	enableAcceleratedRaycast: () => enableAcceleratedRaycast,
+	estimateBackgroundColor: () => estimateBackgroundColor,
 	estimateHandScale: () => estimateHandScale,
 	extractYaw: () => extractYaw,
 	getAdjacentFingerSpreads: () => getAdjacentFingerSpreads,
@@ -8294,7 +8815,9 @@ registerDebugGlobals(/* @__PURE__ */ __exportAll({
 	isBVHReady: () => isBVHReady,
 	isDeviceCameraPoseAvailable: () => isDeviceCameraPoseAvailable,
 	isLayerCapable: () => isLayerCapable,
+	isSerializerRenderer: () => isSerializerRenderer,
 	isWebGPURenderer: () => isWebGPURenderer,
+	keyOutBackground: () => keyOutBackground,
 	layerCapability: () => layerCapability,
 	lerp: () => lerp,
 	loadStereoImageAsTextures: () => loadStereoImageAsTextures,
@@ -8304,7 +8827,10 @@ registerDebugGlobals(/* @__PURE__ */ __exportAll({
 	parseBase64DataURL: () => parseBase64DataURL,
 	parseSimulatorHandPoseRotations: () => parseSimulatorHandPoseRotations,
 	placeObjectAtIntersectionFacingTarget: () => placeObjectAtIntersectionFacingTarget,
+	poseInFrontOfCamera: () => poseInFrontOfCamera,
 	print: () => print,
+	quaternionFacingCamera: () => quaternionFacingCamera,
+	resolveSerializerRenderer: () => resolveSerializerRenderer,
 	resolveSimulatorHandPoseRotations: () => resolveSimulatorHandPoseRotations,
 	resolveSimulatorRotationsFromKeypoints: () => resolveSimulatorRotationsFromKeypoints,
 	scene: () => scene,
@@ -8329,6 +8855,6 @@ registerDebugGlobals(/* @__PURE__ */ __exportAll({
 	xrDeviceCameraUserOptions: () => xrDeviceCameraUserOptions
 }));
 //#endregion
-export { AI, AIOptions, ActiveControllers, Agent, AnchorManager, AnchoredObjects, AnchorsOptions, AudioListener, AudioPlayer, BACK, BackgroundMusic, CategoryVolumes, Context, ContextOptions, Core, CoreSound, DEFAULT_DEVICE_CAMERA_HEIGHT, DEFAULT_DEVICE_CAMERA_WIDTH, DEFAULT_RGB_TO_DEPTH_PARAMS, DEVICE_CAMERA_PARAMETERS, DOWN, Depth, DepthMesh, DepthMeshOptions, DepthOptions, DepthTextures, DetectedBodyPose, DetectedFace, DetectedMesh, DetectedObject, DetectedPlane, DeviceCameraOptions, FINGER_ORDER, FORWARD, FaceCamera, FaceLandmarkName, FaceRecognizer, FacesOptions, FollowHead, FollowObject, GEMINI_DEFAULT_FLASH_MODEL, GEMINI_DEFAULT_IMAGE_MODEL, GEMINI_DEFAULT_LIVE_MODEL, GamepadBindings, GamepadController, GazeController, Gemini, GeminiOptions, GenerateSkyboxTool, GestureRecognition, GestureRecognitionOptions, GetWeatherTool, HAND_BONE_IDX_CONNECTION_MAP, HAND_INDEX_TO_LABEL, HAND_JOINT_COUNT, HAND_JOINT_IDX_CONNECTION_MAP, HAND_JOINT_NAMES, Handedness, Hands, HandsOptions, HeadGestureRecognition, HeadGestureRecognitionOptions, HeuristicGestureRecognizer, HeuristicHeadGestureRecognizer, HumanRecognizer, HumansOptions, Input, InputOptions, Interaction, InteractionOptions, Keycodes, LEFT, LEFT_VIEW_ONLY_LAYER, LayerManager, LayersOptions, Lighting, LightingOptions, LoadingSpinnerManager, LocalStorageAnchorStore, ManipulationAction, MediaPipeHandContext, MediaPipeHandPoseEstimator, MeshDetectionOptions, MeshDetector, MeshScript, ModelLoader, ModelViewer, MouseController, NUM_HANDS, OCCLUDABLE_ITEMS_LAYER, ObjectDetector, ObjectsOptions, OcclusionPass, OcclusionUtils, OpenAI, OpenAIOptions, Options, Orbit, Physics, PhysicsOptions, PlaneDetector, PlanesOptions, PoseJointName, RENDERER_BACKENDS, RIGHT, RIGHT_VIEW_ONLY_LAYER, Registry, ReticleOptions, Reticles, SIMULATOR_HAND_COMMON_BIOMECHANICAL_CONSTRAINTS_DEGREES, SIMULATOR_HAND_POSE_NAMES, SIMULATOR_HAND_POSE_ROTATIONS, SOUND_PRESETS, SceneDetector, SceneOptions, SceneSetOfMarkOptions, SceneVisibilityOptions, ScreenshotSynthesizer, Script, ScriptMixin, ScriptsManager, ScriptsManagerEventType, SegmentCategory, SegmentationOptions, Segmenter, SetSimulatorEnvironmentEvent, SetSimulatorHandPhysicsEvent, SetSimulatorModeEvent, ShowSimulatorInstructionsEvent, SimulatorAnchor, SimulatorHandPose, SimulatorHandPoseChangeRequestEvent, SimulatorMode, SimulatorOptions, SkyboxAgent, SoundOptions, SoundSynthesizer, SparkRendererHolder, SpatialAudio, SpeechRecognizer, SpeechRecognizerOptions, SpeechSynthesizer, SpeechSynthesizerOptions, StreamState, StrokeRecognizer, StylizedFace, TensorFlowHandPoseEstimator, Tool, TransformScript, UIButton, UICard, UIElement, UIIcon, UIImage, UIOverlay, UIPanel, UIScrollView, UISlider, UIText, UITextInput, UP, User, VIEW_DEPTH_GAP, VideoFileStream, VideoLayer, VideoStream, VisibilityTransition, VolumeCategory, WaitFrame, WebXRHandContext, WebXRHandPoseEstimator, World, WorldOptions, XRButton, XRDeviceCamera, XREffects, XRPass, XRReferenceSpaceCache, XRTransitionOptions, XR_BLOCKS_ASSETS_PATH, ZERO_VECTOR3, ZERO_VISEME, _getBvhImportStatus, add, ai, anchorCapability, applyBVH, applySimulatorHandPoseRotationConstraints, aspectRatioOf, assertWebGLRenderer, average, callInitWithDependencyInjection, camera, clamp, clamp01, clampRotationToAngle, context, core, cropImage, defaultAnchorStorageKey, depth, detectDeviceCameraTarget, disposeBVH, disposeMaterial, disposeMeshResources, disposeObjectChildren, disposeObjectTree, disposeRenderableResources, enableAcceleratedRaycast, estimateHandScale, extractYaw, getAdjacentFingerSpreads, getBoneVectors, getCameraParametersSnapshot, getColorHex, getDeltaTime, getDeviceCameraClipFromView, getDeviceCameraWorldFromClip, getDeviceCameraWorldFromView, getElapsedTime, getFingerBendAngles, getFingerCurl, getFingerDirection, getFingerJoint, getFingerPalmAlignment, getFingerSpread, getFingerStraightness, getFingertipDistance, getFingertipPalmDistance, getObjectTargetPoint, getPalmNormal, getPalmPose, getPalmRight, getPalmUp, getPalmWidth, getRelativeBoneAngles, getThumbBendAngles, getThumbCurl, getThumbDirection, getThumbOpposition, getThumbStraightness, getThumbVerticalDirection, getUIPresentationObject, getUrlParamBool, getUrlParamFloat, getUrlParamInt, getUrlParameter, getVec4ByColorString, getXrCameraLeft, getXrCameraRight, init, initScript, input, intrinsicsToProjectionMatrix, isBVHReady, isDeviceCameraPoseAvailable, isLayerCapable, isWebGPURenderer, layerCapability, lerp, loadStereoImageAsTextures, loadingSpinnerManager, lookAtRotation, objectIsDescendantOf, parseBase64DataURL, parseSimulatorHandPoseRotations, placeObjectAtIntersectionFacingTarget, print, resolveSimulatorHandPoseRotations, resolveSimulatorRotationsFromKeypoints, scene, showOnlyInLeftEye, showOnlyInRightEye, sound, timer, transformRgbUvToWorld, traverseUtil, ui, urlParams, user, visualizeDepth, visualizeDepthMap, world, xrDepthMeshOptions, xrDepthMeshPhysicsOptions, xrDepthMeshVisualizationOptions, xrDeviceCameraEnvironmentContinuousOptions, xrDeviceCameraEnvironmentOptions, xrDeviceCameraUserContinuousOptions, xrDeviceCameraUserOptions };
+export { AI, AIOptions, ActiveControllers, Agent, AnchorManager, AnchoredObjects, AnchorsOptions, AudioListener, AudioPlayer, BACK, BackgroundMusic, CategoryVolumes, Context, ContextOptions, Core, CoreSound, DEFAULT_DEVICE_CAMERA_HEIGHT, DEFAULT_DEVICE_CAMERA_WIDTH, DEFAULT_EXIT_BUTTON_STYLE, DEFAULT_RGB_TO_DEPTH_PARAMS, DEVICE_CAMERA_PARAMETERS, DOWN, Depth, DepthMesh, DepthMeshOptions, DepthOptions, DepthTextures, DetectedBodyPose, DetectedFace, DetectedMesh, DetectedObject, DetectedPlane, DeviceCameraOptions, FINGER_ORDER, FORWARD, FaceCamera, FaceLandmarkName, FaceRecognizer, FacesOptions, FollowHead, FollowObject, GEMINI_DEFAULT_FLASH_MODEL, GEMINI_DEFAULT_IMAGE_MODEL, GEMINI_DEFAULT_LIVE_MODEL, GamepadBindings, GamepadController, GazeController, Gemini, GeminiOptions, GenerateSkyboxTool, GestureRecognition, GestureRecognitionOptions, GetWeatherTool, HAND_BONE_IDX_CONNECTION_MAP, HAND_INDEX_TO_LABEL, HAND_JOINT_COUNT, HAND_JOINT_IDX_CONNECTION_MAP, HAND_JOINT_NAMES, Handedness, Hands, HandsOptions, HeadGestureRecognition, HeadGestureRecognitionOptions, HeuristicGestureRecognizer, HeuristicHeadGestureRecognizer, HumanRecognizer, HumansOptions, Input, InputOptions, Interaction, InteractionOptions, Keycodes, LEFT, LEFT_VIEW_ONLY_LAYER, LayerManager, LayersOptions, Lighting, LightingOptions, LoadingSpinnerManager, LocalStorageAnchorStore, ManipulationAction, MediaPipeHandContext, MediaPipeHandPoseEstimator, MeshDetectionOptions, MeshDetector, MeshScript, ModelLoader, ModelViewer, MouseController, NUM_HANDS, OCCLUDABLE_ITEMS_LAYER, ObjectDetector, ObjectsOptions, OcclusionPass, OcclusionUtils, OpenAI, OpenAIOptions, Options, Orbit, Physics, PhysicsOptions, PlaneDetector, PlanesOptions, PoseJointName, RENDERER_BACKENDS, RIGHT, RIGHT_VIEW_ONLY_LAYER, Registry, ReticleOptions, Reticles, SIMULATOR_HAND_COMMON_BIOMECHANICAL_CONSTRAINTS_DEGREES, SIMULATOR_HAND_POSE_NAMES, SIMULATOR_HAND_POSE_ROTATIONS, SOUND_PRESETS, SceneDetector, SceneOptions, SceneSetOfMarkOptions, SceneVisibilityOptions, ScreenshotSynthesizer, Script, ScriptMixin, ScriptsManager, ScriptsManagerEventType, SegmentCategory, SegmentationOptions, Segmenter, SetSimulatorEnvironmentEvent, SetSimulatorHandPhysicsEvent, SetSimulatorModeEvent, ShowSimulatorInstructionsEvent, SimulatorAnchor, SimulatorHandPose, SimulatorHandPoseChangeRequestEvent, SimulatorMode, SimulatorOptions, SkyboxAgent, SoundOptions, SoundSynthesizer, SparkRendererHolder, SpatialAudio, SpeechRecognizer, SpeechRecognizerOptions, SpeechSynthesizer, SpeechSynthesizerOptions, StreamState, StrokeRecognizer, StylizedFace, TensorFlowHandPoseEstimator, Tool, TransformScript, UIButton, UICard, UIElement, UIExitButton, UIIcon, UIImage, UIOverlay, UIPanel, UIScrollView, UISlider, UIText, UITextInput, UP, User, VIEW_DEPTH_GAP, VideoFileStream, VideoLayer, VideoStream, VisibilityTransition, VolumeCategory, WaitFrame, WebXRHandContext, WebXRHandPoseEstimator, WebXRSessionEventType, WebXRSessionManager, World, WorldOptions, XRButton, XRDeviceCamera, XREffects, XRPass, XRReferenceSpaceCache, XRTransitionOptions, XR_BLOCKS_ASSETS_PATH, ZERO_VECTOR3, ZERO_VISEME, _getBvhImportStatus, add, ai, anchorCapability, applyBVH, applySimulatorHandPoseRotationConstraints, aspectRatioOf, assertWebGLRenderer, average, buildDisplacementMap, callInitWithDependencyInjection, camera, clamp, clamp01, clampRotationToAngle, computeBillboardScale, context, core, cropImage, defaultAnchorStorageKey, depth, detectDeviceCameraTarget, disposeBVH, disposeMaterial, disposeMeshResources, disposeObjectChildren, disposeObjectTree, disposeRenderableResources, enableAcceleratedRaycast, estimateBackgroundColor, estimateHandScale, extractYaw, getAdjacentFingerSpreads, getBoneVectors, getCameraParametersSnapshot, getColorHex, getDeltaTime, getDeviceCameraClipFromView, getDeviceCameraWorldFromClip, getDeviceCameraWorldFromView, getElapsedTime, getFingerBendAngles, getFingerCurl, getFingerDirection, getFingerJoint, getFingerPalmAlignment, getFingerSpread, getFingerStraightness, getFingertipDistance, getFingertipPalmDistance, getObjectTargetPoint, getPalmNormal, getPalmPose, getPalmRight, getPalmUp, getPalmWidth, getRelativeBoneAngles, getThumbBendAngles, getThumbCurl, getThumbDirection, getThumbOpposition, getThumbStraightness, getThumbVerticalDirection, getUIPresentationObject, getUrlParamBool, getUrlParamFloat, getUrlParamInt, getUrlParameter, getVec4ByColorString, getXrCameraLeft, getXrCameraRight, init, initScript, input, intrinsicsToProjectionMatrix, isBVHReady, isDeviceCameraPoseAvailable, isLayerCapable, isSerializerRenderer, isWebGPURenderer, keyOutBackground, layerCapability, lerp, loadStereoImageAsTextures, loadingSpinnerManager, lookAtRotation, objectIsDescendantOf, parseBase64DataURL, parseSimulatorHandPoseRotations, placeObjectAtIntersectionFacingTarget, poseInFrontOfCamera, print, quaternionFacingCamera, resolveSerializerRenderer, resolveSimulatorHandPoseRotations, resolveSimulatorRotationsFromKeypoints, scene, showOnlyInLeftEye, showOnlyInRightEye, sound, timer, transformRgbUvToWorld, traverseUtil, ui, urlParams, user, visualizeDepth, visualizeDepthMap, world, xrDepthMeshOptions, xrDepthMeshPhysicsOptions, xrDepthMeshVisualizationOptions, xrDeviceCameraEnvironmentContinuousOptions, xrDeviceCameraEnvironmentOptions, xrDeviceCameraUserContinuousOptions, xrDeviceCameraUserOptions };
 
 //# sourceMappingURL=xrblocks.js.map

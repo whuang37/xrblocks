@@ -14,9 +14,9 @@
 * limitations under the License.
 *
 * @file xrblocks.js
-* @version v0.21.1
-* @commitid 999bf37
-* @builddate 2026-09-30T22:18:33.059Z
+* @version v0.23.0
+* @commitid 5cd7aed
+* @builddate 2026-10-19T19:45:15.070Z
 * @description XR Blocks SDK, built from source with the above commit ID.
 * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
 * and follow rules below:
@@ -40,37 +40,5 @@ physical world space, also add locomotion methods like pinch to teleport.
 or generate from primitive shapes of use vox formats for voxels or
 lego-styles.
 */
-import { n as WebGLDirectCompositor } from "./Simulator.js";
-import { texture, uv } from "three/tsl";
-import { NodeMaterial, QuadMesh } from "three/webgpu";
-//#region src/simulator/internal/compositing/WebGPUDirectCompositor.ts
-/**
-* Creates a fullscreen QuadMesh with a NodeMaterial configured to sample a
-* video texture right-side-up in both WebGPU and WebGL2 fallback modes.
-*/
-function createWebGPUBackgroundVideoQuad(videoTexture) {
-	const material = new NodeMaterial();
-	material.fragmentNode = texture(videoTexture, uv().flipY());
-	material.depthTest = false;
-	material.depthWrite = false;
-	material.lights = false;
-	return new QuadMesh(material);
-}
-/**
-* Compositor that renders the simulator scene directly to the canvas
-* followed by the main scene without an intermediate offscreen render target,
-* configured specifically for WebGPURenderer.
-*/
-var WebGPUDirectCompositor = class extends WebGLDirectCompositor {
-	createBackgroundVideoQuad(videoTexture) {
-		return createWebGPUBackgroundVideoQuad(videoTexture);
-	}
-	clearBeforeSimulatorScene() {
-		if (this.backgroundVideoQuad) this.deps.renderer.clearDepth();
-		else this.deps.renderer.clear();
-	}
-};
-//#endregion
-export { WebGPUDirectCompositor, createWebGPUBackgroundVideoQuad };
-
-//# sourceMappingURL=WebGPUDirectCompositor.js.map
+import { t as WebGPUDirectCompositor } from "./WebGPUDirectCompositor2.js";
+export { WebGPUDirectCompositor };

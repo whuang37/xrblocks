@@ -14,9 +14,9 @@
 * limitations under the License.
 *
 * @file xrblocks.js
-* @version v0.21.1
-* @commitid 999bf37
-* @builddate 2026-09-30T22:18:33.059Z
+* @version v0.23.0
+* @commitid 5cd7aed
+* @builddate 2026-10-19T19:45:15.070Z
 * @description XR Blocks SDK, built from source with the above commit ID.
 * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
 * and follow rules below:
@@ -40,79 +40,80 @@ physical world space, also add locomotion methods like pinch to teleport.
 or generate from primitive shapes of use vox formats for voxels or
 lego-styles.
 */
-import { t as __exportAll } from "./rolldown-runtime.js";
 import { A as DEFAULT_GRADIENT_PANEL_PROPS, D as isUIElement, E as getUIStructureRevision, S as getUIElementKind, T as getUIRevision, f as normalizeManipulationConfig, h as getSemanticControl, j as TransformScript, k as registerUIPresentationObject, m as ManipulationAction, o as setResolvedUICardSize, r as getUICardEdgeOptions, s as setUICardContentMeasurer, t as UICard, w as getUIPresentationObject } from "./UICard.js";
-import { a as UIOverlay, c as updateScrollViewLayout, i as UIText, n as bindTextInput, o as UIScrollView, r as normalizeTextInputValue, s as bindScrollView, t as UITextInput } from "./UITextInput.js";
+import { a as UIOverlay, c as UIScrollView, i as UIText, l as bindScrollView, n as bindTextInput, o as PANEL_BACKFACE_MARKER, r as normalizeTextInputValue, t as UITextInput, u as updateScrollViewLayout } from "./UITextInput.js";
+import { i as ensureWebGPUUIMaterials, n as createCardEdgeMaterial, r as createUnifiedPanelMaterial } from "./PanelMaterialFactory.js";
+import { a as resolveLineHeight, i as graphemes, n as fontShorthand, o as resolveRasterScale, s as DEFAULT_TEXT_LINE_HEIGHT, t as cssColor } from "./CanvasTextStyle.js";
 import * as THREE from "three";
-import { Component, Container, Custom, Image, Svg, Text, abortableEffect, reversePainterSortStable } from "@pmndrs/uikit";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { Component, Container, Content, Custom, Image, Text, abortableEffect, reversePainterSortStable } from "@pmndrs/uikit";
 import { computed, effect, signal } from "@preact/signals-core";
-//#region src/ui/internal/UIContentDefaults.ts
-/** Line-height fallback as a multiple of the current font size. */
-const DEFAULT_TEXT_LINE_HEIGHT = 1.2;
-//#endregion
-//#region src/ui/internal/CanvasTextStyle.ts
+import { SVGLoader } from "three/addons/loaders/SVGLoader.js";
+//#region src/ui/utils/ColorUtils.ts
 /**
-* Font stack shared by every canvas-rendered UI text.
+* Parses a THREE.ColorRepresentation into a THREE.Color and an opacity value.
+* Supports:
+* - Hex strings (#RRGGBB, #RRGGBBAA, #RGB, #RGBA).
+* - rgb() and rgba() CSS strings.
+* - CSS Color Names ('white', 'red', 'aliceblue') natively via THREE.Color.
+* @param value - The color representation to parse.
+* @returns An object containing the parsed THREE.Color and opacity float (0 to 1).
+*/
+function parseColorWithAlpha(value) {
+	const result = {
+		color: new THREE.Color(16777215),
+		opacity: 1
+	};
+	if (value === void 0) return result;
+	if (typeof value === "string") {
+		if (value.trim().toLowerCase() === "transparent") {
+			result.color.set(0);
+			result.opacity = 0;
+			return result;
+		}
+		const rgbaMatch = value.match(/rgba?\s*\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*(?:,\s*([\d.]+))?\s*\)/);
+		if (rgbaMatch) {
+			result.color.setRGB(parseFloat(rgbaMatch[1]) / 255, parseFloat(rgbaMatch[2]) / 255, parseFloat(rgbaMatch[3]) / 255, THREE.SRGBColorSpace);
+			if (rgbaMatch[4] !== void 0) result.opacity = parseFloat(rgbaMatch[4]);
+			return result;
+		}
+		if (value.startsWith("#") && (value.length === 9 || value.length === 5)) {
+			const hex = value.slice(1);
+			const isShort = hex.length === 4;
+			const maxVal = isShort ? 15 : 255;
+			const colorHex = "#" + hex.slice(0, hex.length - (isShort ? 1 : 2));
+			const alphaHex = hex.slice(hex.length - (isShort ? 1 : 2));
+			result.color.set(colorHex);
+			result.opacity = parseInt(alphaHex, 16) / maxVal;
+			return result;
+		}
+	}
+	result.color.set(value);
+	return result;
+}
+const ALPHA_HEX_REGEX = /^#(?:[\da-f]{4}|[\da-f]{8})$/iu;
+/**
+* Normalizes CSS hex colors that carry an alpha nibble/byte (`#RGBA`, `#RRGGBBAA`)
+* into linear RGBA tuples for UIKit. UIKit's `writeColor` treats CSS `rgba()`
+* channels as already-linear, so passing sRGB channel values makes translucent
+* colors appear too light. Values that are not alpha-hex strings pass through
+* unchanged. Keep alpha-hex strings intact for `GradientPanel`, which parses
+* CSS colors itself and performs the sRGB-to-linear conversion.
 *
-* It resolves to the host operating system's UI face, so the platform's own
-* fallback chain covers every script the device can display instead of a single
-* bundled typeface that would draw missing-glyph boxes.
+* @param value - The color value to normalize.
+* @returns A linear RGBA tuple for alpha-hex strings, or the original value.
 */
-const SYSTEM_FONT_STACK = "system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif";
-const NORMAL_FONT_WEIGHT = 400;
-const MEDIUM_FONT_WEIGHT = 500;
-const BOLD_FONT_WEIGHT = 700;
-/** Largest canvas edge we allocate, which every WebGL 2 device supports. */
-const MAX_CANVAS_DIMENSION = 4096;
-/**
-* Samples per device pixel. Text is magnified by the headset optics, so one
-* device pixel per layout pixel leaves visible stair-stepping on glyph edges.
-*/
-const CANVAS_SUPERSAMPLING = 2;
-const graphemeSegmenter$1 = new Intl.Segmenter(void 0, { granularity: "grapheme" });
-/** Maps the CSS-like weight keywords onto numeric CSS font weights. */
-function resolveFontWeight(value) {
-	if (typeof value === "number") return value;
-	if (value === "bold") return BOLD_FONT_WEIGHT;
-	if (value === "medium") return MEDIUM_FONT_WEIGHT;
-	return NORMAL_FONT_WEIGHT;
-}
-/** Builds a CSS `font` shorthand for a canvas context or a DOM mirror. */
-function fontShorthand(fontSize, weight) {
-	return `${resolveFontWeight(weight)} ${fontSize}px ${SYSTEM_FONT_STACK}`;
-}
-/** Converts a Three.js color representation into a CSS color string. */
-function cssColor(color) {
-	if (typeof color === "string") return color;
-	return `#${new THREE.Color(color).getHexString()}`;
-}
-/**
-* Resolves a CSS-like line height into layout units. Bare numbers are a
-* multiple of the font size, matching CSS.
-*/
-function resolveLineHeight(value, fontSize) {
-	if (typeof value === "number") return value * fontSize;
-	if (typeof value === "string" && value.endsWith("px")) return Number.parseFloat(value);
-	if (typeof value === "string" && value.endsWith("%")) return Number.parseFloat(value) / 100 * fontSize;
-	return fontSize * DEFAULT_TEXT_LINE_HEIGHT;
-}
-/** Splits text into user-perceived characters, never inside a grapheme. */
-function graphemes(text) {
-	return Array.from(graphemeSegmenter$1.segment(text), ({ segment }) => segment);
-}
-/** Splits text into graphemes carrying their UTF-16 start index. */
-function graphemeSegments(text) {
-	return Array.from(graphemeSegmenter$1.segment(text), ({ segment, index }) => ({
-		segment,
-		index
-	}));
-}
-/**
-* Supersampling factor for a canvas covering `width` by `height` layout units,
-* capped so the backing texture stays within {@link MAX_CANVAS_DIMENSION}.
-*/
-function resolveRasterScale(width, height) {
-	return Math.max(Number.EPSILON, Math.min((globalThis.devicePixelRatio || 1) * CANVAS_SUPERSAMPLING, MAX_CANVAS_DIMENSION / width, MAX_CANVAS_DIMENSION / height));
+function normalizeAlphaHexColor(value) {
+	if (typeof value !== "string") return value;
+	const trimmed = value.trim();
+	if (!ALPHA_HEX_REGEX.test(trimmed)) return value;
+	const { color, opacity } = parseColorWithAlpha(trimmed);
+	return [
+		color.r,
+		color.g,
+		color.b,
+		opacity
+	];
 }
 //#endregion
 //#region src/ui/primitives/ShaderPanel.ts
@@ -166,268 +167,6 @@ var ShaderPanel = class extends Container {
 	}
 };
 //#endregion
-//#region src/ui/shaders/CommonFunctions.glsl.ts
-const CommonFunctionsShader = `
-#include <clipping_planes_pars_fragment>
-
-float panelClipAlpha() {
-    vec4 diffuseColor = vec4(1.0);
-    #include <clipping_planes_fragment>
-    return diffuseColor.a;
-}
-
-// SDF for a rounded box in 2D.
-float sdRoundedBox(vec2 p, vec2 b, float r) {
-    vec2 d = abs(p) - (b - r);
-    return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - r;
-}
-`;
-//#endregion
-//#region src/ui/shaders/GradientFunctions.glsl.ts
-const GradientFunctionsShader = `
-float rand(vec2 n) {
-	return fract(sin(dot(n, vec2(12.9898, 4.1414))) * 43758.5453);
-}
-
-#include <dithering_pars_fragment>
-#define MAX_GRADIENT_STOPS 4
-#define PI 3.14159265359
-
-// Paint Types.
-#define PAINT_TYPE_SOLID 0
-#define PAINT_TYPE_GRADIENT 1
-
-// Gradient Types.
-#define GRADIENT_TYPE_LINEAR 0
-#define GRADIENT_TYPE_RADIAL 1
-#define GRADIENT_TYPE_ANGULAR 2
-#define GRADIENT_TYPE_DIAMOND 3
-
-// Interpolate color stops across a 1D scalar index range [0..1].
-// Shared by both fill meshes and radius/distance edge blended vectors (like Shadows).
-vec4 mixGradientStops(
-    float t,
-    int numStops,
-    float stops[MAX_GRADIENT_STOPS],
-    vec4 colors[MAX_GRADIENT_STOPS]
-) {
-    if (numStops < 1) return vec4(0.0);
-    if (numStops < 2) return colors[0];
-
-    float finalT = clamp(t, 0.0, 1.0);
-    vec4 color = colors[0];
-
-    for (int i = 0; i < MAX_GRADIENT_STOPS - 1; i++) {
-        if (i >= numStops - 1) break;
-
-        float t0 = stops[i];
-        float t1 = stops[i+1];
-
-        if (finalT >= t0 && finalT <= t1) {
-            float range = t1 - t0;
-            float localT = (finalT - t0) / max(0.0001, range);
-            color = mix(colors[i], colors[i+1], localT);
-            break;
-        }
-    }
-
-    // Boundary checks.
-    if (finalT < stops[0]) color = colors[0];
-    if (finalT > stops[numStops-1]) color = colors[numStops-1];
-
-    return color;
-}
-
-vec4 getGradientColor(
-    vec2 uv,
-    vec2 resolution,
-    int type,
-    vec2 center,
-    vec2 scale,
-    float rotation,
-    int numStops,
-    float stops[MAX_GRADIENT_STOPS],
-    vec4 colors[MAX_GRADIENT_STOPS]
-) {
-    if (numStops < 1) return vec4(0.0);
-    if (numStops < 2) return colors[0];
-
-    // 1. Transform UV.
-    // Center logic: user provided center (default 0.5, 0.5).
-    // We shift UV so that center is at (0,0).
-    vec2 p = uv - center;
-
-    // Rotation.
-    float c = cos(-rotation);
-    float s = sin(-rotation);
-    mat2 rot = mat2(c, -s, s, c);
-    p = rot * p;
-
-    // Scale.
-    // Expand feature = Divide coord.
-    vec2 safeScale = vec2(
-        abs(scale.x) < 0.001 ? 0.001 : scale.x,
-        abs(scale.y) < 0.001 ? 0.001 : scale.y
-    );
-    p = p / safeScale;
-
-    // 2. Calculate t (0 to 1 position in gradient).
-    float t = 0.0;
-
-    if (type == GRADIENT_TYPE_LINEAR) {
-        // Defined along X axis (after rotation).
-        // Maps x range [-0.5, 0.5] to [0.0, 1.0].
-        t = p.x + 0.5;
-    }
-    else if (type == GRADIENT_TYPE_RADIAL) {
-        // Distance from center.
-        // t=0 at center. t=1 at radius 0.5.
-        t = length(p) * 2.0;
-    }
-    else if (type == GRADIENT_TYPE_ANGULAR) {
-        // Conic gradient.
-        // atan(y, x). range -PI to PI.
-        // Standard math angle (0 = Right, CCW).
-        float angle = atan(-p.y, p.x);
-        // Map to 0..1.
-        t = (angle / (2.0 * PI)) + 0.5;
-    }
-    else if (type == GRADIENT_TYPE_DIAMOND) {
-        // |x| + |y| (Manhattan distance).
-        // Edge at 0.5 => |0.5| + |0| = 0.5.
-        // t = (abs x + abs y) * 2.
-        t = (abs(p.x) + abs(p.y)) * 2.0;
-    }
-
-    // Clamp t.
-    t = clamp(t, 0.0, 1.0);
-
-    return mixGradientStops(t, numStops, stops, colors);
-}
-`;
-//#endregion
-//#region src/ui/shaders/GradientDropShadow.frag.ts
-const GradientDropShadowFragmentShader = CommonFunctionsShader + GradientFunctionsShader + `
-varying vec2 vUv;
-
-uniform vec2 u_resolution;
-uniform float u_opacity;
-uniform float u_corner_radius;
-uniform float u_drop_shadow_margin;
-
-// Stroke Info
-uniform float u_stroke_width;
-uniform float u_stroke_align; // -1 Inside, 0 Center, 1 Outside
-
-// Drop Shadow Gradient
-uniform int u_drop_gradientType;
-uniform int u_drop_paintType;
-uniform vec4 u_drop_solidColor;
-uniform float u_drop_rotation;
-uniform vec2 u_drop_center;
-uniform vec2 u_drop_scale;
-uniform float u_drop_gradientStops[MAX_GRADIENT_STOPS];
-uniform vec4 u_drop_gradientColors[MAX_GRADIENT_STOPS];
-uniform int u_drop_numStops;
-
-uniform float u_drop_blur;
-uniform vec2 u_drop_position;
-uniform float u_drop_spread;
-uniform float u_drop_falloff;
-
-void main() {
-    float clippingAlpha = panelClipAlpha();
-    // 1. Setup Coordinates.
-    vec2 pos = vUv * u_resolution;
-    vec2 size = u_resolution;
-
-    // Calculate effective stroke expansion.
-    // align 1 (outside) -> +W.
-    // align 0 (center)  -> +W/2.
-    // align -1 (inside) -> +0.
-    float strokeShift = 0.0;
-    if (u_stroke_align > 0.0) strokeShift = u_stroke_width; // Outside.
-    else if (u_stroke_align > -0.5) strokeShift = u_stroke_width * 0.5; // Center.
-
-    // Content box is usually size - 2*margin.
-    // u_drop_shadow_margin is used to push the mesh bounds out.
-    vec2 baseSize = size - (u_drop_shadow_margin * 2.0);
-    vec2 baseHalfSize = baseSize * 0.5;
-
-    // Now we add stroke expansion to get "Shadow Caster" size.
-    vec2 casterHalfSize = baseHalfSize + vec2(strokeShift);
-
-    // Effective Radius also expands by strokeShift.
-    float effR = min(u_corner_radius, min(baseHalfSize.x, baseHalfSize.y)) + strokeShift;
-
-    // Center coordinates.
-    vec2 p = pos - (size * 0.5);
-
-    // 2. Cutout Mask.
-    // Drop shadow is drawn behind, but we cutout the caster area.
-    float dist = sdRoundedBox(p, casterHalfSize, effR);
-
-    // Adaptive AA for the cutout mask.
-    float aa = fwidth(dist);
-    float alphaMask = smoothstep(-0.5 * aa, 0.5 * aa, dist); // 0 inside caster, 1 outside.
-
-    // 3. Drop Shadow Calculation.
-    // Apply position.
-    vec2 shadowPos = p - u_drop_position;
-
-    // SDF.
-    float shadowDist = sdRoundedBox(shadowPos, casterHalfSize, effR);
-
-    // Apply Spread (expands the shadow shape).
-    shadowDist -= u_drop_spread;
-
-    // Blur.
-    float blur = max(1.0, u_drop_blur);
-    float shadowAlpha = 1.0 - smoothstep(0.0, blur, shadowDist);
-
-    // Falloff power.
-    shadowAlpha = pow(shadowAlpha, u_drop_falloff);
-
-    // 4. Calculate Color.
-    vec4 finalColor = vec4(0.0);
-
-    if (u_drop_paintType == PAINT_TYPE_SOLID) {
-        finalColor = u_drop_solidColor;
-    } else if (u_drop_paintType == PAINT_TYPE_GRADIENT) {
-        if (u_drop_gradientType == GRADIENT_TYPE_RADIAL) {
-            float d = sdRoundedBox(p - u_drop_position, casterHalfSize, effR);
-            float t = clamp(d / max(0.001, u_drop_blur), 0.0, 1.0);
-
-            finalColor = mixGradientStops(
-                t,
-                u_drop_numStops,
-                u_drop_gradientStops,
-                u_drop_gradientColors
-             );
-        } else {
-            finalColor = getGradientColor(
-                vUv, u_resolution,
-                u_drop_gradientType,
-                u_drop_center,
-                u_drop_scale,
-                u_drop_rotation,
-                u_drop_numStops,
-                u_drop_gradientStops,
-                u_drop_gradientColors
-            );
-        }
-    }
-
-    // Apply opacity.
-    float finalAlpha = finalColor.a * shadowAlpha * alphaMask * u_opacity;
-
-    gl_FragColor = vec4(finalColor.rgb, finalAlpha);
-
-    gl_FragColor.a *= clippingAlpha;
-    #include <dithering_fragment>
-}
-`;
-//#endregion
 //#region src/ui/types/ShaderTypes.ts
 /**
 * Numeric IDs mapped to `GradientType` for shader uniforms lookup.
@@ -445,49 +184,6 @@ const PaintTypeIds = {
 	Solid: 0,
 	Gradient: 1
 };
-//#endregion
-//#region src/ui/utils/ColorUtils.ts
-/**
-* Parses a THREE.ColorRepresentation into a THREE.Color and an opacity value.
-* Supports:
-* - Hex strings (#RRGGBB, #RRGGBBAA, #RGB, #RGBA).
-* - rgb() and rgba() CSS strings.
-* - CSS Color Names ('white', 'red', 'aliceblue') natively via THREE.Color.
-* @param value - The color representation to parse.
-* @returns An object containing the parsed THREE.Color and opacity float (0 to 1).
-*/
-function parseColorWithAlpha(value) {
-	const result = {
-		color: new THREE.Color(16777215),
-		opacity: 1
-	};
-	if (value === void 0) return result;
-	if (typeof value === "string") {
-		if (value.trim().toLowerCase() === "transparent") {
-			result.color.set(0);
-			result.opacity = 0;
-			return result;
-		}
-		const rgbaMatch = value.match(/rgba?\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+))?\s*\)/);
-		if (rgbaMatch) {
-			result.color.setRGB(parseInt(rgbaMatch[1]) / 255, parseInt(rgbaMatch[2]) / 255, parseInt(rgbaMatch[3]) / 255);
-			if (rgbaMatch[4] !== void 0) result.opacity = parseFloat(rgbaMatch[4]);
-			return result;
-		}
-		if (value.startsWith("#") && (value.length === 9 || value.length === 5)) {
-			const hex = value.slice(1);
-			const isShort = hex.length === 4;
-			const maxVal = isShort ? 15 : 255;
-			const colorHex = "#" + hex.slice(0, hex.length - (isShort ? 1 : 2));
-			const alphaHex = hex.slice(hex.length - (isShort ? 1 : 2));
-			result.color.set(colorHex);
-			result.opacity = parseInt(alphaHex, 16) / maxVal;
-			return result;
-		}
-	}
-	result.color.set(value);
-	return result;
-}
 //#endregion
 //#region src/ui/utils/ShaderUtils.ts
 /**
@@ -667,56 +363,7 @@ function updateStrokeUniforms(uniforms, properties) {
 	}
 }
 //#endregion
-//#region src/ui/shaders/Panel.vert.ts
-const PanelVertexShader = `
-#include <clipping_planes_pars_vertex>
-varying vec2 vUv;
-void main() {
-    vUv = uv;
-    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-    gl_Position = projectionMatrix * mvPosition;
-    #include <clipping_planes_vertex>
-}
-`;
-//#endregion
 //#region src/ui/primitives/layers/PanelLayer.ts
-/**
-* Base ShaderMaterial for Panels.
-*
-* Provides default uniforms safe for general use:
-* - `u_time`: 0.0 (safe default for animated shaders)
-* - `u_resolution`: 1x1 (updated automatically by PanelLayer)
-* - `u_opacity`: 1.0 (updated automatically from the UI opacity property)
-*
-* Subclasses should extend this and add their own specific uniforms.
-*/
-var PanelShaderMaterial = class extends THREE.ShaderMaterial {
-	constructor(parameters) {
-		super({
-			vertexShader: PanelVertexShader,
-			fragmentShader: `
-        #include <clipping_planes_pars_fragment>
-        void main() {
-          vec4 diffuseColor = vec4(1.0, 0.0, 1.0, 1.0);
-          #include <clipping_planes_fragment>
-          gl_FragColor = diffuseColor;
-        }
-      `,
-			clipping: true,
-			transparent: true,
-			side: THREE.FrontSide,
-			forceSinglePass: true,
-			dithering: true,
-			...parameters,
-			uniforms: {
-				u_time: { value: 0 },
-				u_resolution: { value: new THREE.Vector2(1, 1) },
-				u_opacity: { value: 1 },
-				...parameters?.uniforms
-			}
-		});
-	}
-};
 /**
 * A Custom component that wraps a PanelShaderMaterial.
 *
@@ -768,25 +415,38 @@ var PanelLayer = class extends Custom {
 	}
 };
 //#endregion
-//#region src/ui/primitives/layers/DropShadowLayer.ts
-var DropShadowLayer = class extends PanelLayer {
+//#region src/ui/primitives/layers/UnifiedPanelLayer.ts
+var UnifiedPanelLayer = class extends PanelLayer {
 	constructor(inputProperties, initialClasses = void 0, config = {}) {
-		const material = new PanelShaderMaterial({
-			fragmentShader: GradientDropShadowFragmentShader,
+		const material = createUnifiedPanelMaterial({
+			side: config.side ?? THREE.FrontSide,
 			uniforms: {
+				u_has_fill: { value: 0 },
+				...createPaintUniforms("u_fill_"),
+				u_has_drop_shadow: { value: 0 },
 				...createPaintUniforms("u_drop_"),
 				...createShadowUniforms("u_drop_"),
-				u_corner_radius: { value: 0 },
+				u_has_inner_shadow: { value: 0 },
+				...createPaintUniforms("u_inner_"),
+				...createShadowUniforms("u_inner_"),
+				u_has_stroke: { value: 0 },
+				...createPaintUniforms("u_stroke_"),
 				u_stroke_width: { value: 0 },
 				u_stroke_align: { value: 0 },
+				u_corner_radius: { value: 0 },
 				u_drop_shadow_margin: { value: 0 }
 			}
 		});
 		super(material, inputProperties, initialClasses, config);
-		this.name = "DropShadowLayer";
+		this.name = "UnifiedPanelLayer";
 		abortableEffect(() => {
 			const signalProps = this.properties.signal;
+			const fillColor = signalProps.fillColor?.value;
+			const hasFill = isPaintVisible(fillColor);
+			updatePaintUniforms(this.material.uniforms, fillColor, "u_fill_");
+			this.material.uniforms.u_has_fill.value = hasFill ? 1 : 0;
 			const dropShadowColor = signalProps.dropShadowColor?.value;
+			const hasDropShadow = isPaintVisible(dropShadowColor);
 			updatePaintUniforms(this.material.uniforms, dropShadowColor, "u_drop_");
 			updateShadowUniforms(this.material.uniforms, {
 				blur: signalProps.dropShadowBlur?.value,
@@ -794,291 +454,9 @@ var DropShadowLayer = class extends PanelLayer {
 				spread: signalProps.dropShadowSpread?.value,
 				falloff: signalProps.dropShadowFalloff?.value
 			}, "u_drop_");
-			updateStrokeUniforms(this.material.uniforms, {
-				strokeWidth: signalProps.strokeWidth?.value,
-				strokeAlign: signalProps.strokeAlign?.value
-			});
-			this.material.visible = isPaintVisible(dropShadowColor);
-		}, this.abortSignal);
-	}
-};
-//#endregion
-//#region src/ui/shaders/GradientFill.frag.ts
-const GradientFillFragmentShader = CommonFunctionsShader + GradientFunctionsShader + `
-varying vec2 vUv;
-
-uniform vec2 u_resolution;
-uniform float u_opacity;
-uniform float u_corner_radius;
-uniform float u_drop_shadow_margin;
-
-// Fill Gradient (formerly Base)
-uniform int u_fill_gradientType;
-uniform int u_fill_paintType;
-uniform vec4 u_fill_solidColor;
-uniform float u_fill_rotation;
-uniform vec2 u_fill_center;
-uniform vec2 u_fill_scale;
-uniform float u_fill_gradientStops[MAX_GRADIENT_STOPS];
-uniform vec4 u_fill_gradientColors[MAX_GRADIENT_STOPS];
-uniform int u_fill_numStops;
-
-void main() {
-    float clippingAlpha = panelClipAlpha();
-    // 1. Setup Coordinates.
-    vec2 pos = vUv * u_resolution;
-    vec2 size = u_resolution;
-
-    // Content box is the "solid" area.
-    vec2 contentSize = size - (u_drop_shadow_margin * 2.0);
-    vec2 contentHalfSize = contentSize * 0.5;
-
-    // Center coordinates.
-    vec2 p = pos - (size * 0.5);
-
-    // 2. Base Shape SDF.
-    // Clamp radius to prevent artifacts.
-    float effR = min(u_corner_radius, min(contentHalfSize.x, contentHalfSize.y));
-    float dist = sdRoundedBox(p, contentHalfSize, effR);
-
-    // 3. Clip Mask (Improved AA - Adaptive).
-    // Use fwidth to determine proper AA range (1 pixel wide).
-    float aa = fwidth(dist);
-    // Smoothstep from -0.5*aa to 0.5*aa creates a perfect 1-pixel anti-aliased edge.
-    float alphaMask = 1.0 - smoothstep(-0.5 * aa, 0.5 * aa, dist);
-
-    if (alphaMask < 0.001) discard;
-
-    // 4. Calculate Color.
-    vec4 finalColor = vec4(0.0);
-
-    if (u_fill_paintType == PAINT_TYPE_SOLID) {
-        finalColor = u_fill_solidColor;
-    } else if (u_fill_paintType == PAINT_TYPE_GRADIENT) {
-        finalColor = getGradientColor(
-            vUv, u_resolution,
-            u_fill_gradientType,
-            u_fill_center,
-            u_fill_scale,
-            u_fill_rotation,
-            u_fill_numStops,
-            u_fill_gradientStops,
-            u_fill_gradientColors
-        );
-    }
-
-    // Apply Opacity.
-    finalColor.a *= alphaMask * u_opacity;
-
-    gl_FragColor = finalColor;
-    gl_FragColor.a *= clippingAlpha;
-
-    #include <dithering_fragment>
-}
-`;
-//#endregion
-//#region src/ui/primitives/layers/FillLayer.ts
-/**
-* Layer responsible for rendering the background fill color or gradient.
-* Uses GradientFillFragmentShader.
-*/
-var FillLayer = class extends PanelLayer {
-	constructor(inputProperties, initialClasses = void 0, config = {}) {
-		const material = new PanelShaderMaterial({
-			fragmentShader: GradientFillFragmentShader,
-			uniforms: {
-				...createPaintUniforms("u_fill_"),
-				u_corner_radius: { value: 0 },
-				u_stroke_width: { value: 0 },
-				u_drop_shadow_margin: { value: 0 }
-			}
-		});
-		super(material, inputProperties, initialClasses, config);
-		this.name = "FillLayer";
-		abortableEffect(() => {
-			const fillColor = this.properties.signal.fillColor?.value;
-			updatePaintUniforms(this.material.uniforms, fillColor, "u_fill_");
-			this.material.visible = isPaintVisible(fillColor);
-		}, this.abortSignal);
-	}
-};
-//#endregion
-//#region src/ui/shaders/GradientInnerShadow.frag.ts
-const GradientInnerShadowFragmentShader = CommonFunctionsShader + GradientFunctionsShader + `
-varying vec2 vUv;
-
-uniform vec2 u_resolution;
-uniform float u_opacity;
-uniform float u_corner_radius;
-uniform float u_drop_shadow_margin;
-
-uniform float u_stroke_width;
-uniform float u_stroke_align;
-
-
-// Inner Shadow Gradient
-uniform int u_inner_gradientType;
-uniform int u_inner_paintType;
-uniform vec4 u_inner_solidColor;
-uniform float u_inner_rotation;
-uniform vec2 u_inner_center;
-uniform vec2 u_inner_scale;
-uniform float u_inner_gradientStops[MAX_GRADIENT_STOPS];
-uniform vec4 u_inner_gradientColors[MAX_GRADIENT_STOPS];
-uniform int u_inner_numStops;
-
-// Standard Inner Shadow Props
-uniform float u_inner_blur;
-uniform vec2 u_inner_position;
-uniform float u_inner_spread;
-uniform float u_inner_falloff;
-
-void main() {
-    float clippingAlpha = panelClipAlpha();
-    // 1. Setup Coordinates.
-    vec2 pos = vUv * u_resolution;
-    vec2 size = u_resolution;
-
-    // Content box is the "solid" area.
-    vec2 contentSize = size - (u_drop_shadow_margin * 2.0);
-    vec2 contentHalfSize = contentSize * 0.5;
-
-    // Adjust for Stroke Inset.
-    // Inside (-1) -> Inset by W.
-    // Center (0)  -> Inset by W/2.
-    // Outside (1) -> Inset by 0.
-    float strokeInset = 0.0;
-    if (u_stroke_align < 0.5) {
-        if (u_stroke_align < -0.5) strokeInset = u_stroke_width; // Inside.
-        else strokeInset = u_stroke_width * 0.5; // Center.
-    }
-
-    // Shrink color area by stroke inset so shadow starts at stroke edge.
-    vec2 shadowZoneHalfSize = max(vec2(0.0), contentHalfSize - vec2(strokeInset));
-
-    // Center coordinates.
-    vec2 p = pos - (size * 0.5);
-
-    // 2. Base Shape SDF.
-    // Clamp radius to prevent artifacts.
-    float effR = min(u_corner_radius, min(shadowZoneHalfSize.x, shadowZoneHalfSize.y));
-
-    effR = max(0.0, u_corner_radius - strokeInset);
-    // Clamp to size.
-    effR = min(effR, min(shadowZoneHalfSize.x, shadowZoneHalfSize.y));
-
-    float dist = sdRoundedBox(p, shadowZoneHalfSize, effR);
-
-    // 3. Clip Mask (Improved AA - Adaptive).
-    // Use fwidth to determine proper AA range (1 pixel wide).
-    float aa = fwidth(dist);
-    // Smoothstep from -0.5*aa to 0.5*aa creates a perfect 1-pixel anti-aliased edge.
-    float alphaMask = 1.0 - smoothstep(-0.5 * aa, 0.5 * aa, dist);
-
-    if (alphaMask < 0.001) discard;
-
-    // 4. Calculate Shadow Color.
-    vec4 finalColor = vec4(0.0);
-
-    if (u_inner_paintType == PAINT_TYPE_SOLID) {
-        finalColor = u_inner_solidColor;
-    } else if (u_inner_paintType == PAINT_TYPE_GRADIENT) {
-        if (u_inner_gradientType == GRADIENT_TYPE_RADIAL) {
-             // Distance-based Radial Gradient for Shadows.
-             float d = sdRoundedBox(p - u_inner_position, contentHalfSize, effR);
-             float t = clamp(-d / max(0.001, u_inner_blur), 0.0, 1.0);
-
-             finalColor = mixGradientStops(
-                t,
-                u_inner_numStops,
-                u_inner_gradientStops,
-                u_inner_gradientColors
-             );
-        } else {
-            finalColor = getGradientColor(
-                vUv, u_resolution,
-                u_inner_gradientType,
-                u_inner_center,
-                u_inner_scale,
-                u_inner_rotation,
-                u_inner_numStops,
-                u_inner_gradientStops,
-                u_inner_gradientColors
-            );
-        }
-    }
-
-    // 5. Inner Shadow Factor.
-    // "Outer Glow of Inner Box" Algorithm (Fixes medial axis artifacts).
-    // We create a smaller "source" box and blur outwards from it.
-
-    // Ensure blur is non-zero.
-    float blur = max(0.001, u_inner_blur);
-    float spread = u_inner_spread;
-
-    // The source box is shrunk by (spread + blur).
-    // This defines the "0%" shadow line (pure center color).
-    float totalInset = spread + blur;
-    vec2 bSmall = shadowZoneHalfSize - totalInset;
-    // Radius also shrinks, but clamped to 0.
-    float rSmall = max(0.0, effR - totalInset);
-
-    vec2 p_rel = p - u_inner_position;
-    // Distance from the small source box.
-    // Inside source (<0) = Center Color.
-    // Outside source (>0) = Transition to Shadow.
-    float dSmall = sdRoundedBox(p_rel, bSmall, rSmall);
-
-    // Calculate shadow intensity (0.0 to 1.0).
-    // 0.0 at source boundary, 1.0 at blur distance.
-    float shadowVal = smoothstep(0.0, blur, dSmall);
-
-    // innerEdgeFactor is the "inverse" (1.0 = Center/Hole, 0.0 = Shadow).
-    // Used in Section 6 to calculate final shadow strength.
-    float innerEdgeFactor = 1.0 - shadowVal;
-
-    // 6. Mixing (Composite Shadow).
-    // shadowStrength: 1 at edge -> 0 at depth.
-    float shadowStrength = 1.0 - innerEdgeFactor;
-
-    // Falloff (Power Curve).
-    // 1.0 = Linear.
-    // >1.0 = Fades faster (Power curve).
-    shadowStrength = pow(shadowStrength, max(0.001, u_inner_falloff));
-
-    // Calculate finally alpha.
-    float finalAlpha = finalColor.a * shadowStrength * alphaMask * u_opacity;
-
-    gl_FragColor = vec4(finalColor.rgb, finalAlpha);
-
-    gl_FragColor.a *= clippingAlpha;
-    #include <dithering_fragment>
-}
-`;
-//#endregion
-//#region src/ui/primitives/layers/InnerShadowLayer.ts
-/**
-* Layer responsible for rendering the panel's inner shadow.
-* Uses GradientInnerShadowFragmentShader.
-*/
-var InnerShadowLayer = class extends PanelLayer {
-	constructor(inputProperties, initialClasses = void 0, config = {}) {
-		const material = new PanelShaderMaterial({
-			fragmentShader: GradientInnerShadowFragmentShader,
-			uniforms: {
-				...createPaintUniforms("u_inner_"),
-				...createShadowUniforms("u_inner_"),
-				u_corner_radius: { value: 0 },
-				u_stroke_width: { value: 0 },
-				u_stroke_align: { value: 0 },
-				u_drop_shadow_margin: { value: 0 }
-			}
-		});
-		super(material, inputProperties, initialClasses, config);
-		this.name = "InnerShadowLayer";
-		abortableEffect(() => {
-			const signalProps = this.properties.signal;
+			this.material.uniforms.u_has_drop_shadow.value = hasDropShadow ? 1 : 0;
 			const innerShadowColor = signalProps.innerShadowColor?.value;
+			const hasInnerShadow = isPaintVisible(innerShadowColor);
 			updatePaintUniforms(this.material.uniforms, innerShadowColor, "u_inner_");
 			updateShadowUniforms(this.material.uniforms, {
 				blur: signalProps.innerShadowBlur?.value,
@@ -1086,129 +464,21 @@ var InnerShadowLayer = class extends PanelLayer {
 				spread: signalProps.innerShadowSpread?.value,
 				falloff: signalProps.innerShadowFalloff?.value
 			}, "u_inner_");
-			updateStrokeUniforms(this.material.uniforms, {
-				strokeWidth: signalProps.strokeWidth?.value,
-				strokeAlign: signalProps.strokeAlign?.value
-			});
-			this.material.visible = isPaintVisible(innerShadowColor);
-		}, this.abortSignal);
-	}
-};
-//#endregion
-//#region src/ui/shaders/GradientStroke.frag.ts
-const GradientStrokeFragmentShader = CommonFunctionsShader + GradientFunctionsShader + `
-// Uniforms.
-uniform int u_stroke_gradientType;
-uniform int u_stroke_paintType;
-uniform vec4 u_stroke_solidColor;
-uniform float u_stroke_rotation;
-uniform vec2 u_stroke_center;
-uniform vec2 u_stroke_scale;
-uniform float u_stroke_gradientStops[MAX_GRADIENT_STOPS];
-uniform vec4 u_stroke_gradientColors[MAX_GRADIENT_STOPS];
-uniform int u_stroke_numStops;
-
-uniform float u_stroke_width;
-uniform float u_stroke_align; // Offset from edge (0=center, >0 outside, <0 inside).
-uniform vec2 u_resolution;
-uniform float u_opacity;
-uniform float u_corner_radius;
-uniform float u_drop_shadow_margin;
-
-varying vec2 vUv;
-
-void main() {
-    float clippingAlpha = panelClipAlpha();
-    // 1. Setup Coordinates.
-    vec2 pos = vUv * u_resolution;
-    vec2 size = u_resolution;
-
-    if (u_stroke_width < 0.001) discard;
-
-    // Content box is the "solid" area.
-    vec2 contentSize = size - (u_drop_shadow_margin * 2.0);
-    vec2 contentHalfSize = contentSize * 0.5;
-
-    // Center coordinates.
-    vec2 p = pos - (size * 0.5);
-
-    // 2. Stroke SDF.
-    // We want a stroke of width W around the rounded box.
-    // The rounded box has radius R.
-    // The stroke can be aligned.
-
-    // Base distance to the rounded rect.
-    float effR = min(u_corner_radius, min(contentHalfSize.x, contentHalfSize.y));
-    float d = sdRoundedBox(p, contentHalfSize, effR);
-
-    // Adjust d based on alignment.
-    float shift = u_stroke_align * (u_stroke_width * 0.5);
-    float dStroke = d - shift;
-
-    // The stroke itself is the area where abs(dStroke) <= W/2.
-    float halfWidth = u_stroke_width * 0.5;
-    float strokeDist = abs(dStroke) - halfWidth;
-
-    // 3. Anti-aliasing.
-    float aa = fwidth(d);
-    float alphaMask = 1.0 - smoothstep(-0.5 * aa, 0.5 * aa, strokeDist);
-
-    if (alphaMask < 0.001) discard;
-
-    // 4. Calculate Color.
-    vec4 finalColor = vec4(0.0);
-
-    if (u_stroke_paintType == PAINT_TYPE_SOLID) {
-        finalColor = u_stroke_solidColor;
-    } else if (u_stroke_paintType == PAINT_TYPE_GRADIENT) {
-         finalColor = getGradientColor(
-            vUv, u_resolution,
-            u_stroke_gradientType,
-            u_stroke_center,
-            u_stroke_scale,
-            u_stroke_rotation,
-            u_stroke_numStops,
-            u_stroke_gradientStops,
-            u_stroke_gradientColors
-        );
-    }
-
-    gl_FragColor = vec4(finalColor.rgb, finalColor.a * alphaMask * u_opacity);
-
-    gl_FragColor.a *= clippingAlpha;
-    #include <dithering_fragment>
-}
-`;
-//#endregion
-//#region src/ui/primitives/layers/StrokeLayer.ts
-/**
-* Layer responsible for rendering the panel's stroke or border.
-* Uses GradientStrokeFragmentShader.
-*/
-var StrokeLayer = class extends PanelLayer {
-	constructor(inputProperties, initialClasses = void 0, config = {}) {
-		const material = new PanelShaderMaterial({
-			fragmentShader: GradientStrokeFragmentShader,
-			uniforms: {
-				...createPaintUniforms("u_stroke_"),
-				u_stroke_align: { value: 0 },
-				u_corner_radius: { value: 0 },
-				u_stroke_width: { value: 0 },
-				u_drop_shadow_margin: { value: 0 }
-			}
-		});
-		super(material, inputProperties, initialClasses, config);
-		this.name = "StrokeLayer";
-		abortableEffect(() => {
-			const signalProps = this.properties.signal;
+			this.material.uniforms.u_has_inner_shadow.value = hasInnerShadow ? 1 : 0;
 			const strokeColor = signalProps.strokeColor?.value;
-			const strokeWidth = signalProps.strokeWidth?.value;
+			const strokeWidth = signalProps.strokeWidth?.value ?? 0;
+			const hasStroke = isPaintVisible(strokeColor) && strokeWidth > 0;
 			updatePaintUniforms(this.material.uniforms, strokeColor, "u_stroke_");
 			updateStrokeUniforms(this.material.uniforms, {
 				strokeWidth,
 				strokeAlign: signalProps.strokeAlign?.value
 			});
-			this.material.visible = isPaintVisible(strokeColor) && (strokeWidth ?? 0) > 0;
+			this.material.uniforms.u_has_stroke.value = hasStroke ? 1 : 0;
+			const cornerRadius = signalProps.cornerRadius?.value ?? 0;
+			this.material.uniforms.u_corner_radius.value = cornerRadius;
+			const dropShadowMargin = signalProps.dropShadowMargin?.value ?? 0;
+			this.material.uniforms.u_drop_shadow_margin.value = dropShadowMargin;
+			this.material.visible = hasFill || hasDropShadow || hasInnerShadow || hasStroke;
 		}, this.abortSignal);
 	}
 };
@@ -1220,8 +490,9 @@ var StrokeLayer = class extends PanelLayer {
 */
 var GradientPanel = class extends ShaderPanel {
 	constructor(properties = {}) {
-		const cornerRadiusSignal = signal(properties.cornerRadius ?? DEFAULT_GRADIENT_PANEL_PROPS.cornerRadius);
-		const fillColorSignal = signal(properties.fillColor ?? DEFAULT_GRADIENT_PANEL_PROPS.fillColor);
+		const rawProps = properties;
+		const cornerRadiusSignal = signal(rawProps.borderRadius !== void 0 ? rawProps.borderRadius : properties.cornerRadius ?? DEFAULT_GRADIENT_PANEL_PROPS.cornerRadius);
+		const fillColorSignal = signal(rawProps.backgroundColor !== void 0 ? rawProps.backgroundColor : properties.fillColor ?? DEFAULT_GRADIENT_PANEL_PROPS.fillColor);
 		const backfaceColorSignal = properties.backfaceColor === void 0 ? void 0 : signal(properties.backfaceColor);
 		const innerShadowColorSignal = signal(properties.innerShadowColor ?? DEFAULT_GRADIENT_PANEL_PROPS.innerShadowColor);
 		const innerShadowBlurSignal = signal(properties.innerShadowBlur ?? DEFAULT_GRADIENT_PANEL_PROPS.innerShadowBlur);
@@ -1244,8 +515,8 @@ var GradientPanel = class extends ShaderPanel {
 			}
 			return blur + extra + spread;
 		});
-		const strokeColorSignal = signal(properties.strokeColor ?? DEFAULT_GRADIENT_PANEL_PROPS.strokeColor);
-		const strokeWidthSignal = signal(properties.strokeWidth ?? DEFAULT_GRADIENT_PANEL_PROPS.strokeWidth);
+		const strokeColorSignal = signal(rawProps.borderColor !== void 0 ? rawProps.borderColor : properties.strokeColor ?? DEFAULT_GRADIENT_PANEL_PROPS.strokeColor);
+		const strokeWidthSignal = signal(rawProps.borderWidth !== void 0 ? rawProps.borderWidth : properties.strokeWidth ?? DEFAULT_GRADIENT_PANEL_PROPS.strokeWidth);
 		const strokeAlignSignal = signal(properties.strokeAlign ?? DEFAULT_GRADIENT_PANEL_PROPS.strokeAlign);
 		const expansionMarginSignal = computed(() => {
 			const s = shadowExpansion.value;
@@ -1261,50 +532,38 @@ var GradientPanel = class extends ShaderPanel {
 			overflow: "visible"
 		});
 		this.name = "GradientPanel";
-		this.dropShadowLayer = new DropShadowLayer({
+		this.unifiedLayer = new UnifiedPanelLayer({
+			fillColor: fillColorSignal,
 			dropShadowColor: dropShadowColorSignal,
 			dropShadowBlur: dropShadowBlurSignal,
 			dropShadowPosition: dropShadowPositionSignal,
 			dropShadowSpread: dropShadowSpreadSignal,
 			dropShadowFalloff: dropShadowFalloffSignal,
-			strokeWidth: strokeWidthSignal,
-			strokeAlign: strokeAlignSignal
-		});
-		this.fillLayer = new FillLayer({ fillColor: fillColorSignal });
-		if (backfaceColorSignal) {
-			this.backfaceLayer = new FillLayer({ fillColor: backfaceColorSignal });
-			this.backfaceLayer.name = "BackfaceLayer";
-			this.backfaceLayer.material.side = THREE.BackSide;
-		}
-		this.innerShadowLayer = new InnerShadowLayer({
 			innerShadowColor: innerShadowColorSignal,
 			innerShadowBlur: innerShadowBlurSignal,
 			innerShadowPosition: innerShadowPositionSignal,
 			innerShadowSpread: innerShadowSpreadSignal,
 			innerShadowFalloff: innerShadowFalloffSignal,
-			strokeWidth: strokeWidthSignal,
-			strokeAlign: strokeAlignSignal
-		});
-		this.strokeLayer = new StrokeLayer({
 			strokeColor: strokeColorSignal,
 			strokeWidth: strokeWidthSignal,
-			strokeAlign: strokeAlignSignal
+			strokeAlign: strokeAlignSignal,
+			cornerRadius: cornerRadiusSignal,
+			dropShadowMargin: expansionMarginSignal
 		});
-		if (this.backfaceLayer) {
-			this.backfaceStrokeLayer = new StrokeLayer({
+		if (backfaceColorSignal) {
+			this.backfaceLayer = new UnifiedPanelLayer({
+				fillColor: backfaceColorSignal,
 				strokeColor: strokeColorSignal,
 				strokeWidth: strokeWidthSignal,
-				strokeAlign: strokeAlignSignal
-			});
-			this.backfaceStrokeLayer.name = "BackfaceStrokeLayer";
-			this.backfaceStrokeLayer.material.side = THREE.BackSide;
+				strokeAlign: strokeAlignSignal,
+				cornerRadius: cornerRadiusSignal,
+				dropShadowMargin: expansionMarginSignal
+			}, void 0, { side: THREE.BackSide });
+			this.backfaceLayer.name = "BackfaceLayer";
+			this.backfaceLayer.userData[PANEL_BACKFACE_MARKER] = true;
+			this.addLayer(this.backfaceLayer);
 		}
-		if (this.backfaceLayer) this.addLayer(this.backfaceLayer);
-		if (this.backfaceStrokeLayer) this.addLayer(this.backfaceStrokeLayer);
-		this.addLayer(this.dropShadowLayer);
-		this.addLayer(this.fillLayer);
-		this.addLayer(this.innerShadowLayer);
-		this.addLayer(this.strokeLayer);
+		this.addLayer(this.unifiedLayer);
 		this.cornerRadiusSignal = cornerRadiusSignal;
 		this.fillColorSignal = fillColorSignal;
 		this.backfaceColorSignal = backfaceColorSignal;
@@ -1326,30 +585,14 @@ var GradientPanel = class extends ShaderPanel {
 			positionType: "absolute",
 			pointerEvents: "none"
 		};
-		this.fillLayer.setProperties({
+		this.unifiedLayer.setProperties({
 			...absProps,
-			zIndexOffset: -10,
+			transformTranslateZ: .001,
 			pointerEvents: properties.pointerEvents ?? "auto"
 		});
 		this.backfaceLayer?.setProperties({
 			...absProps,
-			zIndexOffset: -12
-		});
-		this.backfaceStrokeLayer?.setProperties({
-			...absProps,
-			zIndexOffset: -11
-		});
-		this.innerShadowLayer.setProperties({
-			...absProps,
-			zIndexOffset: -8
-		});
-		this.dropShadowLayer.setProperties({
-			...absProps,
-			zIndexOffset: -4
-		});
-		this.strokeLayer.setProperties({
-			...absProps,
-			zIndexOffset: -6
+			transformTranslateZ: -.001
 		});
 		const marginNeg = computed(() => -this.expansionMarginSignal.value);
 		abortableEffect(() => {
@@ -1360,20 +603,8 @@ var GradientPanel = class extends ShaderPanel {
 				positionRight: m,
 				positionBottom: m
 			};
-			this.fillLayer.setProperties(props);
-			this.innerShadowLayer.setProperties(props);
-			this.dropShadowLayer.setProperties(props);
-			this.strokeLayer.setProperties(props);
-		}, this.abortSignal);
-		abortableEffect(() => {
-			const r = this.cornerRadiusSignal.value;
-			const w = this.strokeWidthSignal.value;
-			const m = this.expansionMarginSignal.value;
-			for (const layer of this.panelLayers) {
-				if (layer.material.uniforms.u_corner_radius) layer.material.uniforms.u_corner_radius.value = r;
-				if (layer.material.uniforms.u_stroke_width) layer.material.uniforms.u_stroke_width.value = w;
-				if (layer.material.uniforms.u_drop_shadow_margin) layer.material.uniforms.u_drop_shadow_margin.value = m;
-			}
+			this.unifiedLayer.setProperties(props);
+			this.backfaceLayer?.setProperties(props);
 		}, this.abortSignal);
 		const nestingLevelSignal = computed(() => {
 			let count = 0;
@@ -1388,14 +619,10 @@ var GradientPanel = class extends ShaderPanel {
 		abortableEffect(() => {
 			const baseZ = nestingLevelSignal.value * .01;
 			if (this.backfaceLayer) this.backfaceLayer.position.z = baseZ - .001;
-			if (this.backfaceStrokeLayer) this.backfaceStrokeLayer.position.z = baseZ - .002;
-			this.dropShadowLayer.position.z = baseZ;
-			this.fillLayer.position.z = baseZ + .001;
-			this.innerShadowLayer.position.z = baseZ + .002;
-			this.strokeLayer.position.z = baseZ + .003;
+			this.unifiedLayer.position.z = baseZ + .0015;
 			const contentZ = baseZ + .004;
 			for (const child of this.children) {
-				if (child === this.dropShadowLayer || child === this.backfaceLayer || child === this.backfaceStrokeLayer || child === this.fillLayer || child === this.innerShadowLayer || child === this.strokeLayer) continue;
+				if (child === this.unifiedLayer || child === this.backfaceLayer) continue;
 				const childWithProps = child;
 				if (typeof childWithProps.setProperties === "function") childWithProps.setProperties({ transformTranslateZ: contentZ });
 				else child.position.z = contentZ;
@@ -1407,7 +634,7 @@ var GradientPanel = class extends ShaderPanel {
 		super.add(...objects);
 		const contentZ = (this.nestingLevelSignal?.value ?? 0) * .01 + .004;
 		for (const obj of objects) {
-			if (obj === this.dropShadowLayer || obj === this.backfaceLayer || obj === this.backfaceStrokeLayer || obj === this.fillLayer || obj === this.innerShadowLayer || obj === this.strokeLayer) continue;
+			if (obj === this.unifiedLayer || obj === this.backfaceLayer) continue;
 			const objWithProps = obj;
 			if (typeof objWithProps.setProperties === "function") objWithProps.setProperties({ transformTranslateZ: contentZ });
 			else obj.position.z = contentZ;
@@ -1485,7 +712,11 @@ var GradientPanel = class extends ShaderPanel {
 	* @param props - Object containing properties to update.
 	*/
 	setProperties(props) {
-		const { fillColor, backfaceColor, innerShadowColor, innerShadowBlur, innerShadowPosition, innerShadowSpread, innerShadowFalloff, dropShadowColor, dropShadowBlur, dropShadowPosition, dropShadowSpread, dropShadowFalloff, strokeColor, strokeWidth, strokeAlign, cornerRadius, ...superProps } = props;
+		const { fillColor: rawFillColor, backgroundColor, backfaceColor, innerShadowColor, innerShadowBlur, innerShadowPosition, innerShadowSpread, innerShadowFalloff, dropShadowColor, dropShadowBlur, dropShadowPosition, dropShadowSpread, dropShadowFalloff, strokeColor: rawStrokeColor, borderColor, strokeWidth: rawStrokeWidth, borderWidth, strokeAlign, cornerRadius: rawCornerRadius, borderRadius, ...superProps } = props;
+		const fillColor = backgroundColor !== void 0 ? backgroundColor : rawFillColor;
+		const strokeColor = borderColor !== void 0 ? borderColor : rawStrokeColor;
+		const strokeWidth = borderWidth !== void 0 ? borderWidth : rawStrokeWidth;
+		const cornerRadius = borderRadius !== void 0 ? borderRadius : rawCornerRadius;
 		super.setProperties(superProps);
 		if (fillColor !== void 0) this.setFillColor(fillColor);
 		if (backfaceColor !== void 0) this.setBackfaceColor(backfaceColor);
@@ -1506,213 +737,111 @@ var GradientPanel = class extends ShaderPanel {
 	}
 };
 //#endregion
-//#region src/ui/constants/UICardEdgeConstants.ts
+//#region src/ui/primitives/MergedSvg.ts
+const svgLoader = new SVGLoader();
 /**
-* Largest share of each side's half-length a resize corner may cover, so the
-* middle of every side stays available for moving the card.
+* Parses an SVG string into at most one mesh per fill color: all shapes
+* sharing a color are merged into a single geometry. uikit's `Svg` creates a
+* mesh per shape, which turns every multi-shape icon into several draw calls.
+*
+* The y-flip must stay a mesh scale exactly like uikit's `Svg` does — never
+* baked into the geometry. A negative matrixWorld determinant makes three
+* flip `frontFace` (WebGLState.setMaterial), which mixed-winding shapes from
+* evenodd fill rules need in order to cull like uikit's meshes do.
 */
-const MAX_RESIZE_CORNER_FRACTION = .5;
-//#endregion
-//#region src/ui/shaders/UICardEdge.frag.ts
-/** Formats a number as a GLSL float literal, which needs a decimal point. */
-const glslFloat = (value) => Number.isInteger(value) ? `${value}.0` : `${value}`;
-/** Fragment shader for the hover-lit manipulation edge around a UI card. */
-const UICardEdgeFragmentShader = CommonFunctionsShader + `
-#include <common>
-#include <dithering_pars_fragment>
-
-varying vec2 vUv;
-
-uniform vec2 u_resolution;
-uniform float u_opacity;
-uniform float u_card_corner_radius;
-uniform float u_edge_margin;
-uniform float u_edge_width;
-uniform vec4 u_cursor_spotlight_color;
-uniform float u_cursor_radius;
-uniform float u_cursor_spotlight_blur;
-uniform vec2 u_cursor_uv;
-uniform float u_show_glow;
-uniform vec2 u_cursor_uv_2;
-uniform float u_show_glow_2;
-uniform float u_debug;
-uniform float u_resizable;
-
-const float RESIZE_CORNER_SIDE_MARGINS = ${glslFloat(2)};
-const float MAX_RESIZE_CORNER_FRACTION = ${glslFloat(MAX_RESIZE_CORNER_FRACTION)};
-const float RESIZE_CORNER_EDGE_WIDTH_SCALE = ${glslFloat(2)};
-
-// Matches isOuterEdgeHit and isCornerHit in UICardEdge.ts.
-float cornerHighlight(
-    vec2 p,
-    vec2 cursorUv,
-    float showCursor,
-    vec2 size,
-    vec2 cornerStart,
-    vec2 innerHalfSize,
-    float innerRadius
-) {
-    if (showCursor < 0.5) return 0.0;
-    vec2 cursor = cursorUv * size - size * 0.5;
-    if (sdRoundedBox(cursor, innerHalfSize, innerRadius) < 0.0) return 0.0;
-    bool fragmentInCorner = all(greaterThanEqual(abs(p), cornerStart));
-    bool cursorInCorner = all(greaterThanEqual(abs(cursor), cornerStart));
-    bool sameCorner = all(equal(sign(p), sign(cursor)));
-    return fragmentInCorner && cursorInCorner && sameCorner ? 1.0 : 0.0;
+function parseMergedSvg(content) {
+	const result = svgLoader.parse(content);
+	const groups = /* @__PURE__ */ new Map();
+	for (const path of result.paths) {
+		const shapes = path.toShapes();
+		if (shapes.length === 0) continue;
+		const key = `${path.color.r} ${path.color.g} ${path.color.b}`;
+		const group = groups.get(key);
+		if (group) group.shapes.push(...shapes);
+		else groups.set(key, {
+			color: path.color.clone(),
+			shapes
+		});
+	}
+	const meshes = [];
+	for (const { color, shapes } of groups.values()) {
+		const geometries = shapes.map((shape) => new THREE.ShapeGeometry(shape));
+		const nonIndexed = geometries.map((geometry) => geometry.toNonIndexed());
+		const merged = mergeGeometries(nonIndexed, false);
+		for (const geometry of nonIndexed) geometry.dispose();
+		if (merged == null) {
+			for (const geometry of geometries) meshes.push(createIconMesh(geometry, color.clone()));
+			continue;
+		}
+		for (const geometry of geometries) geometry.dispose();
+		meshes.push(createIconMesh(merged, color));
+	}
+	return {
+		meshes,
+		boundingBox: computeSvgBoundingBox(result.xml)
+	};
 }
-
-void main() {
-    vec2 pixelRes = u_resolution;
-    vec2 pos = vUv * pixelRes;
-    vec2 size = pixelRes;
-    vec2 center = size * 0.5;
-    vec2 p = pos - center;
-    vec2 halfSize = size * 0.5;
-
-    float margin = max(0.0, u_edge_margin);
-    vec2 innerHalfSize = max(vec2(0.0), halfSize - margin);
-    float innerRadius = min(
-        max(0.0, u_card_corner_radius),
-        min(innerHalfSize.x, innerHalfSize.y)
-    );
-    float outerRadius = min(
-        innerRadius + margin,
-        min(halfSize.x, halfSize.y)
-    );
-    float distToEdge = sdRoundedBox(p, halfSize, outerRadius);
-
-    float aa = fwidth(distToEdge);
-    float alphaMask = 1.0 - smoothstep(-0.5 * aa, 0.5 * aa, distToEdge);
-
-    if (alphaMask < 0.001) discard;
-
-    vec4 debugColor = vec4(0.0);
-
-    float distToInner = sdRoundedBox(p, innerHalfSize, innerRadius);
-    float innerAA = fwidth(distToInner);
-    float edgeBandMask = smoothstep(
-        -0.5 * innerAA,
-        0.5 * innerAA,
-        distToInner
-    );
-
-    if (u_debug > 0.5) {
-        if (distToInner < 0.0) {
-            debugColor = vec4(0.0, 1.0, 0.0, 0.4);
-        } else if (distToEdge < 0.0) {
-            debugColor = vec4(1.0, 0.0, 0.0, 0.4);
-        }
-        debugColor.a *= alphaMask;
-    }
-
-    vec4 accumColor = vec4(0.0);
-    float glowAlpha = 0.0;
-
-    if (u_show_glow > 0.5) {
-        vec2 cursorPos = u_cursor_uv * size;
-        float distToCursor = distance(pos, cursorPos);
-        float sigma = max(10.0, u_cursor_radius + u_cursor_spotlight_blur);
-        float d2 = distToCursor * distToCursor;
-        glowAlpha = max(glowAlpha, exp(-0.5 * d2 / (sigma * sigma)));
-    }
-
-    if (u_show_glow_2 > 0.5) {
-        vec2 cursorPos2 = u_cursor_uv_2 * size;
-        float distToCursor2 = distance(pos, cursorPos2);
-        float sigma = max(10.0, u_cursor_radius + u_cursor_spotlight_blur);
-        float d2 = distToCursor2 * distToCursor2;
-        glowAlpha = max(glowAlpha, exp(-0.5 * d2 / (sigma * sigma)));
-    }
-
-    glowAlpha *= edgeBandMask;
-
-    float corner = 0.0;
-    if (u_resizable > 0.5) {
-        vec2 cornerExtent = min(
-            vec2(innerRadius + RESIZE_CORNER_SIDE_MARGINS * margin),
-            halfSize * MAX_RESIZE_CORNER_FRACTION
-        );
-        vec2 cornerStart = halfSize - cornerExtent;
-        corner = max(
-            cornerHighlight(
-                p, u_cursor_uv, u_show_glow, size, cornerStart,
-                innerHalfSize, innerRadius
-            ),
-            cornerHighlight(
-                p, u_cursor_uv_2, u_show_glow_2, size, cornerStart,
-                innerHalfSize, innerRadius
-            )
-        );
-    }
-
-    if (glowAlpha > 0.001 || corner > 0.0) {
-        vec4 glow = u_cursor_spotlight_color;
-        glow.a *= glowAlpha;
-
-        if (glow.a > 0.0) {
-            float dstA = accumColor.a;
-            float srcA = glow.a;
-            float outA = srcA + dstA * (1.0 - srcA);
-            vec3 outRGB = vec3(0.0);
-
-            if (outA > 0.001) {
-                outRGB =
-                    (glow.rgb * srcA + accumColor.rgb * dstA * (1.0 - srcA)) /
-                    outA;
-            }
-
-            accumColor = vec4(outRGB, outA);
-        }
-
-        // Hovering a resize corner lights its whole arc with a thicker stroke.
-        float width =
-            u_edge_width * mix(1.0, RESIZE_CORNER_EDGE_WIDTH_SCALE, corner);
-        float edgeMask = smoothstep(
-            -width - aa,
-            -width,
-            distToEdge
-        );
-        float edgeOpacity = max(glowAlpha, corner);
-
-        vec4 edgeResult = vec4(0.0);
-        if (edgeMask > 0.0 && edgeOpacity > 0.0) {
-            vec4 edgeColor = u_cursor_spotlight_color;
-            edgeColor.a *= edgeOpacity;
-            edgeColor.a *= edgeMask;
-            edgeResult = edgeColor;
-        }
-
-        if (edgeResult.a > 0.0) {
-            float dstA = accumColor.a;
-            float srcA = edgeResult.a;
-            float outA = srcA + dstA * (1.0 - srcA);
-            vec3 outRGB = vec3(0.0);
-
-            if (outA > 0.001) {
-                outRGB =
-                    (edgeResult.rgb * srcA +
-                        accumColor.rgb * dstA * (1.0 - srcA)) /
-                    outA;
-            }
-
-            accumColor = vec4(outRGB, outA);
-        }
-    }
-
-    accumColor.a *= alphaMask;
-
-    if (u_debug > 0.5) {
-        accumColor = mix(accumColor, debugColor, debugColor.a);
-        accumColor.a = max(accumColor.a, debugColor.a);
-    }
-
-    accumColor.a *= u_opacity;
-
-    gl_FragColor = accumColor;
-
-    #include <dithering_fragment>
+function createIconMesh(geometry, color) {
+	const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
+		color,
+		toneMapped: false
+	}));
+	mesh.matrixAutoUpdate = false;
+	mesh.scale.y = -1;
+	mesh.updateMatrix();
+	return mesh;
 }
-`;
+function computeSvgBoundingBox(xml) {
+	const viewBoxNumbers = xml.getAttribute("viewBox")?.split(/\s+/u).map((value) => Number.parseFloat(value)).filter((value) => !isNaN(value));
+	if (viewBoxNumbers?.length !== 4) return void 0;
+	const [minX, minY, width, height] = viewBoxNumbers;
+	return {
+		center: new THREE.Vector3(width / 2 + minX, -height / 2 - minY, 0),
+		size: new THREE.Vector3(width, height, 1e-5)
+	};
+}
+function disposeMergedSvg(result) {
+	for (const mesh of result.meshes) {
+		mesh.geometry.dispose();
+		mesh.material.dispose();
+	}
+}
+var MergedSvg = class MergedSvg extends Content {
+	constructor(inputProperties, initialClasses, inputConfig) {
+		const boundingBox = signal(void 0);
+		super(inputProperties, initialClasses, {
+			...inputConfig,
+			remeasureOnChildrenChange: false,
+			depthWriteDefault: false,
+			supportFillProperty: true,
+			boundingBox
+		});
+		this.inputConfig = inputConfig;
+		const contentSignal = computed(() => this.properties.value.content);
+		abortableEffect(() => {
+			const content = contentSignal.value;
+			if (typeof content !== "string" || content.length === 0) {
+				boundingBox.value = void 0;
+				this.notifyAncestorsChanged();
+				return;
+			}
+			const result = parseMergedSvg(content);
+			boundingBox.value = result.boundingBox;
+			if (result.meshes.length > 0) super.add(...result.meshes);
+			this.notifyAncestorsChanged();
+			return () => {
+				if (result.meshes.length > 0) super.remove(...result.meshes);
+				disposeMergedSvg(result);
+				this.notifyAncestorsChanged();
+			};
+		}, this.abortSignal);
+	}
+	clone(recursive) {
+		const cloned = new MergedSvg(this.inputProperties, this.initialClasses, this.inputConfig);
+		this.copyInto(cloned, recursive);
+		return cloned;
+	}
+};
 //#endregion
 //#region src/ui/internal/UICardEdge.ts
 const DEFAULT_EDGE_PROPERTIES = {
@@ -1727,12 +856,12 @@ const DEFAULT_EDGE_PROPERTIES = {
 };
 var UICardEdgeLayer = class extends PanelLayer {
 	constructor(inputProperties, initialClasses, config = {}) {
-		super(new PanelShaderMaterial({
-			fragmentShader: UICardEdgeFragmentShader,
+		super(createCardEdgeMaterial({
 			depthWrite: false,
 			side: THREE.DoubleSide,
 			uniforms: createUniforms()
 		}), inputProperties, initialClasses, config);
+		this.visible = false;
 		abortableEffect(() => {
 			const signals = this.properties.signal;
 			setNumber(this.material, "u_edge_margin", signals.u_edge_margin?.value);
@@ -1759,6 +888,7 @@ var UICardEdgeLayer = class extends PanelLayer {
 			setVector2(this.material, index === 0 ? "u_cursor_uv" : "u_cursor_uv_2", uv);
 		}
 		if (visible) visible.value = uv ? 1 : 0;
+		this.visible = Boolean(signals.u_show_glow?.value || signals.u_show_glow_2?.value);
 	}
 };
 /** Private shader-backed card edge. */
@@ -1968,7 +1098,7 @@ var EmojiText = class extends Container {
 			text: segment.text,
 			fontSize,
 			lineHeight: properties.lineHeight,
-			color: properties.color,
+			color: normalizeAlphaHexColor(properties.color),
 			fontWeight: properties.fontWeight,
 			whiteSpace: "pre",
 			marginRight: segment.trailingSpaceWidth,
@@ -1987,7 +1117,7 @@ function emojiContainerProperties(properties) {
 		flexWrap: properties.whiteSpace === "nowrap" ? "no-wrap" : "wrap",
 		alignItems: "center",
 		justifyContent: properties.textAlign === "center" ? "center" : properties.textAlign === "right" ? "flex-end" : "flex-start",
-		color: properties.color,
+		color: normalizeAlphaHexColor(properties.color),
 		fontSize: properties.fontSize,
 		fontWeight: properties.fontWeight,
 		lineHeight: properties.lineHeight,
@@ -2249,6 +1379,7 @@ function containerProperties(properties) {
 function nativeTextProperties(properties) {
 	return {
 		...glyphProperties(properties),
+		color: normalizeAlphaHexColor(properties.color),
 		...nativeTextWrapping(properties.whiteSpace)
 	};
 }
@@ -3066,7 +2197,7 @@ function lineHeightRatio(value, fontSize) {
 }
 //#endregion
 //#region src/ui/internal/UIKitBackend.ts
-var UIKitBackend_exports = /* @__PURE__ */ __exportAll({ createUIBackend: () => createUIBackend });
+await ensureWebGPUUIMaterials();
 const ICON_BASE = "https://cdn.jsdelivr.net/gh/marella/material-symbols@v0.33.0/svg/";
 const OVERLAY_RENDER_ORDER_BASE = 1e9;
 const OVERLAY_Z_INDEX_STEP = 1e8;
@@ -3245,7 +2376,8 @@ var UIKitMount = class {
 				if (overflowsAt(middle)) overflows = middle;
 				else fits = middle;
 			}
-			return fits;
+			const horizontalBorder = yoga.getComputedBorder(0) + yoga.getComputedBorder(2);
+			return Math.max(0, fits - horizontalBorder);
 		});
 		if (width === void 0) return void 0;
 		const measured = width * card.pixelSize;
@@ -3289,8 +2421,10 @@ var UIKitBackend = class {
 		this.restoreRenderer();
 		this.renderer = renderer;
 		this.releaseFocusGuard = TextInputEditor.guardCanvas(renderer.domElement);
-		this.previousLocalClippingEnabled = renderer.localClippingEnabled;
-		renderer.localClippingEnabled = true;
+		if ("localClippingEnabled" in renderer) {
+			this.previousLocalClippingEnabled = renderer.localClippingEnabled;
+			renderer.localClippingEnabled = true;
+		}
 		renderer.setTransparentSort(reversePainterSortStable);
 	}
 	createMount(root) {
@@ -3307,7 +2441,7 @@ var UIKitBackend = class {
 		this.releaseFocusGuard?.();
 		this.releaseFocusGuard = void 0;
 		if (!this.renderer) return;
-		this.renderer.localClippingEnabled = this.previousLocalClippingEnabled;
+		if ("localClippingEnabled" in this.renderer) this.renderer.localClippingEnabled = this.previousLocalClippingEnabled;
 		this.renderer = void 0;
 	}
 };
@@ -3366,8 +2500,9 @@ var UIKitNodeBinding = class UIKitNodeBinding {
 		const kind = getUIElementKind(element);
 		if (kind === "text") this.node = new AdaptiveText(properties);
 		else if (kind === "image") this.node = new Image(properties, void 0, { loadTexture: false });
-		else if (kind === "icon") this.node = new Svg(properties);
-		else this.node = new GradientPanel(properties);
+		else if (kind === "icon") this.node = new MergedSvg(properties);
+		else if (requiresGradientPanel(element, properties)) this.node = new GradientPanel(properties);
+		else this.node = new Container(toContainerProperties(properties));
 		if (element instanceof UIScrollView && this.node instanceof Container) this.scrollView = new ScrollViewPresentation(element, this.node);
 		if (element instanceof UITextInput && this.node instanceof Container) this.textInput = new TextFieldPresentation(element, this.node, this.notifyResource);
 		this.hitRegion = new UIHitRegion(this.node);
@@ -3551,8 +2686,8 @@ var UIKitNodeBinding = class UIKitNodeBinding {
 		const kind = getUIElementKind(this.element);
 		if (kind === "text") return {
 			text: this.element.text,
-			color: style.color ?? context.theme.colors.text,
 			...style,
+			color: style.color ?? context.theme.colors.text,
 			pointerEvents: this.element.xb?.pointerEvents ?? "auto"
 		};
 		if (kind === "image") {
@@ -3560,6 +2695,7 @@ var UIKitNodeBinding = class UIKitNodeBinding {
 			const cornerRadius = numericCornerRadius(rawCornerRadius);
 			return {
 				...imageStyle,
+				...imageStyle.color === void 0 ? {} : { color: normalizeAlphaHexColor(imageStyle.color) },
 				borderTopLeftRadius: cornerRadius,
 				borderTopRightRadius: cornerRadius,
 				borderBottomLeftRadius: cornerRadius,
@@ -3570,12 +2706,13 @@ var UIKitNodeBinding = class UIKitNodeBinding {
 		if (kind === "icon") return {
 			content: this.icons.get(iconAssetPath(this.element), this.notifyResource),
 			...style,
+			...style.color === void 0 ? {} : { color: normalizeAlphaHexColor(style.color) },
 			pointerEvents: this.element.xb?.pointerEvents ?? "auto"
 		};
 		if (kind === "scroll" || kind === "input") {
 			this.contentProperties = {
 				...resolvedStyle,
-				color: resolvedStyle.color ?? context.theme.colors.outline
+				color: normalizeAlphaHexColor(resolvedStyle.color) ?? normalizeAlphaHexColor(context.theme.colors.outline)
 			};
 			return panelDefaults(this.element, context.theme, {
 				...style,
@@ -3592,12 +2729,13 @@ var UIKitNodeBinding = class UIKitNodeBinding {
 		const changed = changedProperties(this.presentedProperties, properties);
 		if (Object.keys(changed).length === 0) return;
 		if (this.node instanceof AdaptiveText) this.node.updateTextProperties(properties);
+		else if (this.node instanceof Container && !(this.node instanceof GradientPanel)) this.node.setProperties(toContainerProperties(changed));
 		else this.node.setProperties(changed);
 		if (this.node instanceof Image) this.node.material.opacity = resolvedOpacity(properties.opacity);
 		if (this.renderOrder !== void 0) this.node.renderOrder = this.renderOrder;
 	}
 	ensurePrivateNodes(theme) {
-		if (!(this.node instanceof GradientPanel)) return;
+		if (!isContainerNode(this.node)) return;
 		const kind = getUIElementKind(this.element);
 		if (kind === "button") this.updateButtonContent(theme);
 		if (kind === "slider") {
@@ -3607,7 +2745,7 @@ var UIKitNodeBinding = class UIKitNodeBinding {
 	}
 	updateButtonContent(theme) {
 		const button = this.element;
-		const color = this.presentedProperties.color ?? (button.disabled ? theme.colors.disabledText : theme.colors.primaryText);
+		const color = normalizeAlphaHexColor(this.presentedProperties.color ?? (button.disabled ? theme.colors.disabledText : theme.colors.primaryText));
 		if (button.icon) {
 			const properties = {
 				content: this.icons.get(defaultIconAssetPath(button.icon), this.notifyResource),
@@ -3617,8 +2755,9 @@ var UIKitNodeBinding = class UIKitNodeBinding {
 				pointerEvents: "none"
 			};
 			if (!this.buttonIcon) {
-				this.buttonIcon = new Svg(properties);
-				this.node.add(this.buttonIcon);
+				const icon = new MergedSvg(properties);
+				this.buttonIcon = icon;
+				this.node.add(icon);
 			} else this.buttonIcon.setProperties(properties);
 		} else if (this.buttonIcon) {
 			this.buttonIcon.removeFromParent();
@@ -3643,7 +2782,7 @@ var UIKitNodeBinding = class UIKitNodeBinding {
 		}
 	}
 	syncEdge(properties) {
-		if (!(this.node instanceof GradientPanel)) return false;
+		if (!isContainerNode(this.node)) return false;
 		const options = getUIElementKind(this.element) === "card" ? getUICardEdgeOptions(this.element) : void 0;
 		if (!options && this.edge) {
 			this.edge.removeFromParent();
@@ -3667,11 +2806,18 @@ var UIKitNodeBinding = class UIKitNodeBinding {
 	syncImage() {
 		if (!(this.node instanceof Image)) return;
 		const source = this.element.src;
-		if (source === this.imageSource) return;
+		const sourceSize = textureSourceSize(source);
+		const fit = imageObjectFit(this.presentedProperties);
+		const sourceChanged = source !== this.imageSource;
+		const fitChanged = fit !== this.imageFit;
+		const sourceSizeChanged = sourceSize !== void 0 && (sourceSize[0] !== this.imageSourceSize?.[0] || sourceSize[1] !== this.imageSourceSize?.[1]);
+		if (!sourceChanged && !fitChanged && !sourceSizeChanged) return;
 		this.imageSource = source;
+		this.imageSourceSize = sourceSize;
+		this.imageFit = fit;
 		const request = ++this.imageRequest;
 		if (source instanceof THREE.Texture) {
-			this.replaceImageTexture(source, false);
+			this.replaceImageTexture(fitTexture(source, fit), fit !== "fill");
 			return;
 		}
 		imageTextureLoader.loadAsync(source).then((texture) => {
@@ -3696,7 +2842,10 @@ var UIKitNodeBinding = class UIKitNodeBinding {
 		const previousOwned = this.ownsImageTexture;
 		this.imageTexture = texture;
 		this.ownsImageTexture = ownsTexture;
-		this.node.texture.value = texture;
+		const node = this.node;
+		const material = node.material;
+		if (material && "colorNode" in material) material.colorNode = void 0;
+		node.texture.value = texture;
 		if (previousOwned && previous && previous !== texture) previous.dispose();
 	}
 	setHitEnabled(properties) {
@@ -3710,6 +2859,59 @@ var UIKitNodeBinding = class UIKitNodeBinding {
 		setPhysicalHitEnabled(this.node, enabled);
 	}
 };
+const shimmedSourceImages = /* @__PURE__ */ new WeakSet();
+function imageObjectFit(properties) {
+	const fit = properties.objectFit;
+	return fit === "contain" || fit === "cover" ? fit : "fill";
+}
+/** Intrinsic size of a texture's source image, or undefined while unknown. */
+function textureSourceSize(source) {
+	if (!(source instanceof THREE.Texture)) return void 0;
+	const image = source.image;
+	if (!image) return void 0;
+	const width = image.videoWidth ?? image.naturalWidth ?? image.width;
+	const height = image.videoHeight ?? image.naturalHeight ?? image.height;
+	return width !== void 0 && height !== void 0 && width > 0 && height > 0 ? [width, height] : void 0;
+}
+/**
+* uikit derives its object-fit crop ratio from `source.data.width/.height`,
+* which stay 0 for video elements without width/height content attributes
+* (only videoWidth/videoHeight carry the frame size) — a 0/0 ratio poisons the
+* crop matrix with NaN. Shadow the two getters with the intrinsic frame size so
+* the crop math sees the real ratio, without touching the element's layout.
+*/
+function normalizeSourceImageSize(image) {
+	if (shimmedSourceImages.has(image)) return;
+	shimmedSourceImages.add(image);
+	const source = image;
+	if (!(source.videoWidth > 0) || !(source.videoHeight > 0)) return;
+	try {
+		Object.defineProperty(image, "width", {
+			configurable: true,
+			get: () => source.videoWidth
+		});
+		Object.defineProperty(image, "height", {
+			configurable: true,
+			get: () => source.videoHeight
+		});
+	} catch {}
+}
+/**
+* uikit writes its object-fit crop into `texture.matrix`, but three.js
+* re-derives that matrix from offset/repeat on every material refresh while
+* `matrixAutoUpdate` is true, silently discarding the crop. Hand out a clone
+* (sharing the same image source) with the matrix frozen so the crop survives,
+* and so uikit's matrix writes never touch textures shared with the engine.
+*/
+function fitTexture(source, fit) {
+	if (fit === "fill") return source;
+	const image = source.image;
+	if (image && typeof image === "object") normalizeSourceImageSize(image);
+	const clone = source.clone();
+	clone.matrixAutoUpdate = false;
+	clone.matrix.identity();
+	return clone;
+}
 function isContainerNode(node) {
 	return node instanceof Container || node instanceof GradientPanel;
 }
@@ -3786,6 +2988,68 @@ function isTransparent(color) {
 	if (typeof color !== "string") return false;
 	const compact = color.replace(/\s/g, "").toLowerCase();
 	return /^#[0-9a-f]{3}0$/u.test(compact) || /^#[0-9a-f]{6}00$/u.test(compact) || /^(?:rgba|hsla)\([^)]*,0(?:\.0+)?\)$/u.test(compact);
+}
+function isGradientPaint(value) {
+	return typeof value === "object" && value !== null && "gradientType" in value;
+}
+function paintVisible(color, width) {
+	if (isGradientPaint(color)) return true;
+	if (isTransparent(color)) return false;
+	if (color === void 0) return false;
+	return typeof width !== "number" || width > 0;
+}
+/**
+* Every surface with any visible paint renders through `GradientPanel`'s unified
+* shader — the legacy, pixel-verified pipeline. Only fully invisible panels use
+* uikit's instanced `Container` (a single shared draw that contributes no
+* visible pixels), which keeps the draw-call reduction without changing output.
+*/
+function requiresGradientPanel(element, properties) {
+	if (element instanceof GradientPanel) return true;
+	if (paintVisible(properties.fillColor ?? properties.backgroundColor)) return true;
+	const stroke = properties.strokeColor ?? properties.borderColor;
+	const strokeWidth = properties.strokeWidth ?? properties.borderWidth;
+	if (paintVisible(stroke, typeof strokeWidth === "number" ? strokeWidth : 1)) return true;
+	if (typeof properties.innerShadowBlur === "number" && properties.innerShadowBlur > 0) return true;
+	if (typeof properties.innerShadowSpread === "number" && properties.innerShadowSpread > 0) return true;
+	if (typeof properties.dropShadowBlur === "number" && properties.dropShadowBlur > 0) return true;
+	if (typeof properties.dropShadowSpread === "number" && properties.dropShadowSpread > 0) return true;
+	if (isGradientPaint(properties.backfaceColor)) return true;
+	if (properties.strokeAlign && properties.strokeAlign !== "center") return true;
+	return false;
+}
+function toContainerProperties(properties) {
+	const result = { ...properties };
+	if (result.fillColor !== void 0) {
+		result.backgroundColor = result.fillColor;
+		delete result.fillColor;
+	}
+	if (result.strokeColor !== void 0) {
+		result.borderColor = result.strokeColor;
+		delete result.strokeColor;
+	}
+	if (result.strokeWidth !== void 0) {
+		result.borderWidth = result.strokeWidth;
+		delete result.strokeWidth;
+	}
+	if (result.cornerRadius !== void 0) {
+		result.borderRadius = result.cornerRadius;
+		delete result.cornerRadius;
+	}
+	delete result.innerShadowColor;
+	delete result.innerShadowBlur;
+	delete result.innerShadowPosition;
+	delete result.innerShadowSpread;
+	delete result.innerShadowFalloff;
+	delete result.dropShadowColor;
+	delete result.dropShadowBlur;
+	delete result.dropShadowPosition;
+	delete result.dropShadowSpread;
+	delete result.dropShadowFalloff;
+	delete result.backfaceColor;
+	delete result.strokeAlign;
+	for (const [key, value] of Object.entries(result)) result[key] = normalizeAlphaHexColor(value);
+	return result;
 }
 function panelDefaults(element, theme, style) {
 	const kind = getUIElementKind(element);
@@ -3939,47 +3203,47 @@ function createSliderContent(panel) {
 		height: thumbSize,
 		pointerEvents: "none"
 	});
-	const track = new GradientPanel({
+	const track = new Container({
 		positionType: "absolute",
 		positionLeft: 0,
 		positionRight: 0,
 		positionTop: "50%",
 		transformTranslateY: "-50%",
 		height: 10,
-		fillColor: "transparent",
-		cornerRadius: 5,
+		backgroundColor: "transparent",
+		borderRadius: 5,
 		pointerEvents: "none"
 	});
-	const fill = new GradientPanel({
+	const fill = new Container({
 		positionType: "absolute",
 		positionLeft: 0,
 		positionTop: "50%",
 		transformTranslateY: "-50%",
 		height: 10,
-		cornerRadius: 5,
+		borderRadius: 5,
 		pointerEvents: "none"
 	});
-	const thumb = new GradientPanel({
+	const thumb = new Container({
 		positionType: "absolute",
 		positionTop: "50%",
 		transformTranslateX: "-50%",
 		transformTranslateY: "-50%",
 		width: thumbSize,
 		height: thumbSize,
-		cornerRadius: thumbSize / 2,
+		borderRadius: thumbSize / 2,
 		pointerEvents: "none"
 	});
 	const update = (slider, theme) => {
 		const ratio = slider.max === slider.min ? 0 : (slider.value - slider.min) / (slider.max - slider.min);
-		const color = slider.disabled ? theme.colors.disabledText : theme.colors.primary;
-		track.setProperties({ fillColor: theme.colors.outline });
+		const color = normalizeAlphaHexColor(slider.disabled ? theme.colors.disabledText : theme.colors.primary);
+		track.setProperties({ backgroundColor: normalizeAlphaHexColor(theme.colors.sliderTrack ?? theme.colors.outline) });
 		fill.setProperties({
 			width: `${ratio * 100}%`,
-			fillColor: color
+			backgroundColor: color
 		});
 		thumb.setProperties({
 			positionLeft: `${ratio * 100}%`,
-			fillColor: color
+			backgroundColor: color
 		});
 	};
 	rail.add(track, fill, thumb);
@@ -4033,6 +3297,6 @@ function defaultIconAssetPath(icon) {
 	return `400/outlined/${encodeURIComponent(icon)}.svg`;
 }
 //#endregion
-export { resolveRasterScale as a, createUIBackend, graphemeSegments as i, cssColor as n, DEFAULT_TEXT_LINE_HEIGHT as o, fontShorthand as r, UIKitBackend_exports as t };
+export { createUIBackend };
 
 //# sourceMappingURL=UIKitBackend.js.map

@@ -14,9 +14,9 @@
 * limitations under the License.
 *
 * @file xrblocks.js
-* @version v0.21.1
-* @commitid 999bf37
-* @builddate 2026-09-30T22:18:33.059Z
+* @version v0.23.0
+* @commitid 5cd7aed
+* @builddate 2026-10-19T19:45:15.070Z
 * @description XR Blocks SDK, built from source with the above commit ID.
 * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
 * and follow rules below:
@@ -43,6 +43,7 @@ lego-styles.
 import { C as getUIPresentationBounds, D as isUIElement, F as Script, M as resumeTransformScripts, N as suspendTransformScripts, O as isUIPresentationObject, P as MeshScript, S as getUIElementKind, _ as isSemanticControlDisabled, a as measureUICardMinContentWidth, d as isManipulationActionEnabled, f as normalizeManipulationConfig, g as isSemanticControl, h as getSemanticControl, i as measureUICardContentHeight, l as cloneScaleOptions, m as ManipulationAction, n as getResolvedUICardSize, p as normalizeRotationAxis, u as isHandleAction, w as getUIPresentationObject } from "./UICard.js";
 import { a as HAND_JOINT_IDX_CONNECTION_MAP, n as DEFAULT_DEVICE_CAMERA_WIDTH, r as HAND_BONE_IDX_CONNECTION_MAP } from "./constants.js";
 import { h as deepMerge, l as SimulatorOptions, m as deepFreeze, p as HAND_JOINT_NAMES } from "./HandPoses.js";
+import { c as isWebGPURenderer, i as disposeObjectTree, l as isSerializerRenderer, o as RendererHolder, r as disposeObjectChildren, s as assertWebGLRenderer, t as disposeMaterial } from "./ThreeDisposal.js";
 import * as THREE from "three";
 import { FullScreenQuad, Pass } from "three/addons/postprocessing/Pass.js";
 import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";
@@ -76,14 +77,14 @@ function lerp(x, y, t) {
 function print(...args) {
 	console.log("*", ...args);
 }
-const urlParams = new URLSearchParams(window.location.search);
+const urlParams = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
 /**
 * Function to get the value of a URL parameter.
 * @param name - The name of the URL parameter.
 * @returns The value of the URL parameter or null if not found.
 */
 function getUrlParameter(name) {
-	return new URLSearchParams(window.location.search).get(name);
+	return new URLSearchParams(typeof window !== "undefined" ? window.location.search : "").get(name);
 }
 /**
 * Retrieves a boolean URL parameter. Returns true for 'true' or '1', false for
@@ -95,7 +96,7 @@ function getUrlParameter(name) {
 * @returns The boolean value of the URL parameter.
 */
 function getUrlParamBool(name, defaultBool = false) {
-	const inputString = new URLSearchParams(window.location.search).get(name)?.toLowerCase();
+	const inputString = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "").get(name)?.toLowerCase();
 	if (inputString === "true" || inputString === "1") return true;
 	if (inputString === "false" || inputString === "0") return false;
 	return defaultBool;
@@ -495,8 +496,6 @@ var BaseAIModel = class {
 };
 //#endregion
 //#region src/ai/Gemini.ts
-let createPartFromUri;
-let createUserContent;
 let GoogleGenAI;
 let EndSensitivity;
 let StartSensitivity;
@@ -506,8 +505,6 @@ async function loadGoogleGenAIModule() {
 	try {
 		const genAIModule = await import("@google/genai");
 		if (genAIModule && genAIModule.GoogleGenAI) {
-			createPartFromUri = genAIModule.createPartFromUri;
-			createUserContent = genAIModule.createUserContent;
 			GoogleGenAI = genAIModule.GoogleGenAI;
 			EndSensitivity = genAIModule.EndSensitivity;
 			StartSensitivity = genAIModule.StartSensitivity;
@@ -519,6 +516,64 @@ async function loadGoogleGenAIModule() {
 		console.error(errorMessage);
 		throw new Error(errorMessage);
 	}
+}
+/** Maps an input media type onto the Interactions tagged content blocks. */
+function interactionMediaType(mimeType) {
+	const prefix = mimeType.split("/")[0];
+	return prefix === "image" || prefix === "audio" || prefix === "video" ? prefix : "document";
+}
+/**
+* Converts the SDK's Part-based payloads into the tagged content blocks the
+* Interactions API accepts as `input`.
+*/
+function partToInteractionContent(part) {
+	if (part.text !== void 0) return {
+		type: "text",
+		text: part.text
+	};
+	const inline = part.inlineData;
+	if (inline?.data !== void 0) {
+		const mimeType = inline.mimeType ?? "application/octet-stream";
+		return {
+			type: interactionMediaType(mimeType),
+			mime_type: mimeType,
+			data: inline.data
+		};
+	}
+	const file = part.fileData;
+	if (file?.fileUri !== void 0) {
+		const mimeType = file.mimeType ?? "application/octet-stream";
+		return {
+			type: interactionMediaType(mimeType),
+			mime_type: mimeType,
+			uri: file.fileUri
+		};
+	}
+	console.warn("Unsupported Gemini query part dropped from the input:", part);
+	return null;
+}
+function buildInteractionInput(input) {
+	if (!("type" in input)) return input.prompt;
+	switch (input.type) {
+		case "text": return input.text;
+		case "base64": return [{
+			type: "image",
+			mime_type: input.mimeType ?? "image/png",
+			data: input.base64
+		}];
+		case "uri":
+		case "multiPart": {
+			const blocks = (input.type === "uri" ? [{ fileData: {
+				fileUri: input.uri,
+				mimeType: input.mimeType
+			} }, ...input.text ? [{ text: input.text }] : []] : input.parts ?? []).map(partToInteractionContent).filter((block) => block !== null);
+			return blocks.length > 0 ? blocks : null;
+		}
+		default: return null;
+	}
+}
+function findFunctionCallStep(interaction) {
+	for (const step of interaction.steps ?? []) if (step.type === "function_call") return step;
 }
 var Gemini = class extends BaseAIModel {
 	constructor(options) {
@@ -669,51 +724,21 @@ var Gemini = class extends BaseAIModel {
 			console.warn("Gemini not inited.");
 			return null;
 		}
-		const options = this.options;
-		const config = options.config || {};
-		if (!("type" in input)) return { text: (await this.ai.models.generateContent({
-			model: options.model,
-			contents: input.prompt,
-			config
-		})).text || null };
-		const model = this.ai.models;
-		const modelParams = {
+		const interactionInput = buildInteractionInput(input);
+		if (interactionInput === null) return { text: null };
+		const params = {
+			...this.options.config,
 			model: this.options.model,
-			contents: [],
-			config: this.options.config || {}
+			input: interactionInput,
+			store: false
 		};
-		let response = null;
-		switch (input.type) {
-			case "text":
-				modelParams.contents = input.text;
-				response = await model.generateContent(modelParams);
-				break;
-			case "base64":
-				if (!input.mimeType) input.mimeType = "image/png";
-				modelParams.contents = { inlineData: {
-					mimeType: input.mimeType,
-					data: input.base64
-				} };
-				response = await model.generateContent(modelParams);
-				break;
-			case "uri":
-				modelParams.contents = createUserContent([createPartFromUri(input.uri, input.mimeType), input.text]);
-				response = await model.generateContent(modelParams);
-				break;
-			case "multiPart":
-				modelParams.contents = [{
-					role: "user",
-					parts: input.parts
-				}];
-				response = await model.generateContent(modelParams);
-		}
-		if (!response) return { text: null };
-		const toolCall = response.functionCalls?.[0];
+		const interaction = await this.ai.interactions.create(params);
+		const toolCall = findFunctionCallStep(interaction);
 		if (toolCall && toolCall.name) return { toolCall: {
 			name: toolCall.name,
-			args: toolCall.args
+			args: toolCall.arguments
 		} };
-		return { text: response.text || null };
+		return { text: interaction.output_text || null };
 	}
 	async queryWithExponentialFalloff(input) {
 		const delays = [
@@ -743,23 +768,28 @@ var Gemini = class extends BaseAIModel {
 			if (typeof item === "string") {
 				if (item.startsWith("data:image/")) {
 					const [header, data] = item.split(",");
-					return { inlineData: {
-						mimeType: header.split(";")[0].split(":")[1],
+					const mimeType = header.split(";")[0].split(":")[1];
+					return partToInteractionContent({ inlineData: {
+						mimeType,
 						data
-					} };
-				} else return { text: item };
+					} });
+				}
+				return partToInteractionContent({ text: item });
 			}
-			return item;
-		});
+			return partToInteractionContent(item);
+		}).filter((block) => block !== null);
 		else contents = prompt;
-		const response = await this.ai.models.generateContent({
+		const params = {
 			model,
-			contents,
-			config: { systemInstruction }
-		});
-		if (response.candidates && response.candidates.length > 0) {
-			const firstCandidate = response.candidates[0];
-			for (const part of firstCandidate?.content?.parts || []) if (type === "image" && part.inlineData) return "data:image/png;base64," + part.inlineData.data;
+			input: contents,
+			system_instruction: systemInstruction,
+			response_format: [{ type: "image" }],
+			store: false
+		};
+		const interaction = await this.ai.interactions.create(params);
+		if (type === "image") for (const step of interaction.steps ?? []) {
+			if (step.type !== "model_output") continue;
+			for (const block of step.content ?? []) if (block.type === "image" && block.data) return "data:" + (block.mime_type || "image/png") + ";base64," + block.data;
 		}
 	}
 	async hasApiKey() {
@@ -1341,37 +1371,6 @@ async function cropImage(imageSource, boundingBox) {
 	drawOp(canvasResult.ctx, canvasResult);
 	return canvasResult.canvas.toDataURL("image/png");
 }
-//#endregion
-//#region src/core/RendererTypes.ts
-/**
-* Type guard to determine if a renderer instance is a THREE.WebGPURenderer.
-*
-* @param renderer - The renderer instance to test.
-* @returns True if the renderer is a WebGPURenderer, false otherwise.
-*/
-function isWebGPURenderer(renderer) {
-	return renderer != null && typeof renderer === "object" && "isWebGPURenderer" in renderer && renderer.isWebGPURenderer === true;
-}
-/**
-* Asserts that the provided renderer is a THREE.WebGLRenderer.
-*
-* @param renderer - The renderer instance to check.
-* @param consumerName - The name of the subsystem or feature requiring WebGLRenderer.
-* @throws Error if the renderer is a WebGPURenderer.
-*/
-function assertWebGLRenderer(renderer, consumerName) {
-	if (isWebGPURenderer(renderer)) throw new Error(`${consumerName} requires THREE.WebGLRenderer, but Core is configured with WebGPURenderer.`);
-}
-/**
-* Dependency injection holder for the active Three.js renderer (`WebGLRenderer`
-* or `WebGPURenderer`), allowing scripts to request the renderer via `Registry`
-* in O(1) time without statically importing `three/webgpu`.
-*/
-var RendererHolder = class {
-	constructor(renderer) {
-		this.renderer = renderer;
-	}
-};
 //#endregion
 //#region src/video/VideoStream.ts
 /**
@@ -2155,11 +2154,15 @@ var DepthOptions = class {
 			applyGaussianBlur: false,
 			applyKawaseBlur: false
 		};
-		this.occlusion = { enabled: false };
+		this.occlusion = {
+			enabled: false,
+			resolutionScale: .5
+		};
 		this.usagePreference = [];
 		this.dataFormatPreference = ["float32", "luminance-alpha"];
 		this.depthTypeRequest = ["raw"];
 		this.matchDepthView = false;
+		this.updateAllViews = false;
 		deepMerge(this, options);
 	}
 };
@@ -4053,7 +4056,11 @@ const FORM_FACTORS = [
 	"desktop",
 	"mobile"
 ];
-const RENDERER_BACKENDS = ["webgl", "webgpu"];
+const RENDERER_BACKENDS = [
+	"webgl",
+	"webgpu",
+	"serializer"
+];
 /**
 * A central configuration class for the entire XR Blocks system. It aggregates
 * all settings and provides chainable methods for enabling common features.
@@ -4084,6 +4091,8 @@ var Options = class {
 		this.debugging = false;
 		this.stencil = false;
 		this.rendererBackend = "webgl";
+		this.simulateAdditiveDisplay = false;
+		this.simulatedDimming = 0;
 		this.webxrRequiredFeatures = [];
 		this.webxrOptionalFeatures = [...OPTIONAL_REFERENCE_SPACES];
 		this.referenceSpaceType = "local-floor";
@@ -4154,6 +4163,24 @@ var Options = class {
 		return this;
 	}
 	/**
+	* Configures Core to use a SplitEngineSerializer renderer backend instead of
+	* THREE.WebGLRenderer.
+	* @param serializer - Optional SplitEngineSerializer instance or factory function.
+	*/
+	enableSerializer(serializer) {
+		this.rendererBackend = "serializer";
+		if (serializer !== void 0) this.serializer = serializer;
+		return this;
+	}
+	/**
+	* Alias for `enableSerializer` that configures Core to use a
+	* SplitEngineSerializer renderer backend.
+	* @param serializer - Optional SplitEngineSerializer instance or factory function.
+	*/
+	useSerializer(serializer) {
+		return this.enableSerializer(serializer);
+	}
+	/**
 	* Sets the session mode to VR and disables the simulator passthrough scene.
 	*/
 	enableVR() {
@@ -4178,6 +4205,7 @@ var Options = class {
 		if (hideSimulatorUi) {
 			this.simulator.simulatorSettingsPanel.enabled = false;
 			this.simulator.instructions.enabled = false;
+			this.simulator.instructions.overlayEnabled = false;
 			this.simulator.handPosePanel.enabled = false;
 		}
 		return this;
@@ -4397,6 +4425,16 @@ var Options = class {
 	*/
 	setAppDescription(description) {
 		this.xrButton.appDescription = description;
+		return this;
+	}
+	/**
+	* Sets the WebXR framebuffer scale factor (a numeric multiplier or `'native'`
+	* to use `XRWebGLLayer.getNativeFramebufferScaleFactor(session)`).
+	* @param scaleFactor - Numeric scale factor or `'native'`.
+	* @returns The instance for chaining.
+	*/
+	setFramebufferScaleFactor(scaleFactor) {
+		this.framebufferScaleFactor = scaleFactor;
 		return this;
 	}
 };
@@ -6128,7 +6166,7 @@ var Interaction = class {
 			const snapshot = this.updateRay(input, deltaSeconds, deliberate);
 			if (snapshot) snapshots.push(snapshot);
 		}
-		for (const [controller, factor] of this.scaleIntents) this.applyScaleIntent(controller, factor);
+		for (const [controller, factor] of this.scaleIntents) this.applyScaleIntent(controller, factor, "scale");
 		this.scaleIntents.clear();
 		for (const [controller, delta] of this.wheelIntents) this.applyWheelIntent(controller, delta);
 		this.wheelIntents.clear();
@@ -6263,6 +6301,7 @@ var Interaction = class {
 	isManipulating(object) {
 		return this.manipulation.isManipulating(object);
 	}
+	/** Explicit zoom also reaches a UI control's manipulable ancestor. */
 	queueScaleIntent(controller, factor) {
 		if (!Number.isFinite(factor) || factor <= 0) return false;
 		this.scaleIntents.set(controller, (this.scaleIntents.get(controller) ?? 1) * factor);
@@ -6289,17 +6328,27 @@ var Interaction = class {
 			});
 			if (moved) return;
 		}
-		if (!owned) this.applyScaleIntent(controller, Math.exp(-delta * WHEEL_SCALE_SPEED));
+		if (!owned) this.applyScaleIntent(controller, Math.exp(-delta * WHEEL_SCALE_SPEED), "wheel");
 	}
-	applyScaleIntent(controller, factor) {
+	applyScaleIntent(controller, factor, intent) {
 		const snapshot = this.sourceStates.get(controller);
 		const resolved = this.resolvedRays.get(controller);
 		if (!snapshot || !resolved?.target) return false;
-		const source = getInteractionSource(controller, "simulator");
+		let scalingTarget = resolved;
+		if (intent === "scale" && !resolved.manipulation && resolved.semanticControl) {
+			const barrier = resolved.objectPath.findIndex((object) => object.xb?.interactionEnabled === false);
+			const path = barrier < 0 ? resolved.objectPath : resolved.objectPath.slice(0, barrier);
+			scalingTarget = {
+				...resolved,
+				manipulation: this.manipulation.resolve(path)
+			};
+		}
 		const intentSnapshot = new InteractionSourceState(controller).copyFrom(snapshot);
-		intentSnapshot.source = source;
-		intentSnapshot.sourceType = "simulator";
-		return this.manipulation.applyScaleIntent(this.createSelection(controller, resolved), intentSnapshot, factor);
+		if (intent === "wheel") {
+			intentSnapshot.source = getInteractionSource(controller, "simulator");
+			intentSnapshot.sourceType = "simulator";
+		}
+		return this.manipulation.applyScaleIntent(this.createSelection(controller, scalingTarget), intentSnapshot, factor);
 	}
 	updateRay(input, deltaSeconds, deliberate) {
 		if (this.directTouch.has(input.controller)) {
@@ -6343,7 +6392,7 @@ var Interaction = class {
 			intersections = [];
 			this.rawIntersections.set(input.controller, intersections);
 		}
-		if (!(this.raycastMode === "continuous" || input.sourceType === "gaze" || input.selected || previousSelected || input.released === true || this.wheelIntents.has(input.controller)) || !this.scene) {
+		if (!(this.raycastMode === "continuous" || input.sourceType === "gaze" || input.selected || previousSelected || input.released === true || this.scaleIntents.has(input.controller) || this.wheelIntents.has(input.controller)) || !this.scene) {
 			intersections.length = 0;
 			return intersections;
 		}
@@ -6852,39 +6901,6 @@ function selectionBelongsTo(selection, object) {
 	return objectIsDescendantOf(selection.target, object) || selection.scriptPath.includes(object);
 }
 //#endregion
-//#region src/utils/ThreeDisposal.ts
-function disposeMaterial(material, except = /* @__PURE__ */ new Set()) {
-	if (!material) return;
-	const materials = Array.isArray(material) ? material : [material];
-	for (const item of materials) if (!except.has(item)) item.dispose();
-}
-function disposeMeshResources(mesh) {
-	disposeRenderableResources(mesh);
-}
-function disposeRenderableResources(object) {
-	const renderable = object;
-	renderable.geometry?.dispose?.();
-	disposeMaterial(renderable.material);
-}
-function hasRenderableResources(object) {
-	const renderable = object;
-	return !!(renderable.geometry || renderable.material);
-}
-function disposeObjectTree(object) {
-	for (const child of [...object.children]) {
-		disposeObjectTree(child);
-		object.remove(child);
-	}
-	if (hasRenderableResources(object)) disposeRenderableResources(object);
-	object.dispose?.();
-}
-function disposeObjectChildren(object) {
-	for (const child of [...object.children]) {
-		disposeObjectTree(child);
-		object.remove(child);
-	}
-}
-//#endregion
 //#region src/depth/DepthMeshGeometry.ts
 /**
 * Creates a PlaneGeometry with UVs remapped to the active depth sensor region.
@@ -6960,6 +6976,9 @@ var DepthGeometryUpdater = class {
 		this.geometryRayCache = /* @__PURE__ */ new WeakMap();
 		this.scratchVertexPosition = new THREE.Vector3();
 	}
+	getGeometryMetadata(geometry) {
+		return this.geometryRayCache.get(geometry);
+	}
 	getOrComputeUnprojectionRays(geometry, projectionMatrixInverse) {
 		const vertexCount = geometry.attributes.position.count;
 		const projElements = projectionMatrixInverse.elements;
@@ -6972,9 +6991,15 @@ var DepthGeometryUpdater = class {
 			}
 			if (unchanged) return cached.rayXY;
 		} else {
+			const gridX1 = Math.round(Math.sqrt(vertexCount));
 			cached = {
 				rayXY: new Float64Array(2 * vertexCount),
-				projInvElements: /* @__PURE__ */ new Float64Array(16)
+				projInvElements: /* @__PURE__ */ new Float64Array(16),
+				segments: gridX1 - 1,
+				isRectilinear: false,
+				minVertexDepth: 0,
+				maxVertexDepth: 0,
+				hasDepthData: false
 			};
 			this.geometryRayCache.set(geometry, cached);
 		}
@@ -6990,6 +7015,9 @@ var DepthGeometryUpdater = class {
 			rayXY[2 * i] = vertexPosition.x * invNegZ;
 			rayXY[2 * i + 1] = vertexPosition.y * invNegZ;
 		}
+		const gridX1 = cached.segments + 1;
+		const lastIdx = 2 * (vertexCount - 1);
+		cached.isRectilinear = cached.segments >= 1 && gridX1 * gridX1 === vertexCount && projElements[1] === 0 && projElements[2] === 0 && projElements[4] === 0 && projElements[6] === 0 && Math.abs(rayXY[lastIdx] - rayXY[0]) > 1e-6 && Math.abs(rayXY[lastIdx + 1] - rayXY[1]) > 1e-6;
 		return rayXY;
 	}
 	updateGeometryPositions(params) {
@@ -7005,6 +7033,7 @@ var DepthGeometryUpdater = class {
 		const posArray = geometry.attributes.position.array;
 		const vertexCount = geometry.attributes.position.count;
 		const rayXY = this.getOrComputeUnprojectionRays(geometry, projectionMatrixInverse);
+		const cached = this.geometryRayCache.get(geometry);
 		const transformMatrix = depthData.normDepthBufferFromNormView?.matrix;
 		const hasTransform = Boolean(transformMatrix);
 		let m0 = 1, m1 = 0, m3 = 0, m4 = 0, m5 = 1, m7 = 0, m12 = 0, m13 = 0, m15 = 1;
@@ -7021,6 +7050,8 @@ var DepthGeometryUpdater = class {
 			m15 = transformMatrix[15];
 			isAffineTransform = m3 === 0 && m7 === 0 && m15 === 1;
 		}
+		let minVertexDepth = Infinity;
+		let maxVertexDepth = 0;
 		for (let i = 0; i < vertexCount; ++i) {
 			const uvIdx = 2 * i;
 			const u = uvArray[uvIdx];
@@ -7045,15 +7076,181 @@ var DepthGeometryUpdater = class {
 			}
 			if (depth === 0 && patchHoles) depth = maxDepthPrev;
 			if (patchHolesUpper && v > .9) depth = minDepthPrev;
+			if (depth < minVertexDepth) minVertexDepth = depth;
+			if (depth > maxVertexDepth) maxVertexDepth = depth;
 			const posIdx = 3 * i;
 			posArray[posIdx] = depth * rayXY[uvIdx];
 			posArray[posIdx + 1] = depth * rayXY[uvIdx + 1];
 			posArray[posIdx + 2] = -depth;
 		}
+		cached.minVertexDepth = minVertexDepth <= maxVertexDepth ? minVertexDepth : 0;
+		cached.maxVertexDepth = maxVertexDepth;
+		cached.hasDepthData = maxVertexDepth > 0;
 		return {
 			minDepth,
 			maxDepth
 		};
+	}
+};
+//#endregion
+//#region src/depth/DepthMeshRaycast.ts
+/**
+* Performs a 2D projective grid walk over a rectilinear depth heightfield,
+* testing only the grid cells crossed by the projected 3D ray segment.
+*/
+var DepthMeshRaycaster = class {
+	constructor() {
+		this.inverseMatrix = new THREE.Matrix4();
+		this.localRay = new THREE.Ray();
+		this.vA = new THREE.Vector3();
+		this.vB = new THREE.Vector3();
+		this.vC = new THREE.Vector3();
+		this.vD = new THREE.Vector3();
+		this.intersectPoint = new THREE.Vector3();
+		this.worldPoint = new THREE.Vector3();
+	}
+	raycast(params) {
+		const { targetObject, geometry, meta, material, matrixWorld, updateVertexNormals, raycaster, intersects } = params;
+		const startIndex = intersects.length;
+		this.raycastRectilinearGrid(targetObject, geometry, meta.rayXY, meta.segments, meta.minVertexDepth, meta.maxVertexDepth, material, matrixWorld, updateVertexNormals, raycaster, intersects);
+		if (intersects.length - startIndex > 1) {
+			const added = intersects.splice(startIndex);
+			added.sort((a, b) => (a.faceIndex ?? 0) - (b.faceIndex ?? 0));
+			intersects.push(...added);
+		}
+	}
+	raycastRectilinearGrid(targetObject, geometry, rayXY, segments, minVertexDepth, maxVertexDepth, material, matrixWorld, updateVertexNormals, raycaster, intersects) {
+		this.inverseMatrix.copy(matrixWorld).invert();
+		const localRay = this.localRay.copy(raycaster.ray).applyMatrix4(this.inverseMatrix);
+		const ox = localRay.origin.x;
+		const oy = localRay.origin.y;
+		const oz = localRay.origin.z;
+		const dx = localRay.direction.x;
+		const dy = localRay.direction.y;
+		const dz = localRay.direction.z;
+		const gridX1 = segments + 1;
+		const lastIdx = 2 * (gridX1 * gridX1 - 1);
+		const rx0 = rayXY[0];
+		const ry0 = rayXY[1];
+		const rx1 = rayXY[lastIdx];
+		const ry1 = rayXY[lastIdx + 1];
+		const rxMin = Math.min(rx0, rx1) - 1e-5;
+		const rxMax = Math.max(rx0, rx1) + 1e-5;
+		const ryMin = Math.min(ry0, ry1) - 1e-5;
+		const ryMax = Math.max(ry0, ry1) + 1e-5;
+		const zMin = Math.max(1e-4, minVertexDepth - 1e-4);
+		const zMax = maxVertexDepth + 1e-4;
+		let t0 = 0;
+		let t1 = Infinity;
+		const clipPlane = (a, b) => {
+			if (a > 1e-12) {
+				const t = b / a;
+				if (t < t1) t1 = t;
+			} else if (a < -1e-12) {
+				const t = b / a;
+				if (t > t0) t0 = t;
+			} else if (b < -1e-7) return false;
+			return t0 <= t1;
+		};
+		if (!clipPlane(dz, -oz - zMin) || !clipPlane(-dz, oz + zMax) || !clipPlane(-(dx + dz * rxMin), ox + oz * rxMin) || !clipPlane(dx + dz * rxMax, -(ox + oz * rxMax)) || !clipPlane(-(dy + dz * ryMin), oy + oz * ryMin) || !clipPlane(dy + dz * ryMax, -(oy + oz * ryMax)) || !Number.isFinite(t1)) return;
+		const invNegZ0 = -1 / (oz + t0 * dz);
+		const invNegZ1 = -1 / (oz + t1 * dz);
+		const invRxSpan = segments / (rx1 - rx0);
+		const invRySpan = segments / (ry1 - ry0);
+		const c0 = ((ox + t0 * dx) * invNegZ0 - rx0) * invRxSpan;
+		const r0 = ((oy + t0 * dy) * invNegZ0 - ry0) * invRySpan;
+		const c1 = ((ox + t1 * dx) * invNegZ1 - rx0) * invRxSpan;
+		const r1 = ((oy + t1 * dy) * invNegZ1 - ry0) * invRySpan;
+		const dc = c1 - c0;
+		const dr = r1 - r0;
+		const maxCell = segments - 1;
+		const posArray = geometry.attributes.position.array;
+		const uvAttr = geometry.attributes.uv;
+		const normalAttr = geometry.attributes.normal;
+		if (Math.abs(dc) >= Math.abs(dr)) {
+			const cMin = Math.min(c0, c1);
+			const cMax = Math.max(c0, c1);
+			const ixStart = Math.max(0, Math.min(maxCell, Math.floor(cMin - 1e-5)));
+			const ixEnd = Math.max(0, Math.min(maxCell, Math.floor(cMax + 1e-5)));
+			const slope = Math.abs(dc) > 1e-7 ? dr / dc : 0;
+			for (let ix = ixStart; ix <= ixEnd; ++ix) {
+				const segC0 = Math.max(cMin, Math.min(cMax, ix));
+				const segC1 = Math.max(cMin, Math.min(cMax, ix + 1));
+				const rAt0 = r0 + (segC0 - c0) * slope;
+				const rAt1 = r0 + (segC1 - c0) * slope;
+				const iyStart = Math.max(0, Math.min(maxCell, Math.floor(Math.min(rAt0, rAt1) - 1e-5)));
+				const iyEnd = Math.max(0, Math.min(maxCell, Math.floor(Math.max(rAt0, rAt1) + 1e-5)));
+				for (let iy = iyStart; iy <= iyEnd; ++iy) this.testGridCell(targetObject, ix, iy, gridX1, segments, posArray, uvAttr, normalAttr, material, matrixWorld, updateVertexNormals, raycaster, intersects);
+			}
+		} else {
+			const rMin = Math.min(r0, r1);
+			const rMax = Math.max(r0, r1);
+			const iyStart = Math.max(0, Math.min(maxCell, Math.floor(rMin - 1e-5)));
+			const iyEnd = Math.max(0, Math.min(maxCell, Math.floor(rMax + 1e-5)));
+			const invSlope = Math.abs(dr) > 1e-7 ? dc / dr : 0;
+			for (let iy = iyStart; iy <= iyEnd; ++iy) {
+				const segR0 = Math.max(rMin, Math.min(rMax, iy));
+				const segR1 = Math.max(rMin, Math.min(rMax, iy + 1));
+				const cAt0 = c0 + (segR0 - r0) * invSlope;
+				const cAt1 = c0 + (segR1 - r0) * invSlope;
+				const ixStart = Math.max(0, Math.min(maxCell, Math.floor(Math.min(cAt0, cAt1) - 1e-5)));
+				const ixEnd = Math.max(0, Math.min(maxCell, Math.floor(Math.max(cAt0, cAt1) + 1e-5)));
+				for (let ix = ixStart; ix <= ixEnd; ++ix) this.testGridCell(targetObject, ix, iy, gridX1, segments, posArray, uvAttr, normalAttr, material, matrixWorld, updateVertexNormals, raycaster, intersects);
+			}
+		}
+	}
+	testGridCell(targetObject, ix, iy, gridX1, segments, posArray, uvAttr, normalAttr, material, matrixWorld, updateVertexNormals, raycaster, intersects) {
+		const a = ix + gridX1 * iy;
+		const b = ix + gridX1 * (iy + 1);
+		const c = ix + 1 + gridX1 * (iy + 1);
+		const d = ix + 1 + gridX1 * iy;
+		const a3 = 3 * a;
+		const b3 = 3 * b;
+		const c3 = 3 * c;
+		const d3 = 3 * d;
+		this.vA.set(posArray[a3], posArray[a3 + 1], posArray[a3 + 2]);
+		this.vB.set(posArray[b3], posArray[b3 + 1], posArray[b3 + 2]);
+		this.vC.set(posArray[c3], posArray[c3 + 1], posArray[c3 + 2]);
+		this.vD.set(posArray[d3], posArray[d3 + 1], posArray[d3 + 2]);
+		const baseFaceIndex = 2 * (ix + segments * iy);
+		this.testGridTriangle(targetObject, a, b, d, this.vA, this.vB, this.vD, baseFaceIndex, uvAttr, normalAttr, material, matrixWorld, updateVertexNormals, raycaster, intersects);
+		this.testGridTriangle(targetObject, b, c, d, this.vB, this.vC, this.vD, baseFaceIndex + 1, uvAttr, normalAttr, material, matrixWorld, updateVertexNormals, raycaster, intersects);
+	}
+	testGridTriangle(targetObject, idxA, idxB, idxC, vA, vB, vC, faceIndex, uvAttr, normalAttr, material, matrixWorld, updateVertexNormals, raycaster, intersects) {
+		const localRay = this.localRay;
+		const intersectPoint = this.intersectPoint;
+		if ((material.side === THREE.BackSide ? localRay.intersectTriangle(vC, vB, vA, true, intersectPoint) : localRay.intersectTriangle(vA, vB, vC, material.side === THREE.FrontSide, intersectPoint)) === null) return;
+		const worldPoint = this.worldPoint.copy(intersectPoint).applyMatrix4(matrixWorld);
+		const distance = raycaster.ray.origin.distanceTo(worldPoint);
+		if (distance < raycaster.near || distance > raycaster.far) return;
+		const barycoord = new THREE.Vector3();
+		THREE.Triangle.getBarycoord(intersectPoint, vA, vB, vC, barycoord);
+		const faceNormal = THREE.Triangle.getNormal(vA, vB, vC, new THREE.Vector3());
+		const face = {
+			a: idxA,
+			b: idxB,
+			c: idxC,
+			normal: faceNormal,
+			materialIndex: 0
+		};
+		let normal;
+		if (normalAttr) {
+			if (updateVertexNormals) {
+				normal = THREE.Triangle.getInterpolatedAttribute(normalAttr, idxA, idxB, idxC, barycoord, new THREE.Vector3());
+				if (normal.dot(localRay.direction) > 0) normal.multiplyScalar(-1);
+			} else normal = faceNormal.clone();
+		}
+		const intersection = {
+			distance,
+			point: worldPoint.clone(),
+			object: targetObject,
+			face,
+			faceIndex,
+			barycoord
+		};
+		if (uvAttr) intersection.uv = THREE.Triangle.getInterpolatedAttribute(uvAttr, idxA, idxB, idxC, barycoord, new THREE.Vector2());
+		if (normal) intersection.normal = normal;
+		intersects.push(intersection);
 	}
 };
 //#endregion
@@ -7249,6 +7446,7 @@ var DepthMesh = class extends MeshScript {
 		this.colliderId = 0;
 		this.disposed = false;
 		this.geometryUpdater = new DepthGeometryUpdater();
+		this.gridRaycaster = new DepthMeshRaycaster();
 		this.gridResolution = activeRes;
 		this.visible = true;
 		this.xb = {
@@ -7306,7 +7504,6 @@ var DepthMesh = class extends MeshScript {
 		}
 		this.minDepthPrev = this.minDepth;
 		this.maxDepthPrev = this.maxDepth;
-		this.geometry.attributes.position.needsUpdate = true;
 		const depthTextureLeft = this.depthTextures?.get(0);
 		if (depthTextureLeft && this.depthTextureMaterialUniforms) {
 			this.depthTextureMaterialUniforms.uUsingFloatDepth.value = depthDataFormat === "float32";
@@ -7340,6 +7537,7 @@ var DepthMesh = class extends MeshScript {
 	*/
 	updateFullResolutionGeometry(depthData, depthDataFormat) {
 		this.updateGeometry(depthData, this.geometry, depthDataFormat);
+		this.geometry.attributes.position.needsUpdate = true;
 	}
 	/**
 	* Internal method to update the geometry of the depth mesh.
@@ -7386,30 +7584,49 @@ var DepthMesh = class extends MeshScript {
 			this.lastColliderUpdateTime = performance.now();
 		}
 	}
-	initRapierPhysics(RAPIER, blendedWorld) {
+	initRapierPhysics(rapier, blendedWorld) {
 		this.getWorldPosition(this.worldPosition);
 		this.getWorldQuaternion(this.worldQuaternion);
-		const desc = RAPIER.RigidBodyDesc.fixed().setTranslation(this.worldPosition.x, this.worldPosition.y, this.worldPosition.z).setRotation(this.worldQuaternion);
+		const desc = rapier.RigidBodyDesc.fixed().setTranslation(this.worldPosition.x, this.worldPosition.y, this.worldPosition.z).setRotation(this.worldQuaternion);
 		this.rigidBody = blendedWorld.createRigidBody(desc);
 		const vertices = this.geometry.attributes.position.array;
 		const indices = this.geometry.getIndex().array;
-		const shape = RAPIER.ColliderDesc.trimesh(vertices, indices);
+		const shape = rapier.ColliderDesc.trimesh(vertices, indices);
 		if (this.options.useDualCollider) {
 			this.colliders = [];
 			this.colliders.push(blendedWorld.createCollider(shape, this.rigidBody), blendedWorld.createCollider(shape, this.rigidBody));
 			this.colliderId = 0;
 		} else this.collider = blendedWorld.createCollider(shape, this.rigidBody);
-		this.RAPIER = RAPIER;
+		this.RAPIER = rapier;
 		this.blendedWorld = blendedWorld;
 		this.lastColliderUpdateTime = performance.now();
 	}
 	/**
 	* Customizes raycasting to compute normals for intersections.
+	* Uses a 2D projective grid walk over the depth heightfield when depth
+	* data is available, avoiding brute-force tests across all grid triangles.
 	* @param raycaster - The raycaster object.
 	* @param intersects - Array to store intersections.
 	* @returns - True if intersections are found.
 	*/
 	raycast(raycaster, intersects) {
+		const geometry = this.downsampledGeometry ?? this.geometry;
+		const material = this.material;
+		if (material === void 0) return true;
+		const meta = this.geometryUpdater.getGeometryMetadata(geometry);
+		if (meta && meta.hasDepthData && meta.isRectilinear && !Array.isArray(material)) {
+			this.gridRaycaster.raycast({
+				targetObject: this,
+				geometry,
+				meta,
+				material,
+				matrixWorld: this.downsampledMesh ? this.downsampledMesh.matrixWorld : this.matrixWorld,
+				updateVertexNormals: this.updateVertexNormals,
+				raycaster,
+				intersects
+			});
+			return true;
+		}
 		const intersections = [];
 		if (this.downsampledMesh) this.downsampledMesh.raycast(raycaster, intersections);
 		else super.raycast(raycaster, intersections);
@@ -7625,13 +7842,13 @@ var DepthTextures = class {
 	createDataDepthTextures(depthData, viewId, depthDataFormat) {
 		if (this.dataTextures[viewId]) this.dataTextures[viewId].dispose();
 		if (depthDataFormat === "float32") {
-			const typedArray = new Float32Array(depthData.width * depthData.height);
+			const typedArray = new Float32Array(depthData.data);
 			const format = THREE.RedFormat;
 			const type = THREE.FloatType;
 			this.float32Arrays[viewId] = typedArray;
 			this.dataTextures[viewId] = new THREE.DataTexture(typedArray, depthData.width, depthData.height, format, type);
 		} else {
-			const typedArray = new Uint8Array(depthData.width * depthData.height * 2);
+			const typedArray = new Uint8Array(depthData.data);
 			const format = THREE.RGFormat;
 			const type = THREE.UnsignedByteType;
 			this.uint8Arrays[viewId] = typedArray;
@@ -7640,8 +7857,15 @@ var DepthTextures = class {
 	}
 	updateData(depthData, viewId, depthDataFormat) {
 		if (this.dataTextures.length < viewId + 1 || this.dataTextures[viewId].image.width !== depthData.width || this.dataTextures[viewId].image.height !== depthData.height) this.createDataDepthTextures(depthData, viewId, depthDataFormat);
-		if (depthDataFormat === "float32") this.float32Arrays[viewId].set(new Float32Array(depthData.data));
-		else this.uint8Arrays[viewId].set(new Uint8Array(depthData.data));
+		else if (depthDataFormat === "float32") {
+			const view = new Float32Array(depthData.data);
+			this.float32Arrays[viewId] = view;
+			this.dataTextures[viewId].image.data = view;
+		} else {
+			const view = new Uint8Array(depthData.data);
+			this.uint8Arrays[viewId] = view;
+			this.dataTextures[viewId].image.data = view;
+		}
 		this.dataTextures[viewId].needsUpdate = true;
 		this.depthData[viewId] = depthData;
 	}
@@ -7719,10 +7943,11 @@ var GPUDepthConverter = class {
 
                 uniform sampler2DArray uTexture;
                 uniform float uCameraNear;
+                uniform int uImageIndex;
                 varying vec2 vUv;
 
                 void main() {
-                  float z = texture(uTexture, vec3(vUv, 0)).r;
+                  float z = texture(uTexture, vec3(vUv, float(uImageIndex))).r;
                   z = uCameraNear / (1.0 - z);
                   z = clamp(z, 0.0, 20.0);
                   gl_FragColor = vec4(z, 0, 0, 1.0);
@@ -7730,7 +7955,8 @@ var GPUDepthConverter = class {
             `,
 				uniforms: {
 					uTexture: { value: this.depthTexture },
-					uCameraNear: { value: depthData.depthNear }
+					uCameraNear: { value: depthData.depthNear },
+					uImageIndex: { value: depthData.imageIndex ?? 0 }
 				},
 				blending: THREE.NoBlending,
 				depthTest: false,
@@ -7746,6 +7972,8 @@ var GPUDepthConverter = class {
 			this.gpuPixels = new Float32Array(depthData.width * depthData.height);
 		}
 		this.depthTexture.sourceTexture = depthData.texture;
+		this.depthMesh.material.uniforms.uCameraNear.value = depthData.depthNear;
+		this.depthMesh.material.uniforms.uImageIndex.value = depthData.imageIndex ?? 0;
 		const originalRenderTarget = this.renderer.getRenderTarget();
 		const activeCubeFace = this.renderer.getActiveCubeFace();
 		const activeMipmapLevel = this.renderer.getActiveMipmapLevel();
@@ -7786,7 +8014,7 @@ var GPUDepthConverter = class {
 		return {
 			width: depthData.width,
 			height: depthData.height,
-			data: this.gpuPixels.buffer,
+			data: this.gpuPixels.slice().buffer,
 			rawValueToMeters: depthData.rawValueToMeters
 		};
 	}
@@ -8106,12 +8334,13 @@ var OcclusionMapMeshMaterial = class extends THREE.MeshBasicMaterial {
 * 3. (Mode B only) Apply the occlusion map to the rendered frame.
 */
 var OcclusionPass = class extends Pass {
-	constructor(scene, camera, useFloatDepth = true, renderToScreen = false, occludableItemsLayer = 3) {
+	constructor(scene, camera, useFloatDepth = true, renderToScreen = false, occludableItemsLayer = 3, resolutionScale = .5) {
 		super();
 		this.scene = scene;
 		this.camera = camera;
 		this.renderToScreen = renderToScreen;
 		this.occludableItemsLayer = occludableItemsLayer;
+		this.resolutionScale = resolutionScale;
 		this.depthTextures = [];
 		this.depthNear = [];
 		this.depthViewMatrices = [];
@@ -8221,7 +8450,7 @@ var OcclusionPass = class extends Pass {
 		this.occlusionMeshMaterial.uniforms.uDepthViewMatrix.value = this.depthViewMatrices[viewId] || camera.matrixWorldInverse;
 		this.occlusionMeshMaterial.uniforms.uDepthProjectionMatrix.value = this.depthProjectionMatrices[viewId] || camera.projectionMatrix;
 		this.scene.overrideMaterial = this.occlusionMeshMaterial;
-		renderer.getDrawingBufferSize(dimensions);
+		this.getScaledDimensions(renderer, dimensions);
 		this.resizeOcclusionMap(dimensions);
 		const renderTarget = this.occlusionMapTexture;
 		renderer.setRenderTarget(renderTarget);
@@ -8240,16 +8469,17 @@ var OcclusionPass = class extends Pass {
 		this.occlusionMapUniforms.uViewId.value = viewId;
 		if (isTextureArray) this.occlusionMapUniforms.uDepthTextureArray.value = texture;
 		else this.occlusionMapUniforms.uDepthTexture.value = texture;
-		renderer.getDrawingBufferSize(dimensions);
+		this.getScaledDimensions(renderer, dimensions);
 		this.resizeOcclusionMap(dimensions);
 		renderer.setRenderTarget(this.occlusionMapTexture);
 		this.occlusionMapQuad.render(renderer);
 	}
 	blurOcclusionMap(renderer, dimensions) {
 		this.resizeKawaseBlur(dimensions);
+		const scale = this.resolutionScale;
 		for (let i = 0; i < 3; i++) {
-			this.kawaseBlurQuads[i].material.uniforms.uTexelSize.value.set(1 / (dimensions.x / 2 ** i), 1 / (dimensions.y / 2 ** i));
-			this.kawaseBlurQuads[this.kawaseBlurQuads.length - 1 - i].material.uniforms.uTexelSize.value.set(1 / (dimensions.x / 2 ** (i - 1)), 1 / (dimensions.y / 2 ** (i - 1)));
+			this.kawaseBlurQuads[i].material.uniforms.uTexelSize.value.set(scale / (dimensions.x / 2 ** i), scale / (dimensions.y / 2 ** i));
+			this.kawaseBlurQuads[this.kawaseBlurQuads.length - 1 - i].material.uniforms.uTexelSize.value.set(scale / (dimensions.x / 2 ** (i - 1)), scale / (dimensions.y / 2 ** (i - 1)));
 		}
 		renderer.setRenderTarget(this.kawaseBlurTargets[0]);
 		this.kawaseBlurQuads[0].render(renderer);
@@ -8264,6 +8494,10 @@ var OcclusionPass = class extends Pass {
 		renderer.setRenderTarget(this.occlusionMapTexture);
 		this.kawaseBlurQuads[5].render(renderer);
 	}
+	getScaledDimensions(renderer, dimensions) {
+		renderer.getDrawingBufferSize(dimensions);
+		dimensions.set(Math.max(1, Math.floor(dimensions.x * this.resolutionScale)), Math.max(1, Math.floor(dimensions.y * this.resolutionScale)));
+	}
 	resizeOcclusionMap(dimensions) {
 		if (this.lastOcclusionMapSize.x === dimensions.x && this.lastOcclusionMapSize.y === dimensions.y) return;
 		this.lastOcclusionMapSize.copy(dimensions);
@@ -8272,7 +8506,7 @@ var OcclusionPass = class extends Pass {
 	resizeKawaseBlur(dimensions) {
 		if (this.lastKawaseBlurSize.x === dimensions.x && this.lastKawaseBlurSize.y === dimensions.y) return;
 		this.lastKawaseBlurSize.copy(dimensions);
-		for (let i = 0; i < 3; i++) this.kawaseBlurTargets[i].setSize(dimensions.x / 2 ** i, dimensions.y / 2 ** i);
+		for (let i = 0; i < 3; i++) this.kawaseBlurTargets[i].setSize(Math.max(1, Math.floor(dimensions.x / 2 ** (i + 1))), Math.max(1, Math.floor(dimensions.y / 2 ** (i + 1))));
 	}
 	applyOcclusionMapToRenderedImage(renderer, readBuffer, writeBuffer) {
 		if (readBuffer && (this.renderToScreen || writeBuffer)) {
@@ -8422,6 +8656,20 @@ var Depth = class Depth {
 		return 0;
 	}
 	/**
+	* Resolves the buffer and metadata for a query, falling back to view 0 only
+	* when the requested view has not produced CPU depth yet.
+	*/
+	getDepthBuffer(viewId) {
+		const resolvedViewId = this.depthArray[viewId] ? viewId : 0;
+		const depthData = this.cpuDepthData[resolvedViewId] ?? this.gpuDepthData[resolvedViewId];
+		return {
+			depthArray: this.depthArray[resolvedViewId],
+			width: depthData?.width ?? this.width,
+			height: depthData?.height ?? this.height,
+			rawValueToMeters: depthData?.rawValueToMeters ?? this.rawValueToMeters
+		};
+	}
+	/**
 	* Depth is a lightweight manager based on three.js to simply prototyping
 	* with Depth in WebXR.
 	*/
@@ -8446,6 +8694,8 @@ var Depth = class Depth {
 		this.depthCameraRotations = [];
 		this.normDepthBufferFromNormViewMatrices = [];
 		this.lastDepthMeshUpdateTime = 0;
+		this.requestedSecondaryViews = false;
+		this.requestedDepth = false;
 		if (Depth.instance) return Depth.instance;
 		Depth.instance = this;
 	}
@@ -8460,28 +8710,34 @@ var Depth = class Depth {
 		this.registry = registry;
 		this.enabled = options.enabled;
 		const isWebGPU = isWebGPURenderer(renderer);
-		this.gpuDepthConverter = isWebGPU ? void 0 : new GPUDepthConverter(renderer);
+		const isSerializer = isSerializerRenderer(renderer);
+		this.gpuDepthConverter = isWebGPU || isSerializer ? void 0 : new GPUDepthConverter(renderer);
 		if (this.options.depthTexture.enabled) {
 			this.depthTextures = new DepthTextures(options);
 			registry.register(this.depthTextures);
 		}
 		const asyncTasks = [];
 		if (this.options.occlusion.enabled) {
+			const resolutionScale = this.options.occlusion.resolutionScale ?? .5;
 			if (isWebGPU) asyncTasks.push(Promise.all([import("./WebGPUOcclusionPass.js"), import("./WebGPUOcclusionUtils.js")]).then(([{ WebGPUOcclusionPass }, { addWebGPUOcclusionToMaterial }]) => {
 				if (!this.disposed) {
 					OcclusionUtils.setWebGPUMaterialHandler(addWebGPUOcclusionToMaterial);
-					this.occlusionPass = new WebGPUOcclusionPass(scene, camera);
+					const pass = new WebGPUOcclusionPass(scene, camera);
+					pass.resolutionScale = resolutionScale;
+					this.occlusionPass = pass;
 				}
 			}));
-			else {
+			else if (!isSerializer) {
 				OcclusionUtils.setWebGPUMaterialHandler(void 0);
-				this.occlusionPass = new OcclusionPass(scene, camera);
+				const pass = new OcclusionPass(scene, camera);
+				pass.resolutionScale = resolutionScale;
+				this.occlusionPass = pass;
 			}
 		}
 		if (this.options.depthMesh.enabled) {
 			this.depthMesh = new DepthMesh(options, this.width, this.height, this.depthTextures);
 			registry.register(this.depthMesh);
-			if (this.options.depthMesh.renderShadow) {
+			if (this.options.depthMesh.renderShadow && this.renderer.shadowMap) {
 				this.renderer.shadowMap.enabled = true;
 				this.renderer.shadowMap.type = THREE.PCFShadowMap;
 			}
@@ -8507,11 +8763,13 @@ var Depth = class Depth {
 	* @param u - Normalized horizontal coordinate, origin at bottom left.
 	* @param v - Normalized vertical coordinate, origin at bottom left.
 	* @param target - Vector that receives the result.
+	* @param viewId - View index (default 0).
 	* @returns The normalized depth buffer coordinates.
 	*/
-	normDepthBufferCoords(u, v, target) {
+	normDepthBufferCoords(u, v, target, viewId = 0) {
 		target.set(u, 1 - v, 0);
-		if (this.normDepthBufferFromNormViewMatrices.length > 0) target.applyMatrix4(this.normDepthBufferFromNormViewMatrices[0]);
+		const matrix = this.normDepthBufferFromNormViewMatrices[viewId] ?? this.normDepthBufferFromNormViewMatrices[0];
+		if (matrix) target.applyMatrix4(matrix);
 		return target;
 	}
 	/**
@@ -8521,35 +8779,41 @@ var Depth = class Depth {
 	* the view, growing right.
 	* @param v - Normalized vertical coordinate, origin at the bottom left of
 	* the view, growing up.
+	* @param viewId - View index to query (default 0). Requesting viewId > 0 enables secondary view updates.
 	* @returns Depth value at the specified coordinates.
 	*/
-	getDepth(u, v) {
-		if (!this.depthArray[0]) return 0;
-		const coords = this.normDepthBufferCoords(u, v, normViewCoord);
-		const depthX = Math.round(clamp$1(coords.x * this.width, 0, this.width - 1));
-		const depthY = Math.round(clamp$1(coords.y * this.height, 0, this.height - 1));
-		const rawDepth = this.depthArray[0][depthY * this.width + depthX];
-		return this.rawValueToMeters * rawDepth;
+	getDepth(u, v, viewId = 0) {
+		this.requestDepth(viewId);
+		const { depthArray, width, height, rawValueToMeters } = this.getDepthBuffer(viewId);
+		if (!depthArray) return 0;
+		const coords = this.normDepthBufferCoords(u, v, normViewCoord, viewId);
+		const depthX = Math.round(clamp$1(coords.x * width, 0, width - 1));
+		return rawValueToMeters * depthArray[Math.round(clamp$1(coords.y * height, 0, height - 1)) * width + depthX];
 	}
 	/**
 	* Projects the given world position to depth camera's clip space and then
 	* to the depth camera's view space using the depth.
 	* @param position - The world position to project.
+	* @param target - Optional target vector.
+	* @param viewId - View index to query (default 0).
 	* @returns The depth camera view space position.
 	*/
-	getProjectedDepthViewPositionFromWorldPosition(position, target = new THREE.Vector3()) {
-		clipSpacePosition.copy(position).applyMatrix4(this.depthViewMatrices[0]).applyMatrix4(this.depthProjectionMatrices[0]);
+	getProjectedDepthViewPositionFromWorldPosition(position, target = new THREE.Vector3(), viewId = 0) {
+		this.requestDepth(viewId);
+		const viewMatrix = this.depthViewMatrices[viewId] ?? this.depthViewMatrices[0];
+		const projMatrix = this.depthProjectionMatrices[viewId] ?? this.depthProjectionMatrices[0];
+		const projInvMatrix = this.depthProjectionInverseMatrices[viewId] ?? this.depthProjectionInverseMatrices[0];
+		clipSpacePosition.copy(position).applyMatrix4(viewMatrix).applyMatrix4(projMatrix);
 		const u = .5 * (clipSpacePosition.x + 1);
 		const v = .5 * (clipSpacePosition.y + 1);
 		let depth = 0;
-		if (this.depthArray[0]) {
-			const depthX = Math.round(clamp$1(u * this.width, 0, this.width - 1));
-			const depthY = Math.round(clamp$1((1 - v) * this.height, 0, this.height - 1));
-			const rawDepth = this.depthArray[0][depthY * this.width + depthX];
-			depth = this.rawValueToMeters * rawDepth;
+		const { depthArray, width, height, rawValueToMeters } = this.getDepthBuffer(viewId);
+		if (depthArray) {
+			const depthX = Math.round(clamp$1(u * width, 0, width - 1));
+			depth = rawValueToMeters * depthArray[Math.round(clamp$1((1 - v) * height, 0, height - 1)) * width + depthX];
 		}
 		target.set(2 * (u - .5), 2 * (v - .5), -1);
-		target.applyMatrix4(this.depthProjectionInverseMatrices[0]);
+		target.applyMatrix4(projInvMatrix);
 		target.multiplyScalar(-depth / target.z);
 		return target;
 	}
@@ -8560,17 +8824,19 @@ var Depth = class Depth {
 	* the view, growing right.
 	* @param v - Normalized vertical coordinate, origin at the bottom left of
 	* the view, growing up.
+	* @param viewId - View index to query (default 0). Requesting viewId > 0 enables secondary view updates.
 	* @returns Vertex at (u, v)
 	*/
-	getVertex(u, v) {
-		if (!this.depthArray[0]) return null;
-		const coords = this.normDepthBufferCoords(u, v, normViewCoord);
-		const depthX = Math.round(clamp$1(coords.x * this.width, 0, this.width - 1));
-		const depthY = Math.round(clamp$1(coords.y * this.height, 0, this.height - 1));
-		const rawDepth = this.depthArray[0][depthY * this.width + depthX];
-		const depth = this.rawValueToMeters * rawDepth;
+	getVertex(u, v, viewId = 0) {
+		this.requestDepth(viewId);
+		const { depthArray, width, height, rawValueToMeters } = this.getDepthBuffer(viewId);
+		if (!depthArray) return null;
+		const coords = this.normDepthBufferCoords(u, v, normViewCoord, viewId);
+		const depthX = Math.round(clamp$1(coords.x * width, 0, width - 1));
+		const depth = rawValueToMeters * depthArray[Math.round(clamp$1(coords.y * height, 0, height - 1)) * width + depthX];
 		const vertexPosition = new THREE.Vector3(2 * (coords.x - .5), 2 * (.5 - coords.y), -1);
-		vertexPosition.applyMatrix4(this.depthProjectionInverseMatrices[0]);
+		const projInvMatrix = this.depthProjectionInverseMatrices[viewId] ?? this.depthProjectionInverseMatrices[0];
+		vertexPosition.applyMatrix4(projInvMatrix);
 		vertexPosition.multiplyScalar(-depth / vertexPosition.z);
 		return vertexPosition;
 	}
@@ -8601,6 +8867,11 @@ var Depth = class Depth {
 		this.depthProjectionInverseMatrices[viewId].copy(this.depthProjectionMatrices[viewId]).invert();
 		this.depthViewProjectionMatrices[viewId].multiplyMatrices(this.depthProjectionMatrices[viewId], this.depthViewMatrices[viewId]);
 	}
+	/** Records demand for CPU depth so GPU depth is read back on the next frame. */
+	requestDepth(viewId) {
+		this.requestedDepth = true;
+		if (viewId > 0) this.requestedSecondaryViews = true;
+	}
 	updateCPUDepthData(depthData, viewId, depthDataFormat) {
 		this.cpuDepthData[viewId] = depthData;
 		this.depthDataFormat = depthDataFormat;
@@ -8618,7 +8889,7 @@ var Depth = class Depth {
 		assertWebGLRenderer(this.renderer, "WebXR GPU depth");
 		this.gpuDepthData[viewId] = depthData;
 		this.updateDepthMatrices(depthData, viewId);
-		const cpuDepth = this.options.depthMesh.enabled && viewId === 0 && this.gpuDepthConverter ? this.gpuDepthConverter.convertGPUToCPU(depthData) : null;
+		const cpuDepth = (this.options.depthMesh.enabled || Boolean(this.options.updateAllViews) || this.requestedDepth) && this.shouldUpdateView(viewId) && this.gpuDepthConverter ? this.gpuDepthConverter.convertGPUToCPU(depthData) : null;
 		if (cpuDepth) {
 			this.cpuDepthData[viewId] = cpuDepth;
 			this.depthDataFormat = "float32";
@@ -8649,9 +8920,25 @@ var Depth = class Depth {
 		this.lastDepthMeshUpdateTime = now;
 		return true;
 	}
+	/**
+	* Returns whether CPU depth data and textures should be extracted for the
+	* given view index. By default only view 0 is processed since DepthMesh and
+	* OcclusionPass only consume view 0, unless `options.updateAllViews`,
+	* `options.matchDepthView`, or a runtime `viewId > 0` request is active.
+	*/
+	shouldUpdateView(viewId) {
+		return viewId === 0 || Boolean(this.options.updateAllViews) || Boolean(this.options.matchDepthView) || this.requestedSecondaryViews;
+	}
 	getTexture(viewId) {
 		if (!this.options.depthTexture.enabled) return void 0;
-		return this.depthTextures?.get(viewId);
+		if (viewId > 0) this.requestedSecondaryViews = true;
+		return this.depthTextures?.get(viewId) ?? this.depthTextures?.get(0);
+	}
+	/**
+	* Updates the shadow opacity on the depth mesh material when active.
+	*/
+	setShadowOpacity(opacity) {
+		if (this.options.enabled && this.options.depthMesh.enabled && this.depthMesh?.material instanceof THREE.ShadowMaterial) this.depthMesh.material.opacity = opacity;
 	}
 	update(frame) {
 		if (this.disposed || !this.options.enabled) return;
@@ -8660,14 +8947,14 @@ var Depth = class Depth {
 	}
 	updateLocalDepth(frame) {
 		const session = frame.session;
-		const binding = this.renderer.xr.getBinding();
+		const binding = this.renderer.xr.getBinding?.() ?? null;
 		if (session.depthActive !== void 0 && this.depthClientsInitialized) {
 			const needsDepth = this.depthClients.size > 0;
 			if (session.depthActive && !needsDepth) session.pauseDepthSensing?.();
 			else if (!session.depthActive && needsDepth) session.resumeDepthSensing?.();
-			if (this.depthClients.size == 0) return;
+			if (this.depthClients.size === 0) return;
 		}
-		const xrRefSpace = this.renderer.xr.getReferenceSpace();
+		const xrRefSpace = this.renderer.xr.getReferenceSpace?.() ?? null;
 		if (xrRefSpace) {
 			const pose = frame.getViewerPose(xrRefSpace);
 			if (pose) for (let viewId = 0; viewId < pose.views.length; ++viewId) {
@@ -8677,7 +8964,7 @@ var Depth = class Depth {
 					const depthData = binding?.getDepthInformation(view);
 					if (!depthData) return;
 					this.updateGPUDepthData(depthData, viewId);
-				} else {
+				} else if (this.shouldUpdateView(viewId)) {
 					const depthData = frame.getDepthInformation(view);
 					if (!depthData) return;
 					this.updateCPUDepthData(depthData, viewId, session.depthDataFormat ?? "luminance-alpha");
@@ -8687,7 +8974,7 @@ var Depth = class Depth {
 		}
 	}
 	renderOcclusionPass() {
-		if (!this.occlusionPass) return;
+		if (!this.occlusionPass || isSerializerRenderer(this.renderer)) return;
 		const leftDepthTexture = this.getTexture(0);
 		if (leftDepthTexture) this.occlusionPass.setDepthTexture(leftDepthTexture, this.rawValueToMeters, 0, this.gpuDepthData[0]?.depthNear, this.depthViewMatrices[0], this.depthProjectionMatrices[0]);
 		const currentXREnabled = this.renderer.xr.enabled;
@@ -8750,6 +9037,8 @@ var Depth = class Depth {
 		}
 		this.gpuDepthConverter = void 0;
 		this.registry = void 0;
+		this.requestedSecondaryViews = false;
+		this.requestedDepth = false;
 		this.view.length = 0;
 		this.cpuDepthData.length = 0;
 		this.gpuDepthData.length = 0;
@@ -9569,15 +9858,19 @@ var PinchFilter = class {
 		for (const [type, forwarder] of this.forwardingListeners.entries()) for (const controller of controllers) controller.removeEventListener(type, forwarder);
 		this.forwardingListeners.clear();
 	}
+	isHandInputSource(controller) {
+		const inputSource = controller.inputSource;
+		return inputSource?.targetRayMode === "tracked-pointer" && (inputSource.hand != null || inputSource.profiles?.includes("generic-hand-select") === true);
+	}
 	shouldFilterEvent(event) {
 		const controller = event.target;
 		if (event.type === "selectstart" || event.type === "selectend" || event.type === "select") {
-			if (controller.gamepad?.buttons[0] !== void 0 && controller.inputSource?.targetRayMode !== "screen" && !event.isCustom) return true;
+			if (controller.gamepad?.buttons[0] !== void 0 && this.isHandInputSource(controller) && !event.isCustom) return true;
 		}
 		return false;
 	}
 	updateController(controller) {
-		if (controller.gamepad && controller.gamepad.buttons[0] !== void 0 && controller.inputSource?.targetRayMode !== "screen") {
+		if (controller.gamepad && controller.gamepad.buttons[0] !== void 0 && this.isHandInputSource(controller)) {
 			const isPinching = controller.gamepad.buttons[0].value >= 1;
 			const wasPinching = controller.userData.selected === true;
 			if (isPinching && !wasPinching) {
@@ -9634,11 +9927,21 @@ var Input = class {
 		this.gazeController = new GazeController();
 		this.mouseController = new MouseController();
 		this.gamepadController = new GamepadController();
+		this.builtInControllers = /* @__PURE__ */ new Set([
+			this.gazeController,
+			this.mouseController,
+			this.gamepadController
+		]);
+		this.addonControllers = /* @__PURE__ */ new Set();
+		this.removingControllers = /* @__PURE__ */ new Map();
+		this.nextControllerId = 0;
 		this.controllersEnabled = true;
 		this.listeners = /* @__PURE__ */ new Map();
 		this.dispatchControllerEvent = (event) => this.dispatchEvent(event);
 		this.pinchFilter = new PinchFilter(this.dispatchControllerEvent);
 		this.releasedControllers = /* @__PURE__ */ new Set();
+		this.nativeSelectControllers = /* @__PURE__ */ new Set();
+		this.disconnectedTransientPointerControllers = /* @__PURE__ */ new Map();
 		this.keyDownListeners = /* @__PURE__ */ new Set();
 		this.keyUpListeners = /* @__PURE__ */ new Set();
 		this.activeControllers = new ActiveControllers();
@@ -9651,6 +9954,10 @@ var Input = class {
 		this.interactionFrame = {
 			raySources: this.raySourceInputs,
 			directTouches: this.directTouchInputs
+		};
+		this.captureNativeSelectEvent = (event) => {
+			if (event.type === "selectstart") this.nativeSelectControllers.delete(event.target);
+			else if (event.type === "select" && !event.isCustom) this.nativeSelectControllers.add(event.target);
 		};
 	}
 	/**
@@ -9670,6 +9977,7 @@ var Input = class {
 		for (let i = 0; i < 2; ++i) {
 			controllers.push(renderer.xr.getController(i));
 			controllers[i].userData.id = i;
+			this.builtInControllers.add(controllers[i]);
 			this.activeControllers.add(this.controllers[i]);
 		}
 		controllers.push(this.gazeController);
@@ -9720,6 +10028,7 @@ var Input = class {
 			}
 		}
 		if (options.controllers.visualizeRays) for (let i = 0; i < 2; ++i) controllers[i].add(new ControllerRayVisual());
+		for (const controller of controllers) this.setupNativeSelectTracking(controller);
 		this.bindSelectStart(this.defaultOnSelectStart.bind(this));
 		this.bindSelectEnd(this.defaultOnSelectEnd.bind(this));
 		this.bindSqueezeStart(this.defaultOnSqueezeStart.bind(this));
@@ -9730,10 +10039,10 @@ var Input = class {
 	/**
 	* Retrieves the controller object by its ID.
 	* @param id - The ID of the controller.
-	* @returns The controller with the specified ID.
+	* @returns The controller with the specified ID, or undefined after removal.
 	*/
 	get(id) {
-		return this.controllers[id];
+		return this.controllers.find((controller) => controller.userData.id === id);
 	}
 	/**
 	* Adds an object to both controllers by creating a new group and cloning it.
@@ -9831,6 +10140,26 @@ var Input = class {
 	}
 	defaultOnDisconnected(event) {
 		const controller = event.target;
+		const wasSelected = controller.userData.selected === true;
+		const shouldKeepTransientPointer = this.nativeSelectControllers.delete(controller) && (wasSelected || this.releasedControllers.has(controller)) && (event.data?.targetRayMode ?? controller.inputSource?.targetRayMode) === "transient-pointer";
+		if (shouldKeepTransientPointer) {
+			const lastIntersection = controller.userData.lastIntersection;
+			this.disconnectedTransientPointerControllers.set(controller, {
+				position: controller.getWorldPosition(new THREE.Vector3()),
+				orientation: controller.getWorldQuaternion(new THREE.Quaternion()),
+				sourceType: this.getRaySourceType(controller),
+				sampled: false,
+				...lastIntersection?.object && lastIntersection.point ? { intersection: {
+					...lastIntersection,
+					point: lastIntersection.point.clone(),
+					...lastIntersection.uv ? { uv: lastIntersection.uv.clone() } : {},
+					...lastIntersection.uv1 ? { uv1: lastIntersection.uv1.clone() } : {},
+					...lastIntersection.normal ? { normal: lastIntersection.normal.clone() } : {},
+					...lastIntersection.barycoord ? { barycoord: lastIntersection.barycoord.clone() } : {},
+					...lastIntersection.pointOnLine ? { pointOnLine: lastIntersection.pointOnLine.clone() } : {}
+				} } : {}
+			});
+		}
 		controller.userData.connected = false;
 		if (controller.userData.selected) {
 			controller.userData.selected = false;
@@ -9842,14 +10171,18 @@ var Input = class {
 			});
 		}
 		if (controller.reticle) controller.reticle.visible = false;
-		this.releasedControllers.delete(controller);
+		if (!shouldKeepTransientPointer) this.releasedControllers.delete(controller);
 		delete controller?.gamepad;
-		switch (event.data?.handedness) {
-			case "left":
-				this.leftController = void 0;
-				break;
-			case "right": this.rightController = void 0;
-		}
+		if (this.leftController === controller) this.leftController = void 0;
+		if (this.rightController === controller) this.rightController = void 0;
+	}
+	setupNativeSelectTracking(controller) {
+		controller.addEventListener("selectstart", this.captureNativeSelectEvent);
+		controller.addEventListener("select", this.captureNativeSelectEvent);
+	}
+	removeNativeSelectTracking(controller) {
+		controller.removeEventListener("selectstart", this.captureNativeSelectEvent);
+		controller.removeEventListener("select", this.captureNativeSelectEvent);
 	}
 	/**
 	* Binds a listener to both controllers.
@@ -9857,7 +10190,10 @@ var Input = class {
 	* @param listener - Function to call
 	*/
 	bindListener(listenerName, listener) {
-		for (const controller of this.controllers) this.pinchFilter.setupControllerForType(controller, listenerName);
+		for (const controller of this.controllers) {
+			this.setupNativeSelectTracking(controller);
+			this.pinchFilter.setupControllerForType(controller, listenerName);
+		}
 		if (!this.listeners.has(listenerName)) this.listeners.set(listenerName, []);
 		this.listeners.get(listenerName).push(listener);
 	}
@@ -9870,7 +10206,11 @@ var Input = class {
 		}
 	}
 	dispatchEvent(event) {
-		if (this.pinchFilter.shouldFilterEvent(event)) return;
+		const removal = this.removingControllers.get(event.target);
+		if (removal && (event.type === "selectend" || event.type === "disconnected")) {
+			if (removal.has(event.type)) return;
+			removal.add(event.type);
+		} else if (this.pinchFilter.shouldFilterEvent(event)) return;
 		if (this.listeners.has(event.type)) for (const listener of this.listeners.get(event.type)) listener(event);
 	}
 	/**
@@ -9916,23 +10256,27 @@ var Input = class {
 	bindKeyDown(event) {
 		if (this.keyDownListeners.has(event)) return;
 		this.keyDownListeners.add(event);
-		window.addEventListener("keydown", event);
+		if (typeof window !== "undefined") window.addEventListener("keydown", event);
 	}
 	bindKeyUp(event) {
 		if (this.keyUpListeners.has(event)) return;
 		this.keyUpListeners.add(event);
-		window.addEventListener("keyup", event);
+		if (typeof window !== "undefined") window.addEventListener("keyup", event);
 	}
 	unbindKeyDown(event) {
 		this.keyDownListeners.delete(event);
-		window.removeEventListener("keydown", event);
+		if (typeof window !== "undefined") window.removeEventListener("keydown", event);
 	}
 	unbindKeyUp(event) {
 		this.keyUpListeners.delete(event);
-		window.removeEventListener("keyup", event);
+		if (typeof window !== "undefined") window.removeEventListener("keyup", event);
 	}
 	/** Samples current controller, button, and direct-touch state. */
 	sampleSources() {
+		for (const [controller, graceFrame] of this.disconnectedTransientPointerControllers) if (graceFrame.sampled) {
+			this.disconnectedTransientPointerControllers.delete(controller);
+			this.releasedControllers.delete(controller);
+		} else graceFrame.sampled = true;
 		if (this.controllersEnabled) for (const controller of this.controllers) {
 			if (controller.userData.connected !== true) continue;
 			controller.updatePose?.();
@@ -9944,7 +10288,8 @@ var Input = class {
 	getFrame() {
 		this.raySourceInputs.length = 0;
 		if (this.controllersEnabled) for (const controller of this.controllers) {
-			if (controller.userData.connected !== true) continue;
+			const transientPointerGraceFrame = this.disconnectedTransientPointerControllers.get(controller);
+			if (controller.userData.connected !== true && !transientPointerGraceFrame) continue;
 			let input = this.raySourceSlots.get(controller);
 			if (!input) {
 				input = {
@@ -9959,13 +10304,23 @@ var Input = class {
 			}
 			const position = input.position;
 			const orientation = input.orientation;
-			controller.getWorldPosition(position);
-			controller.getWorldQuaternion(orientation);
-			input.sourceType = this.getRaySourceType(controller);
+			if (transientPointerGraceFrame) {
+				position.copy(transientPointerGraceFrame.position);
+				orientation.copy(transientPointerGraceFrame.orientation);
+			} else {
+				controller.getWorldPosition(position);
+				controller.getWorldQuaternion(orientation);
+			}
+			input.sourceType = transientPointerGraceFrame?.sourceType ?? this.getRaySourceType(controller);
 			input.ray.origin.copy(position);
 			input.ray.direction.set(0, 0, -1).applyQuaternion(orientation).normalize();
-			input.selected = controller.userData.selected === true;
-			input.released = this.releasedControllers.delete(controller);
+			if (transientPointerGraceFrame) input.intersections = transientPointerGraceFrame.intersection ? [transientPointerGraceFrame.intersection] : void 0;
+			else {
+				const lastIntersection = controller.userData.lastIntersection;
+				input.intersections = lastIntersection && lastIntersection.object && lastIntersection.point ? [lastIntersection] : void 0;
+			}
+			input.selected = !transientPointerGraceFrame && controller.userData.selected === true;
+			input.released = transientPointerGraceFrame ? this.releasedControllers.has(controller) : this.releasedControllers.delete(controller);
 			this.raySourceInputs.push(input);
 		}
 		return this.interactionFrame;
@@ -10012,15 +10367,27 @@ var Input = class {
 	}
 	registerController(controller) {
 		if (this.controllers.includes(controller)) return;
+		for (const existing of [...this.builtInControllers, ...this.controllers]) {
+			const id = existing.userData.id;
+			if (Number.isSafeInteger(id) && id >= 0) this.nextControllerId = Math.max(this.nextControllerId, id + 1);
+		}
+		controller.userData.id = this.nextControllerId++;
 		this.controllers.push(controller);
+		if (!this.builtInControllers.has(controller)) this.addonControllers.add(controller);
+		if (!controller.reticle && this.options?.reticles.enabled) {
+			controller.reticle = new Reticle();
+			this.ownedReticles.add(controller.reticle);
+		}
 		if (controller.reticle) {
 			controller.reticle.visible = false;
 			this.reticles.add(controller.reticle);
 			if (this.reticleConfigurer) this.reticleConfigurer(controller.reticle);
 		}
+		this.setupNativeSelectTracking(controller);
 		this.pinchFilter.setupController(controller, this.listeners.keys());
 	}
 	enableController(controller) {
+		if (this.removingControllers.has(controller)) return;
 		this.registerController(controller);
 		this.activeControllers.add(controller);
 		controller.connect?.();
@@ -10029,8 +10396,80 @@ var Input = class {
 		controller.disconnect?.();
 		this.activeControllers.remove(controller);
 	}
+	/**
+	* Permanently unregisters a source added through enableController. Built-ins
+	* and already-removed sources are ignored. Capture is cancelled as source-lost
+	* next frame; terminal selectend/disconnected notifications are sent once.
+	*/
+	removeController(controller) {
+		if (this.builtInControllers.has(controller) || !this.addonControllers.delete(controller)) return;
+		const index = this.controllers.indexOf(controller);
+		if (index !== -1) this.controllers.splice(index, 1);
+		this.removeNativeSelectTracking(controller);
+		this.nativeSelectControllers.delete(controller);
+		this.disconnectedTransientPointerControllers.delete(controller);
+		this.removingControllers.set(controller, /* @__PURE__ */ new Set());
+		const seen = /* @__PURE__ */ new Set();
+		const observeEnd = () => {
+			seen.add("selectend");
+		};
+		const observeDisconnect = () => {
+			seen.add("disconnected");
+		};
+		controller.addEventListener("selectend", observeEnd);
+		controller.addEventListener("disconnected", observeDisconnect);
+		this.pinchFilter.setupController(controller, ["selectend", "disconnected"]);
+		try {
+			controller.disconnect?.();
+		} finally {
+			try {
+				try {
+					if (!seen.has("selectend")) controller.dispatchEvent({
+						type: "selectend",
+						target: controller
+					});
+				} finally {
+					if (!seen.has("disconnected")) controller.dispatchEvent({
+						type: "disconnected",
+						target: controller
+					});
+				}
+			} finally {
+				controller.removeEventListener("selectend", observeEnd);
+				controller.removeEventListener("disconnected", observeDisconnect);
+				for (const type of /* @__PURE__ */ new Set([
+					...this.listeners.keys(),
+					"selectend",
+					"disconnected"
+				])) this.pinchFilter.removeControllerForType(controller, type);
+				this.removingControllers.delete(controller);
+				this.activeControllers.remove(controller);
+				controller.userData.connected = false;
+				controller.userData.selected = false;
+				controller.userData.squeezing = false;
+				delete controller.gamepad;
+				if (this.leftController === controller) this.leftController = void 0;
+				if (this.rightController === controller) this.rightController = void 0;
+				this.releasedControllers.delete(controller);
+				this.nativeSelectControllers.delete(controller);
+				this.disconnectedTransientPointerControllers.delete(controller);
+				this.raySourceSlots.delete(controller);
+				if (controller.reticle) {
+					controller.reticle.visible = false;
+					controller.reticle.targetObject = void 0;
+					controller.reticle.removeFromParent();
+					if (this.ownedReticles.delete(controller.reticle)) {
+						controller.reticle.dispose();
+						controller.reticle = void 0;
+					}
+				}
+			}
+		}
+	}
 	disableControllers() {
 		this.controllersEnabled = false;
+		this.nativeSelectControllers.clear();
+		this.disconnectedTransientPointerControllers.clear();
 		for (const controller of this.controllers) {
 			controller.userData.selected = false;
 			this.releasedControllers.delete(controller);
@@ -10044,11 +10483,16 @@ var Input = class {
 		this.controllersEnabled = true;
 	}
 	dispose() {
-		for (const listener of this.keyDownListeners) window.removeEventListener("keydown", listener);
-		for (const listener of this.keyUpListeners) window.removeEventListener("keyup", listener);
+		if (typeof window !== "undefined") {
+			for (const listener of this.keyDownListeners) window.removeEventListener("keydown", listener);
+			for (const listener of this.keyUpListeners) window.removeEventListener("keyup", listener);
+		}
 		this.keyDownListeners.clear();
 		this.keyUpListeners.clear();
 		this.pinchFilter.dispose(this.controllers);
+		this.addonControllers.clear();
+		this.removingControllers.clear();
+		for (const controller of this.controllers) this.removeNativeSelectTracking(controller);
 		this.listeners.clear();
 		for (const controller of /* @__PURE__ */ new Set([...this.controllers, this.gazeController])) if (controller.reticle && this.ownedReticles.has(controller.reticle)) controller.reticle = void 0;
 		for (const reticle of this.ownedReticles) reticle.dispose();
@@ -10056,6 +10500,8 @@ var Input = class {
 		this.reticles.clear();
 		this.raySourceInputs.length = 0;
 		this.raySourceSlots.clear();
+		this.nativeSelectControllers.clear();
+		this.disconnectedTransientPointerControllers.clear();
 		this.directTouchInputs.length = 0;
 		this.directTouchSlots.length = 0;
 	}
@@ -10523,11 +10969,16 @@ var GeminiDetectorBackend = class extends BaseDetectorBackend$1 {
 	buildGeminiConfig() {
 		const geminiOptions = this.context.options.objects.backendConfig.gemini;
 		return {
-			thinkingConfig: { thinkingLevel: "LOW" },
-			responseMimeType: "application/json",
-			responseSchema: geminiOptions.responseSchema,
-			systemInstruction: [{ text: geminiOptions.systemInstruction }],
-			...geminiOptions.generationConfig ?? {}
+			generation_config: {
+				thinking_level: "low",
+				...geminiOptions.generationConfig ?? {}
+			},
+			system_instruction: geminiOptions.systemInstruction,
+			response_format: [{
+				type: "text",
+				mime_type: "application/json",
+				schema: geminiOptions.responseSchema
+			}]
 		};
 	}
 	async detect(snapshot) {
@@ -10695,21 +11146,21 @@ var ObjectDetector = class extends Script {
 			deviceCamera: XRDeviceCamera,
 			depth: Depth,
 			camera: THREE.Camera,
-			renderer: THREE.WebGLRenderer
+			rendererHolder: RendererHolder
 		};
 	}
 	/**
 	* Initializes the ObjectDetector.
 	* @override
 	*/
-	init({ options, ai, aiOptions, deviceCamera, depth, camera, renderer }) {
+	init({ options, ai, aiOptions, deviceCamera, depth, camera, rendererHolder }) {
 		this.options = options;
 		this.ai = ai;
 		this.aiOptions = aiOptions;
 		this.deviceCamera = deviceCamera;
 		this.depth = depth;
 		this.camera = camera;
-		this.renderer = renderer;
+		this.renderer = rendererHolder.renderer;
 		this.initialized = true;
 		this.disposed = false;
 		if (this.targetDevice === "galaxyxr") this.targetDevice = detectDeviceCameraTarget();
@@ -11006,14 +11457,14 @@ var PlaneDetector = class extends Script {
 	static {
 		this.dependencies = {
 			options: WorldOptions,
-			renderer: THREE.WebGLRenderer
+			rendererHolder: RendererHolder
 		};
 	}
 	/**
 	* Initializes the PlaneDetector.
 	*/
-	init({ options, renderer }) {
-		this.renderer = renderer;
+	init({ options, rendererHolder }) {
+		this.renderer = rendererHolder.renderer;
 		if (options.planes.showDebugVisualizations) this._debugMaterial = new THREE.MeshBasicMaterial({
 			color: 16776960,
 			wireframe: true,
@@ -11415,7 +11866,7 @@ var AnchorManager = class extends Script {
 	static {
 		this.dependencies = {
 			options: WorldOptions,
-			renderer: THREE.WebGLRenderer,
+			rendererHolder: RendererHolder,
 			xrReferenceSpaceCache: XRReferenceSpaceCache
 		};
 	}
@@ -11439,9 +11890,9 @@ var AnchorManager = class extends Script {
 	*     the anchor settings, and the renderer supplying the reference space
 	*     that anchor poses are expressed against.
 	*/
-	init({ options, renderer, xrReferenceSpaceCache }) {
+	init({ options, rendererHolder, xrReferenceSpaceCache }) {
 		this.options = options;
-		this.renderer = renderer;
+		this.renderer = rendererHolder?.renderer;
 		this.referenceSpaceCache = xrReferenceSpaceCache;
 		this.store = this.injectedStore ?? new LocalStorageAnchorStore(options.anchors.storageKey, options.anchors.maxStoredAnchors);
 	}
@@ -12012,14 +12463,14 @@ var DetectedMesh = class extends THREE.Mesh {
 		this.lastChangedTime = "lastChangedTime" in mesh ? mesh.lastChangedTime : 0;
 		this.semanticLabel = mesh.semanticLabel;
 	}
-	initRapierPhysics(RAPIER, blendedWorld) {
-		this.RAPIER = RAPIER;
+	initRapierPhysics(rapier, blendedWorld) {
+		this.RAPIER = rapier;
 		this.blendedWorld = blendedWorld;
-		const desc = RAPIER.RigidBodyDesc.fixed().setTranslation(this.position.x, this.position.y, this.position.z).setRotation(this.quaternion);
+		const desc = rapier.RigidBodyDesc.fixed().setTranslation(this.position.x, this.position.y, this.position.z).setRotation(this.quaternion);
 		this.rigidBody = blendedWorld.createRigidBody(desc);
 		const vertices = this.geometry.attributes.position.array;
 		const indices = this.geometry.getIndex().array;
-		const colliderDesc = RAPIER.ColliderDesc.trimesh(vertices, indices);
+		const colliderDesc = rapier.ColliderDesc.trimesh(vertices, indices);
 		this.collider = blendedWorld.createCollider(colliderDesc, this.rigidBody);
 	}
 	updateVertices(mesh) {
@@ -12103,11 +12554,11 @@ var MeshDetector = class extends Script {
 	static {
 		this.dependencies = {
 			options: MeshDetectionOptions,
-			renderer: THREE.WebGLRenderer
+			rendererHolder: RendererHolder
 		};
 	}
-	init({ options, renderer }) {
-		this.renderer = renderer;
+	init({ options, rendererHolder }) {
+		this.renderer = rendererHolder.renderer;
 		if (options.showDebugVisualizations) {
 			this.fallbackDebugMaterial = new THREE.MeshBasicMaterial({
 				color: 0,
@@ -13341,15 +13792,15 @@ var HumanRecognizer = class extends Script {
 			deviceCamera: XRDeviceCamera,
 			depth: Depth,
 			camera: THREE.Camera,
-			renderer: THREE.WebGLRenderer
+			rendererHolder: RendererHolder
 		};
 	}
-	init({ options, deviceCamera, depth, camera, renderer }) {
+	init({ options, deviceCamera, depth, camera, rendererHolder }) {
 		this.options = options;
 		this.deviceCamera = deviceCamera;
 		this.depth = depth;
 		this.camera = camera;
-		this.renderer = renderer;
+		this.renderer = rendererHolder.renderer;
 		this.disposed = false;
 	}
 	/**
@@ -13914,15 +14365,15 @@ var FaceRecognizer = class extends Script {
 			deviceCamera: XRDeviceCamera,
 			depth: Depth,
 			camera: THREE.Camera,
-			renderer: THREE.WebGLRenderer
+			rendererHolder: RendererHolder
 		};
 	}
-	init({ options, deviceCamera, depth, camera, renderer }) {
+	init({ options, deviceCamera, depth, camera, rendererHolder }) {
 		this.options = options;
 		this.deviceCamera = deviceCamera;
 		this.depth = depth;
 		this.camera = camera;
-		this.renderer = renderer;
+		this.renderer = rendererHolder.renderer;
 		this.disposed = false;
 		enableAcceleratedRaycast();
 	}
@@ -16765,6 +17216,6 @@ var ModelLoader = class {
 	}
 };
 //#endregion
-export { disposeMeshResources as $, xrDeviceCameraUserContinuousOptions as $n, getAdjacentFingerSpreads as $t, DetectedObject as A, SceneOptions as An, FacesOptions as At, GazeController as B, cropImage as Bn, StrokeRecognitionOptions as Bt, AnchorManager as C, HandsOptions as Cn, RENDERER_BACKENDS as Ct, PlaneDetector as D, xrDepthMeshPhysicsOptions as Dn, AnchorsOptions as Dt, anchorCapability as E, xrDepthMeshOptions as En, WorldOptions as Et, ActiveControllers as F, VideoStream as Fn, SoundOptions as Ft, OcclusionUtils as G, getDeviceCameraWorldFromView as Gn, WebXRHandContext as Gt, GamepadBindings as H, getCameraParametersSnapshot as Hn, HeadGestureRecognitionOptions as Ht, Input as I, RendererHolder as In, SpeechRecognizerOptions as It, XRReferenceSpaceCache as J, intrinsicsToProjectionMatrix as Jn, HeuristicGestureRecognizer as Jt, OcclusionPass as K, isDeviceCameraPoseAvailable as Kn, WebXRHandPoseEstimator as Kt, Reticles as L, assertWebGLRenderer as Ln, SpeechSynthesizerOptions as Lt, callInitWithDependencyInjection as M, SceneVisibilityOptions as Mn, PlanesOptions as Mt, AudioListener as N, XRDeviceCamera as Nn, ObjectsOptions as Nt, DetectedPlane as O, xrDepthMeshVisualizationOptions as On, defaultAnchorStorageKey as Ot, Physics as P, StreamState as Pn, MeshDetectionOptions as Pt, disposeMaterial as Q, xrDeviceCameraEnvironmentOptions as Qn, estimateHandScale as Qt, MouseController as R, isWebGPURenderer as Rn, PhysicsOptions as Rt, DetectedMesh as S, LayersOptions as Sn, Options as St, LocalStorageAnchorStore as T, DepthOptions as Tn, XRTransitionOptions as Tt, Reticle as U, getDeviceCameraClipFromView as Un, HeuristicHeadGestureRecognizer as Ut, GamepadController as V, detectDeviceCameraTarget as Vn, OneDollarUnistrokeRecognizer as Vt, Depth as W, getDeviceCameraWorldFromClip as Wn, GestureRecognitionOptions as Wt, Registry as X, DeviceCameraOptions as Xn, average as Xt, WaitFrame as Y, DEFAULT_RGB_TO_DEPTH_PARAMS as Yn, FINGER_ORDER as Yt, DepthMesh as Z, xrDeviceCameraEnvironmentContinuousOptions as Zn, clamp01 as Zt, isBVHReady as _, getThumbCurl as _n, lerp as _r, getObjectTargetPoint as _t, resolveSimulatorRotationsFromKeypoints as a, getFingerPalmAlignment as an, GEMINI_DEFAULT_FLASH_MODEL as ar, DEFAULT_FACE_CAMERA_SMOOTHING as at, PoseJointName as b, getThumbStraightness as bn, urlParams as br, InputOptions as bt, World as c, getFingertipDistance as cn, GeminiOptions as cr, BACK as ct, DetectedFace as d, getPalmPose as dn, getColorHex as dr, LEFT as dt, getBoneVectors as en, xrDeviceCameraUserOptions as er, disposeObjectChildren as et, FaceLandmarkName as f, getPalmRight as fn, getUrlParamBool as fr, RIGHT as ft, enableAcceleratedRaycast as g, getThumbBendAngles as gn, getVec4ByColorString as gr, getInteractionSource as gt, disposeBVH as h, getRelativeBoneAngles as hn, getUrlParameter as hr, ReticlePresenter as ht, resolveSimulatorHandPoseRotations as i, getFingerJoint as in, AIOptions as ir, DEFAULT_FACE_CAMERA_CAPSULE_HALF_HEIGHT as it, placeObjectAtIntersectionFacingTarget as j, SceneSetOfMarkOptions as jn, HumansOptions as jt, ObjectDetector as k, ContextOptions as kn, SegmentationOptions as kt, Segmenter as l, getFingertipPalmDistance as ln, OpenAIOptions as lr, DOWN as lt, applyBVH as m, getPalmWidth as mn, getUrlParamInt as mr, ZERO_VECTOR3 as mt, SIMULATOR_HAND_POSE_ROTATIONS as n, getFingerCurl as nn, OpenAI as nr, disposeRenderableResources as nt, SIMULATOR_HAND_COMMON_BIOMECHANICAL_CONSTRAINTS_DEGREES as o, getFingerSpread as on, GEMINI_DEFAULT_IMAGE_MODEL as or, faceCameraQuaternion as ot, _getBvhImportStatus as p, getPalmUp as pn, getUrlParamFloat as pr, UP as pt, DepthTextures as q, transformRgbUvToWorld as qn, HAND_INDEX_TO_LABEL as qt, applySimulatorHandPoseRotationConstraints as r, getFingerDirection as rn, Gemini as rr, Interaction as rt, parseSimulatorHandPoseRotations as s, getFingerStraightness as sn, GEMINI_DEFAULT_LIVE_MODEL as sr, faceCameraSlerpAlpha as st, ModelLoader as t, getFingerBendAngles as tn, AI as tr, disposeObjectTree as tt, FaceRecognizer as u, getPalmNormal as un, clamp$1 as ur, FORWARD as ut, HumanRecognizer as v, getThumbDirection as vn, parseBase64DataURL as vr, objectIsDescendantOf as vt, SimulatorAnchor as w, DepthMeshOptions as wn, ReticleOptions as wt, MeshDetector as x, getThumbVerticalDirection as xn, InteractionOptions as xt, DetectedBodyPose as y, getThumbOpposition as yn, print as yr, traverseUtil as yt, HeadGestureRecognition as z, DEVICE_CAMERA_PARAMETERS as zn, LightingOptions as zt };
+export { DEFAULT_FACE_CAMERA_CAPSULE_HALF_HEIGHT as $, GEMINI_DEFAULT_LIVE_MODEL as $n, getFingerJoint as $t, DetectedObject as A, VideoStream as An, SoundOptions as At, GazeController as B, intrinsicsToProjectionMatrix as Bn, WebXRHandContext as Bt, AnchorManager as C, xrDepthMeshVisualizationOptions as Cn, defaultAnchorStorageKey as Ct, PlaneDetector as D, SceneVisibilityOptions as Dn, PlanesOptions as Dt, anchorCapability as E, SceneSetOfMarkOptions as En, HumansOptions as Et, ActiveControllers as F, getDeviceCameraClipFromView as Fn, StrokeRecognitionOptions as Ft, OcclusionUtils as G, xrDeviceCameraUserContinuousOptions as Gn, average as Gt, GamepadBindings as H, DeviceCameraOptions as Hn, HAND_INDEX_TO_LABEL as Ht, Input as I, getDeviceCameraWorldFromClip as In, OneDollarUnistrokeRecognizer as It, XRReferenceSpaceCache as J, OpenAI as Jn, getAdjacentFingerSpreads as Jt, OcclusionPass as K, xrDeviceCameraUserOptions as Kn, clamp01 as Kt, Reticles as L, getDeviceCameraWorldFromView as Ln, HeadGestureRecognitionOptions as Lt, callInitWithDependencyInjection as M, cropImage as Mn, SpeechSynthesizerOptions as Mt, AudioListener as N, detectDeviceCameraTarget as Nn, PhysicsOptions as Nt, DetectedPlane as O, XRDeviceCamera as On, ObjectsOptions as Ot, Physics as P, getCameraParametersSnapshot as Pn, LightingOptions as Pt, Interaction as Q, GEMINI_DEFAULT_IMAGE_MODEL as Qn, getFingerDirection as Qt, MouseController as R, isDeviceCameraPoseAvailable as Rn, HeuristicHeadGestureRecognizer as Rt, DetectedMesh as S, xrDepthMeshPhysicsOptions as Sn, AnchorsOptions as St, LocalStorageAnchorStore as T, SceneOptions as Tn, FacesOptions as Tt, Reticle as U, xrDeviceCameraEnvironmentContinuousOptions as Un, HeuristicGestureRecognizer as Ut, GamepadController as V, DEFAULT_RGB_TO_DEPTH_PARAMS as Vn, WebXRHandPoseEstimator as Vt, Depth as W, xrDeviceCameraEnvironmentOptions as Wn, FINGER_ORDER as Wt, Registry as X, AIOptions as Xn, getFingerBendAngles as Xt, WaitFrame as Y, Gemini as Yn, getBoneVectors as Yt, DepthMesh as Z, GEMINI_DEFAULT_FLASH_MODEL as Zn, getFingerCurl as Zt, isBVHReady as _, LayersOptions as _n, Options as _t, resolveSimulatorRotationsFromKeypoints as a, getPalmNormal as an, getUrlParamFloat as ar, FORWARD as at, PoseJointName as b, DepthOptions as bn, XRTransitionOptions as bt, World as c, getPalmUp as cn, getVec4ByColorString as cr, UP as ct, DetectedFace as d, getThumbBendAngles as dn, print as dr, getInteractionSource as dt, getFingerPalmAlignment as en, GeminiOptions as er, DEFAULT_FACE_CAMERA_SMOOTHING as et, FaceLandmarkName as f, getThumbCurl as fn, urlParams as fr, getObjectTargetPoint as ft, enableAcceleratedRaycast as g, getThumbVerticalDirection as gn, InteractionOptions as gt, disposeBVH as h, getThumbStraightness as hn, InputOptions as ht, resolveSimulatorHandPoseRotations as i, getFingertipPalmDistance as in, getUrlParamBool as ir, DOWN as it, placeObjectAtIntersectionFacingTarget as j, DEVICE_CAMERA_PARAMETERS as jn, SpeechRecognizerOptions as jt, ObjectDetector as k, StreamState as kn, MeshDetectionOptions as kt, Segmenter as l, getPalmWidth as ln, lerp as lr, ZERO_VECTOR3 as lt, applyBVH as m, getThumbOpposition as mn, traverseUtil as mt, SIMULATOR_HAND_POSE_ROTATIONS as n, getFingerStraightness as nn, clamp$1 as nr, faceCameraSlerpAlpha as nt, SIMULATOR_HAND_COMMON_BIOMECHANICAL_CONSTRAINTS_DEGREES as o, getPalmPose as on, getUrlParamInt as or, LEFT as ot, _getBvhImportStatus as p, getThumbDirection as pn, objectIsDescendantOf as pt, DepthTextures as q, AI as qn, estimateHandScale as qt, applySimulatorHandPoseRotationConstraints as r, getFingertipDistance as rn, getColorHex as rr, BACK as rt, parseSimulatorHandPoseRotations as s, getPalmRight as sn, getUrlParameter as sr, RIGHT as st, ModelLoader as t, getFingerSpread as tn, OpenAIOptions as tr, faceCameraQuaternion as tt, FaceRecognizer as u, getRelativeBoneAngles as un, parseBase64DataURL as ur, ReticlePresenter as ut, HumanRecognizer as v, HandsOptions as vn, RENDERER_BACKENDS as vt, SimulatorAnchor as w, ContextOptions as wn, SegmentationOptions as wt, MeshDetector as x, xrDepthMeshOptions as xn, WorldOptions as xt, DetectedBodyPose as y, DepthMeshOptions as yn, ReticleOptions as yt, HeadGestureRecognition as z, transformRgbUvToWorld as zn, GestureRecognitionOptions as zt };
 
 //# sourceMappingURL=ModelLoader.js.map

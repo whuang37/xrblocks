@@ -14,9 +14,9 @@
 * limitations under the License.
 *
 * @file xrblocks.js
-* @version v0.21.1
-* @commitid 999bf37
-* @builddate 2026-09-30T22:18:33.059Z
+* @version v0.23.0
+* @commitid 5cd7aed
+* @builddate 2026-10-19T19:45:15.070Z
 * @description XR Blocks SDK, built from source with the above commit ID.
 * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
 * and follow rules below:
@@ -40,11 +40,12 @@ physical world space, also add locomotion methods like pinch to teleport.
 or generate from primitive shapes of use vox formats for voxels or
 lego-styles.
 */
-import { t as __exportAll } from "./rolldown-runtime.js";
 import { F as Script } from "./UICard.js";
-import { I as Input, M as callInitWithDependencyInjection, Nn as XRDeviceCamera, P as Physics, Rn as isWebGPURenderer, St as Options, U as Reticle, W as Depth, X as Registry, Y as WaitFrame, c as World, et as disposeObjectChildren, i as resolveSimulatorHandPoseRotations, n as SIMULATOR_HAND_POSE_ROTATIONS, r as applySimulatorHandPoseRotationConstraints, rt as Interaction, t as ModelLoader, tt as disposeObjectTree } from "./ModelLoader.js";
+import { I as Input, M as callInitWithDependencyInjection, On as XRDeviceCamera, P as Physics, Q as Interaction, U as Reticle, W as Depth, X as Registry, Y as WaitFrame, _t as Options, c as World, i as resolveSimulatorHandPoseRotations, n as SIMULATOR_HAND_POSE_ROTATIONS, r as applySimulatorHandPoseRotationConstraints, t as ModelLoader } from "./ModelLoader.js";
 import { a as SetSimulatorModeEvent, i as ShowSimulatorInstructionsEvent, l as SimulatorOptions, n as SimulatorHandPose, o as SimulatorHandPoseChangeRequestEvent, p as HAND_JOINT_NAMES, r as SetSimulatorHandPhysicsEvent, s as SetSimulatorEnvironmentEvent, u as Keycodes } from "./HandPoses.js";
-import { SparkRendererHolder } from "../xrblocks.js";
+import { c as isWebGPURenderer, i as disposeObjectTree, r as disposeObjectChildren } from "./ThreeDisposal.js";
+import { n as BaseSimulatorCompositor, t as WebGLDirectCompositor } from "./WebGLDirectCompositor.js";
+import { n as SetSimulatorTimeOfDayEvent, t as SetSimulatorDayNightEvent } from "./SimulatorLightingEvents.js";
 import * as THREE from "three";
 import { FullScreenQuad } from "three/addons/postprocessing/Pass.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
@@ -93,73 +94,6 @@ var SimulatorBackgroundVideo = class {
 	}
 };
 //#endregion
-//#region src/simulator/internal/compositing/BaseSimulatorCompositor.ts
-/**
-* Abstract base compositor providing shared simulator scene pass, background video quad,
-* and SparkRenderer linear encoding state management.
-*/
-var BaseSimulatorCompositor = class {
-	constructor(deps) {
-		this.deps = deps;
-		this.renderSimulatorSceneToCanvasBound = this.renderSimulatorSceneToCanvas.bind(this);
-		this.previousAutoClearColor = deps.renderer.autoClearColor;
-		deps.renderer.autoClearColor = false;
-	}
-	setSparkEncodeLinear(value) {
-		this.sparkRenderer ??= this.deps.registry.get(SparkRendererHolder)?.renderer;
-		if (this.sparkRenderer) this.sparkRenderer.encodeLinear = value;
-	}
-	setBackgroundVideo(videoTexture) {
-		if (this.backgroundVideoQuad) {
-			this.backgroundVideoQuad.material.dispose();
-			if ("dispose" in this.backgroundVideoQuad) this.backgroundVideoQuad.dispose();
-			this.backgroundVideoQuad = void 0;
-		}
-		if (videoTexture) this.backgroundVideoQuad = this.createBackgroundVideoQuad(videoTexture);
-	}
-	createBackgroundVideoQuad(videoTexture) {
-		return new FullScreenQuad(new THREE.MeshBasicMaterial({ map: videoTexture }));
-	}
-	renderSimulatorScenePass(renderCamera, mainCamera) {
-		this.deps.simulatorCamera?.onBeforeSimulatorSceneRender(mainCamera, this.renderSimulatorSceneToCanvasBound);
-		this.renderSimulatorSceneToCanvas(renderCamera);
-		this.deps.simulatorCamera?.onSimulatorSceneRendered();
-	}
-	renderSimulatorSceneToCanvas(camera) {
-		const { renderer, simulatorScene } = this.deps;
-		this.setSparkEncodeLinear(false);
-		renderer.setRenderTarget(null);
-		if (this.backgroundVideoQuad) this.backgroundVideoQuad.render(renderer);
-		this.clearBeforeSimulatorScene();
-		renderer.render(simulatorScene, camera);
-		renderer.clearDepth();
-	}
-	clearBeforeSimulatorScene() {}
-	dispose() {
-		this.setBackgroundVideo(void 0);
-		this.deps.renderer.autoClearColor = this.previousAutoClearColor;
-	}
-};
-//#endregion
-//#region src/simulator/internal/compositing/WebGLDirectCompositor.ts
-/**
-* Compositor that renders the simulator scene directly to the canvas
-* followed by the main scene without an intermediate offscreen render target.
-*/
-var WebGLDirectCompositor = class extends BaseSimulatorCompositor {
-	renderFrame(renderCamera, mainCamera) {
-		this.renderSimulatorScenePass(renderCamera, mainCamera);
-		const { renderer } = this.deps;
-		const prevAutoClear = renderer.autoClear;
-		renderer.autoClear = false;
-		try {
-			this.deps.renderMainScene(renderCamera);
-		} finally {
-			renderer.autoClear = prevAutoClear;
-		}
-	}
-};
-//#endregion
 //#region src/simulator/internal/compositing/WebGLRenderTargetCompositor.ts
 /**
 * Compositor that renders the main scene to an offscreen WebGLRenderTarget
@@ -188,7 +122,6 @@ var WebGLRenderTargetCompositor = class extends BaseSimulatorCompositor {
 			this.virtualSceneRenderTarget = new THREE.WebGLRenderTarget(this.deps.renderer.domElement.width, this.deps.renderer.domElement.height, { stencilBuffer: this.stencilBuffer });
 			this.virtualSceneFullScreenQuad.material.map = this.virtualSceneRenderTarget.texture;
 		}
-		this.setSparkEncodeLinear(true);
 		this.deps.renderer.setRenderTarget(this.virtualSceneRenderTarget);
 		this.deps.renderer.clear();
 		this.deps.renderMainScene(renderCamera);
@@ -839,10 +772,12 @@ var SimulatorControls = class {
 		this.#enabled = true;
 		this.onPointerMove = (event) => {
 			if (!this.enabled) return;
+			if (this.pointerDown || event.buttons > 0 || this.renderer?.domElement && document.pointerLockElement === this.renderer.domElement) this.userInterface.notifyUserInteraction?.();
 			this.simulatorModeControls.onPointerMove(event);
 		};
 		this.onPointerDown = (event) => {
 			if (!this.enabled) return;
+			this.userInterface.notifyUserInteraction?.();
 			this.simulatorModeControls.onPointerDown(event);
 			this.pointerDown = true;
 			this.activePointerId = event.pointerId;
@@ -864,7 +799,10 @@ var SimulatorControls = class {
 		};
 		this.onWheel = (event) => {
 			if (!this.enabled) return;
-			if (this.simulatorModeControls.onWheel(event)) event.preventDefault();
+			if (this.simulatorModeControls.onWheel(event)) {
+				this.userInterface.notifyUserInteraction?.();
+				event.preventDefault();
+			}
 		};
 		this.onKeyDown = (event) => {
 			if (!this.enabled) return;
@@ -876,6 +814,7 @@ var SimulatorControls = class {
 				this.downKeys.clear();
 				return;
 			}
+			this.userInterface.notifyUserInteraction?.();
 			this.downKeys.add(event.code);
 			if (this.simulatorOptions?.modeToggle.enabled && event.code === this.simulatorOptions.modeToggle.toggleKey) this.setSimulatorMode(this.simulatorOptions.modeToggle.toggleOrder[this.simulatorMode]);
 			this.simulatorModeControls.onKeyDown(event);
@@ -978,6 +917,7 @@ var SimulatorControls = class {
 		this.simulatorModeControls = this.simulatorModes[this.simulatorMode];
 		this.simulatorModeControls.onModeActivated();
 		if (this.simulatorSettingsPanelElement) this.simulatorSettingsPanelElement.simulatorMode = mode;
+		this.userInterface.setSimulatorMode?.(mode);
 	}
 	setSimulatorSettingsPanelElement(element) {
 		this.simulatorSettingsPanelElement?.removeEventListener("setSimulatorMode", this.onSetSimulatorMode);
@@ -1020,6 +960,70 @@ var SimulatorControls = class {
 		if (!domElement) return;
 		if (pointerId === this.activePointerId) this.activePointerId = void 0;
 		if (domElement.hasPointerCapture?.(pointerId)) domElement.releasePointerCapture(pointerId);
+	}
+};
+//#endregion
+//#region src/simulator/SimulatorDisplayFov.ts
+/** Applies and restores a simulated display FOV across mono and stereo cameras. */
+var SimulatorDisplayFov = class {
+	constructor(mainCamera, stereoCameras, options) {
+		this.mainCamera = mainCamera;
+		this.stereoCameras = stereoCameras;
+		this.options = options;
+		if (mainCamera instanceof THREE.PerspectiveCamera) this.defaultCameraFov = mainCamera.fov;
+	}
+	apply() {
+		if (!(this.mainCamera instanceof THREE.PerspectiveCamera) || this.defaultCameraFov === void 0) return;
+		const diagonalFov = this.options.displayDiagonalFov;
+		const aspect = this.mainCamera.aspect;
+		if (diagonalFov === this.appliedDisplayDiagonalFov && (diagonalFov === void 0 || aspect === this.appliedDisplayAspect)) {
+			this.syncStereoCameraProjection();
+			return;
+		}
+		if (diagonalFov === void 0) {
+			this.restore();
+			this.syncStereoCameraProjection();
+			return;
+		}
+		if (!Number.isFinite(diagonalFov) || diagonalFov <= 0 || diagonalFov >= 180) throw new RangeError(`Simulator displayDiagonalFov must be greater than 0 and less than 180 degrees.`);
+		const aspectForDiagonal = aspect > 0 ? aspect : 1;
+		const verticalTangent = Math.tan(THREE.MathUtils.degToRad(diagonalFov / 2)) / Math.hypot(aspectForDiagonal, 1);
+		this.mainCamera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(verticalTangent));
+		this.mainCamera.updateProjectionMatrix();
+		this.appliedDisplayDiagonalFov = diagonalFov;
+		this.appliedDisplayAspect = aspect;
+		this.appliedCameraFov = this.mainCamera.fov;
+		this.appliedCameraProjection = this.mainCamera.projectionMatrix.clone();
+		this.syncStereoCameraProjection();
+	}
+	dispose() {
+		this.restore();
+	}
+	syncStereoCameraProjection() {
+		if (!(this.mainCamera instanceof THREE.PerspectiveCamera)) return;
+		for (const camera of this.stereoCameras) {
+			if (!(camera instanceof THREE.PerspectiveCamera)) continue;
+			camera.fov = this.mainCamera.fov;
+			camera.aspect = this.mainCamera.aspect;
+			camera.near = this.mainCamera.near;
+			camera.far = this.mainCamera.far;
+			camera.zoom = this.mainCamera.zoom;
+			camera.projectionMatrix.copy(this.mainCamera.projectionMatrix);
+			camera.projectionMatrixInverse.copy(this.mainCamera.projectionMatrixInverse);
+		}
+	}
+	restore() {
+		const camera = this.mainCamera;
+		const appliedCameraFov = this.appliedCameraFov;
+		const appliedCameraProjection = this.appliedCameraProjection;
+		this.appliedCameraFov = void 0;
+		this.appliedCameraProjection = void 0;
+		this.appliedDisplayDiagonalFov = void 0;
+		this.appliedDisplayAspect = void 0;
+		if (!(camera instanceof THREE.PerspectiveCamera) || this.defaultCameraFov === void 0 || appliedCameraFov === void 0 || appliedCameraProjection === void 0 || camera.fov !== appliedCameraFov || !camera.projectionMatrix.equals(appliedCameraProjection)) return;
+		camera.fov = this.defaultCameraFov;
+		camera.updateProjectionMatrix();
+		this.syncStereoCameraProjection();
 	}
 };
 //#endregion
@@ -1320,6 +1324,8 @@ var SimulatorHands = class {
 			if (this.simulatorControllerState.currentControllerIndex === 0) this.setLeftHandLerpPose(handPoseChangeEvent.pose);
 			else this.setRightHandLerpPose(handPoseChangeEvent.pose);
 		};
+		this.leftController.visible = false;
+		this.rightController.visible = false;
 	}
 	/**
 	* Initialize Simulator Hands.
@@ -1608,6 +1614,7 @@ var SimulatorInterface = class {
 		this.simulatorElementsLoader = simulatorElementsLoader;
 		this.elements = [];
 		this.interfaceVisible = true;
+		this.hasUserInteracted = false;
 		this.onGamepadConnected = () => {
 			const gp = this.gamepadController;
 			if (!gp || gp.hasShownToast) return;
@@ -1618,11 +1625,16 @@ var SimulatorInterface = class {
 	/**
 	* Initialize the simulator interface.
 	*/
-	async init(simulatorOptions, simulatorControls, simulatorHands, input, setEnvironment, handPhysicsAvailable = false) {
+	async init(simulatorOptions, simulatorControls, simulatorHands, input, setEnvironment, handPhysicsAvailable = false, lighting) {
+		this.lighting = lighting;
+		this.simulatorOptions = simulatorOptions;
+		this.hasUserInteracted = false;
+		this.clearOverlayTimers();
 		if (!await this.ensureElementsAvailable()) return;
-		if (setEnvironment) this.createSimulatorSettingsPanel(simulatorOptions, simulatorControls, setEnvironment, handPhysicsAvailable);
+		if (setEnvironment) this.createSimulatorSettingsPanel(simulatorOptions, simulatorControls, setEnvironment, handPhysicsAvailable, lighting);
 		this.showGeminiLivePanel(simulatorOptions);
 		this.createHandPosePanel(simulatorOptions, simulatorHands);
+		this.createOverlayInstructions(simulatorOptions, simulatorControls.simulatorMode);
 		this.simulatorHands = simulatorHands;
 		simulatorHands.onHandednessChanged = (handedness) => {
 			this._ensureGamepadToast().flash(`Active Hand: ${handedness === "left" ? "Left" : "Right"}`);
@@ -1637,7 +1649,7 @@ var SimulatorInterface = class {
 		});
 		return this.elementsAvailable;
 	}
-	createSimulatorSettingsPanel(simulatorOptions, simulatorControls, setEnvironment, handPhysicsAvailable) {
+	createSimulatorSettingsPanel(simulatorOptions, simulatorControls, setEnvironment, handPhysicsAvailable, lighting) {
 		if (simulatorOptions.simulatorSettingsPanel.enabled) {
 			const settingsElement = document.createElement(simulatorOptions.simulatorSettingsPanel.element);
 			settingsElement.environments = simulatorOptions.environments;
@@ -1645,6 +1657,8 @@ var SimulatorInterface = class {
 			settingsElement.instructionsEnabled = simulatorOptions.instructions.enabled;
 			settingsElement.handPhysicsAvailable = handPhysicsAvailable;
 			settingsElement.handPhysicsEnabled = simulatorOptions.handPhysics.enabled;
+			this.settingsElement = settingsElement;
+			this.syncLightingState();
 			document.body.appendChild(settingsElement);
 			simulatorControls.setSimulatorSettingsPanelElement(settingsElement);
 			settingsElement.addEventListener(SetSimulatorEnvironmentEvent.type, (event) => {
@@ -1659,6 +1673,14 @@ var SimulatorInterface = class {
 					});
 				}
 			});
+			settingsElement.addEventListener(SetSimulatorDayNightEvent.type, (event) => {
+				if (event instanceof SetSimulatorDayNightEvent && lighting) Promise.resolve(lighting.setEnabled(event.enabled)).then(() => {
+					this.syncLightingState();
+				});
+			});
+			settingsElement.addEventListener(SetSimulatorTimeOfDayEvent.type, (event) => {
+				if (event instanceof SetSimulatorTimeOfDayEvent) lighting?.setTimeOfDay(event.timeOfDay);
+			});
 			settingsElement.addEventListener(ShowSimulatorInstructionsEvent.type, (event) => {
 				const mode = event instanceof ShowSimulatorInstructionsEvent ? event.simulatorMode : void 0;
 				this.showInstructions(simulatorOptions, mode);
@@ -1668,6 +1690,20 @@ var SimulatorInterface = class {
 			});
 			this.elements.push(settingsElement);
 		}
+	}
+	/**
+	* Re-reads the day/night lighting binding into the settings panel. Called
+	* after environment switches (the environment may declare lighting or not),
+	* after enable/disable, and after API-driven changes so the slider can
+	* never show a time of day the simulator is not actually at.
+	*/
+	syncLightingState() {
+		const element = this.settingsElement;
+		const lighting = this.lighting;
+		if (!element || !lighting) return;
+		element.dayNightAvailable = lighting.isAvailable();
+		element.dayNightEnabled = lighting.isEnabled();
+		element.timeOfDay = lighting.getTimeOfDay();
 	}
 	showInstructions(simulatorOptions, simulatorMode) {
 		if (simulatorOptions.instructions.enabled) {
@@ -1692,6 +1728,69 @@ var SimulatorInterface = class {
 			document.body.appendChild(handsPanelElement);
 			simulatorHands.setHandPosePanelElement(handsPanelElement);
 			this.elements.push(handsPanelElement);
+		}
+	}
+	createOverlayInstructions(simulatorOptions, simulatorMode) {
+		if (simulatorOptions.instructions.enabled && simulatorOptions.instructions.overlayEnabled) {
+			this.overlayInstructionsElement?.remove();
+			const element = document.createElement(simulatorOptions.instructions.overlayElement);
+			element.simulatorMode = simulatorMode;
+			element.visible = false;
+			document.body.appendChild(element);
+			this.overlayInstructionsElement = element;
+			this.elements.push(element);
+		}
+	}
+	/**
+	* Starts the 5-second idle timer after the simulator finishes initializing.
+	* If no user interaction occurs before the timer expires, the overlay
+	* instructions fade in.
+	*/
+	startOverlayInstructionsTimer(simulatorOptions = this.simulatorOptions, simulatorMode) {
+		if (!simulatorOptions?.instructions.enabled || !simulatorOptions.instructions.overlayEnabled || this.hasUserInteracted) return;
+		this.simulatorOptions = simulatorOptions;
+		if (simulatorMode && this.overlayInstructionsElement) this.overlayInstructionsElement.simulatorMode = simulatorMode;
+		this.clearOverlayTimers();
+		this.overlayFadeInTimer = setTimeout(() => {
+			this.overlayFadeInTimer = void 0;
+			if (!this.hasUserInteracted && this.overlayInstructionsElement) this.overlayInstructionsElement.visible = true;
+		}, simulatorOptions.instructions.fadeInDelayMs);
+	}
+	/**
+	* Notifies the interface that the user has interacted with the simulator.
+	* Cancels the fade-in timer if the overlay has not yet appeared, or fades
+	* the overlay out immediately.
+	*/
+	notifyUserInteraction() {
+		if (this.hasUserInteracted) return;
+		this.hasUserInteracted = true;
+		if (this.overlayFadeInTimer !== void 0) {
+			clearTimeout(this.overlayFadeInTimer);
+			this.overlayFadeInTimer = void 0;
+			this.overlayInstructionsElement?.remove();
+			this.overlayInstructionsElement = void 0;
+			return;
+		}
+		if (this.overlayInstructionsElement) {
+			this.overlayInstructionsElement.visible = false;
+			this.overlayRemoveTimer = setTimeout(() => {
+				this.overlayRemoveTimer = void 0;
+				this.overlayInstructionsElement?.remove();
+				this.overlayInstructionsElement = void 0;
+			}, 500);
+		}
+	}
+	setSimulatorMode(mode) {
+		if (this.overlayInstructionsElement) this.overlayInstructionsElement.simulatorMode = mode;
+	}
+	clearOverlayTimers() {
+		if (this.overlayFadeInTimer !== void 0) {
+			clearTimeout(this.overlayFadeInTimer);
+			this.overlayFadeInTimer = void 0;
+		}
+		if (this.overlayRemoveTimer !== void 0) {
+			clearTimeout(this.overlayRemoveTimer);
+			this.overlayRemoveTimer = void 0;
 		}
 	}
 	hideUiElements() {
@@ -1719,6 +1818,11 @@ var SimulatorInterface = class {
 		gp.onOpenSettings = () => this.toggleGamepadSettings(gp);
 	}
 	dispose() {
+		this.clearOverlayTimers();
+		this.overlayInstructionsElement?.remove();
+		this.overlayInstructionsElement = void 0;
+		this.simulatorOptions = void 0;
+		this.hasUserInteracted = false;
 		if (this.gamepadController) {
 			this.gamepadController.removeEventListener("connected", this.onGamepadConnected);
 			this.gamepadController.onOpenSettings = void 0;
@@ -2188,7 +2292,8 @@ const MANIFEST_KEYS = /* @__PURE__ */ new Set([
 	"quaternion",
 	"scale",
 	"locations",
-	"objects"
+	"objects",
+	"lighting"
 ]);
 const LOCATION_KEYS = /* @__PURE__ */ new Set(["description", "position"]);
 const OBJECT_KEYS = /* @__PURE__ */ new Set([
@@ -2202,6 +2307,11 @@ const OBJECT_KEYS = /* @__PURE__ */ new Set([
 	"label",
 	"data",
 	"physics"
+]);
+const LIGHTING_KEYS = /* @__PURE__ */ new Set([
+	"kind",
+	"nightScenePath",
+	"pairing"
 ]);
 function isRecord(value) {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -2280,6 +2390,21 @@ function parseObject(value, index, seenIds) {
 function resolveOptionalUrl(path, baseUrl) {
 	return path ? new URL(path, baseUrl).href : void 0;
 }
+function parseLighting(value, baseUrl) {
+	if (value === void 0) return void 0;
+	const location = "manifest.lighting";
+	if (!isRecord(value)) throw new Error(`${location}: expected an object.`);
+	assertKnownKeys(value, LIGHTING_KEYS, location);
+	if (value.kind !== "dayNight") throw new Error(`${location}.kind: expected 'dayNight'.`);
+	const nightScenePath = parseString(value.nightScenePath, `${location}.nightScenePath`);
+	if (!nightScenePath) throw new Error(`${location}: nightScenePath is required.`);
+	if (value.pairing !== "bake-crossfade-v1") throw new Error(`${location}.pairing: expected 'bake-crossfade-v1'.`);
+	return {
+		kind: "dayNight",
+		nightScenePath: resolveOptionalUrl(nightScenePath, baseUrl) ?? nightScenePath,
+		pairing: "bake-crossfade-v1"
+	};
+}
 function parseSimulatorSceneManifest(value, manifestUrl) {
 	if (!isRecord(value)) throw new Error(`Invalid simulator manifest at ${manifestUrl}: expected an object.`);
 	try {
@@ -2309,6 +2434,7 @@ function parseSimulatorSceneManifest(value, manifestUrl) {
 				...object,
 				assetPath: resolveOptionalUrl(object.assetPath, manifestUrl)
 			})),
+			lighting: parseLighting(value.lighting, manifestUrl),
 			manifestUrl
 		};
 	} catch (error) {
@@ -2354,6 +2480,8 @@ var SimulatorEnvironmentManager = class {
 		}));
 	}
 	async setEnvironment(environment) {
+		this.dayNight?.dispose();
+		this.dayNight = void 0;
 		const generation = ++this.generation;
 		const manifest = await loadSimulatorSceneManifest(environment.manifestPath);
 		const { root, objects: objectsGroup } = this.simulatorScene.createEnvironmentRoot(manifest);
@@ -2446,7 +2574,81 @@ var SimulatorEnvironmentManager = class {
 		this.simulatorWorld.restoreSimulatorPlanes();
 		this.refreshMeshes();
 	}
+	/**
+	* Fetches the environment's night bake for day/night lighting ahead of
+	* first use. No-op when the manifest declares no day/night lighting.
+	*/
+	async preloadDayNight() {
+		await (await this.ensureDayNight())?.preload();
+	}
+	/**
+	* Sets the time of day for the environment's day/night lighting (0 = day
+	* endpoint, 1 = night endpoint). Initializes the lighting lazily on first
+	* use. No-op when the manifest declares no day/night lighting.
+	*/
+	async setTimeOfDay(t) {
+		(await this.ensureDayNight())?.setTimeOfDay(t);
+	}
+	/** True when day/night lighting is initialized for the active environment. */
+	get dayNightEnabled() {
+		return !!this.dayNight;
+	}
+	/** Current time of day (0 = day, 1 = night); 0 while lighting is off. */
+	get timeOfDay() {
+		return this.dayNight?.timeOfDay ?? 0;
+	}
+	/**
+	* Enables or disables day/night lighting for the active environment. The
+	* DayNightCycle chunk and the night bake are only fetched on first enable,
+	* never at environment load; disabling restores the day-only render and
+	* frees the night resources. No-op when the manifest declares no day/night
+	* lighting.
+	*/
+	async setDayNightEnabled(enabled) {
+		if (enabled) await (await this.ensureDayNight())?.preload();
+		else if (this.dayNight) {
+			this.dayNight.dispose();
+			this.dayNight = void 0;
+		}
+	}
+	/**
+	* Lazily initializes the environment's day/night lighting. Returns the
+	* cached cycle, or null when the active environment declares no day/night
+	* lighting (or the backend cannot render it).
+	*/
+	async ensureDayNight() {
+		if (this.dayNight !== void 0) return this.dayNight;
+		const lighting = this.manifest?.lighting;
+		const root = this.simulatorScene.environmentRoot;
+		const dayScene = this.simulatorScene.gltf?.scene;
+		if (!lighting || !root || !dayScene) {
+			this.dayNight = null;
+			return null;
+		}
+		const generation = this.generation;
+		try {
+			const { DayNightCycle } = await import("./DayNightCycle.js");
+			const dayNight = await DayNightCycle.create({
+				renderer: this.renderer,
+				root,
+				dayScene,
+				loader: new ModelLoader(),
+				lighting
+			});
+			if (generation !== this.generation) {
+				dayNight?.dispose();
+				return null;
+			}
+			this.dayNight = dayNight ?? null;
+		} catch (error) {
+			console.warn("Simulator day/night lighting failed to initialize.", error);
+			this.dayNight = null;
+		}
+		return this.dayNight;
+	}
 	dispose() {
+		this.dayNight?.dispose();
+		this.dayNight = void 0;
 		this.generation++;
 		this.simulatorWorld.suspendSimulatorSensing();
 		this.disposeRoomPhysics();
@@ -3092,7 +3294,6 @@ var SimulatorWorld = class {
 };
 //#endregion
 //#region src/simulator/Simulator.ts
-var Simulator_exports = /* @__PURE__ */ __exportAll({ Simulator: () => Simulator });
 var Simulator = class extends Script {
 	static {
 		this.dependencies = {
@@ -3153,6 +3354,8 @@ var Simulator = class extends Script {
 		this.simulatorPhysics = physics && simulatorOptions.physics.enabled ? new SimulatorPhysics(physics, simulatorOptions.handPhysics) : void 0;
 		this.options = simulatorOptions;
 		this.mainCamera = camera;
+		this.displayFov = new SimulatorDisplayFov(camera, this.stereoCameras, simulatorOptions);
+		this.displayFov.apply();
 		this.mainScene = scene;
 		this.registry = registry;
 		this.world = world;
@@ -3181,7 +3384,13 @@ var Simulator = class extends Script {
 		if (!initialEnvironment) throw new Error(`Simulator environment index ${this.options.activeEnvironmentIndex} does not exist.`);
 		await this.environment.setEnvironment(initialEnvironment);
 		await this.environment.resolveEnvironmentNames(this.options.environments);
-		await this.userInterface.init(simulatorOptions, this.controls, this.hands, input, this.activateEnvironment.bind(this), !!this.simulatorPhysics);
+		await this.userInterface.init(simulatorOptions, this.controls, this.hands, input, this.activateEnvironment.bind(this), !!this.simulatorPhysics, {
+			isAvailable: () => !!this.activeEnvironmentManifest?.lighting,
+			isEnabled: () => this.dayNightEnabled,
+			getTimeOfDay: () => this.environment?.timeOfDay ?? 0,
+			setEnabled: (enabled) => this.setDayNightEnabled(enabled),
+			setTimeOfDay: (timeOfDay) => void this.setTimeOfDay(timeOfDay)
+		});
 		this.useSimulatorObjectDetection = options.world.objects.enabled && options.world.objects.simulatorOverride;
 		if (this.useSimulatorObjectDetection && world.objects) {
 			this.objectDetectionSource = new SimulatorObjectDetectionSource(camera, this.simulatorScene, this.objects);
@@ -3208,6 +3417,7 @@ var Simulator = class extends Script {
 		scene.add(camera);
 		if (this.options.stereo.enabled) this.setupStereoCameras(camera);
 		this.initialized = true;
+		this.userInterface.startOverlayInstructionsTimer(this.options, this.controls.simulatorMode);
 	}
 	async setEnvironment(nameOrPath, manifestPath) {
 		await this.activateEnvironment(manifestPath ? {
@@ -3220,6 +3430,7 @@ var Simulator = class extends Script {
 		const index = this.options.environments.findIndex((candidate) => candidate.manifestPath === environment.manifestPath);
 		if (index !== -1) this.options.activeEnvironmentIndex = index;
 		await this.environment.setEnvironment(environment);
+		this.userInterface.syncLightingState();
 	}
 	get activeEnvironment() {
 		return this.environment?.activeEnvironment;
@@ -3230,6 +3441,38 @@ var Simulator = class extends Script {
 	/** Returns the named world-space locations for the active environment. */
 	getLocations() {
 		return this.environment?.manifest?.locations ?? {};
+	}
+	/**
+	* Sets the time of day for the active environment's day/night lighting
+	* (0 = day endpoint, 1 = night endpoint). Initializes the lighting lazily
+	* on first use. No-op when the active environment declares no day/night
+	* lighting.
+	*/
+	async setTimeOfDay(t) {
+		await this.environment?.setTimeOfDay(t);
+		this.userInterface.syncLightingState();
+	}
+	/**
+	* Fetches the active environment's night bake ahead of first use so the
+	* day/night lighting can start without a visible delay. No-op when the
+	* active environment declares no day/night lighting.
+	*/
+	async preloadDayNight() {
+		await this.environment?.preloadDayNight();
+	}
+	/**
+	* Enables or disables day/night lighting for the active environment. The
+	* DayNightCycle chunk and the night bake are only fetched on first enable,
+	* never at environment load. No-op when the active environment declares no
+	* day/night lighting.
+	*/
+	async setDayNightEnabled(enabled) {
+		await this.environment?.setDayNightEnabled(enabled);
+		this.userInterface.syncLightingState();
+	}
+	/** True when day/night lighting is enabled for the active environment. */
+	get dayNightEnabled() {
+		return this.environment?.dayNightEnabled ?? false;
 	}
 	physicsStep() {
 		this.simulatorPhysics?.step();
@@ -3250,6 +3493,11 @@ var Simulator = class extends Script {
 	dispose() {
 		let firstError;
 		const cleanups = [
+			() => {
+				const displayFov = this.displayFov;
+				this.displayFov = void 0;
+				displayFov?.dispose();
+			},
 			() => this.controls.dispose(),
 			() => this.userInterface.dispose(),
 			() => this.hands.dispose(),
@@ -3333,6 +3581,7 @@ var Simulator = class extends Script {
 	*/
 	renderFrame() {
 		if (!this.initialized || !this.compositor) return;
+		this.displayFov?.apply();
 		this.compositor.renderFrame(this.getRenderCamera(), this.mainCamera);
 	}
 	setVideoPath(path) {
@@ -3341,6 +3590,6 @@ var Simulator = class extends Script {
 	}
 };
 //#endregion
-export { Simulator, WebGLDirectCompositor as n, BaseSimulatorCompositor as r, Simulator_exports as t };
+export { Simulator };
 
 //# sourceMappingURL=Simulator.js.map

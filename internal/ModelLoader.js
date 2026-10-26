@@ -14,9 +14,9 @@
 * limitations under the License.
 *
 * @file xrblocks.js
-* @version v0.23.0
-* @commitid 5cd7aed
-* @builddate 2026-10-19T19:45:15.070Z
+* @version v0.24.0
+* @commitid 414ae0d
+* @builddate 2026-10-26T17:22:12.993Z
 * @description XR Blocks SDK, built from source with the above commit ID.
 * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
 * and follow rules below:
@@ -198,8 +198,8 @@ function parseBase64DataURL(dataURL) {
 //#endregion
 //#region src/ai/AIOptions.ts
 const GEMINI_DEFAULT_FLASH_MODEL = "gemini-3.8-flash";
-const GEMINI_DEFAULT_LIVE_MODEL = "gemini-3.1-flash-live-preview";
-const GEMINI_DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image";
+const GEMINI_DEFAULT_LIVE_MODEL = "gemini-3.8-live";
+const GEMINI_DEFAULT_IMAGE_MODEL = "gemini-nano-banana-2.1";
 var GeminiOptions = class {
 	constructor() {
 		this.apiKey = "";
@@ -215,7 +215,7 @@ var OpenAIOptions = class {
 	constructor() {
 		this.apiKey = "";
 		this.urlParam = "openaiKey";
-		this.model = "gpt-4.1";
+		this.model = "gpt-6-luna";
 		this.enabled = false;
 	}
 };
@@ -3739,7 +3739,7 @@ var HumansOptions = class {
 		this.backendConfig = {
 			activeBackend: "mediapipe",
 			mediapipe: {
-				wasmFilesUrl: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm",
+				wasmFilesUrl: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/wasm",
 				modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task",
 				/**
 				* Run inference in a web worker so a detection pass does not stall the
@@ -3787,7 +3787,7 @@ var FacesOptions = class {
 		this.backendConfig = {
 			activeBackend: "mediapipe",
 			mediapipe: {
-				wasmFilesUrl: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm",
+				wasmFilesUrl: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/wasm",
 				modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task",
 				/**
 				* The maximum number of simultaneous faces to track.
@@ -3842,7 +3842,7 @@ var SegmentationOptions = class {
 		this.backendConfig = {
 			activeBackend: "mediapipe",
 			mediapipe: {
-				wasmFilesUrl: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm",
+				wasmFilesUrl: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/wasm",
 				modelAssetPath: "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite",
 				/**
 				* Output the per-pixel category mask. Required to produce a
@@ -10737,15 +10737,18 @@ var AudioListener = class extends Script {
 */
 async function callInitWithDependencyInjection(script, registry, fallback) {
 	const dependencies = script.constructor.dependencies;
-	if (dependencies == null) {
+	const optionalDependencies = script.constructor.optionalDependencies;
+	if (dependencies == null && optionalDependencies == null) {
 		await script.init(fallback);
 		return;
 	}
-	await script.init(Object.fromEntries(Object.entries(dependencies).map(([key, value]) => {
+	const resolvedDependencies = Object.fromEntries(Object.entries(dependencies ?? {}).map(([key, value]) => {
 		const dependency = registry.get(value);
 		if (!dependency) throw new Error(`Dependency not found for key: ${value.name}`);
 		return [key, dependency];
-	})));
+	}));
+	for (const [key, value] of Object.entries(optionalDependencies ?? {})) resolvedDependencies[key] = registry.get(value);
+	await script.init(resolvedDependencies);
 }
 //#endregion
 //#region src/utils/ObjectPlacement.ts
@@ -13397,7 +13400,7 @@ var BaseHumanBackend = class {
 * host page's importmap, so they need an absolute URL. Bump this in lockstep
 * with the importmap entries in the demos that use MediaPipe.
 */
-const MEDIAPIPE_MODULE_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs";
+const MEDIAPIPE_MODULE_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/vision_bundle.mjs";
 const MEDIA_PIPE_VISION_WORKER_SOURCE = `
 let task = null;
 

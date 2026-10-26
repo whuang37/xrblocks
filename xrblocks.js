@@ -14,9 +14,9 @@
 * limitations under the License.
 *
 * @file xrblocks.js
-* @version v0.23.0
-* @commitid 5cd7aed
-* @builddate 2026-10-19T19:45:15.070Z
+* @version v0.24.0
+* @commitid 414ae0d
+* @builddate 2026-10-26T17:22:12.993Z
 * @description XR Blocks SDK, built from source with the above commit ID.
 * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
 * and follow rules below:
@@ -5147,6 +5147,21 @@ var PermissionsManager = class {
 	}
 };
 //#endregion
+//#region src/core/components/WebGPUXRSupport.ts
+/**
+* Whether this device can run immersive WebXR but not WebXR with WebGPU, as in
+* browsers without the WebXR/WebGPU binding. `WebGPURenderer` has to use its
+* WebGL backend to enter an immersive session on such devices.
+*/
+async function isWebGPUXRUnavailable() {
+	if (typeof navigator === "undefined" || !navigator.xr) return false;
+	if (typeof globalThis.XRGPUBinding !== "undefined") return false;
+	for (const mode of ["immersive-ar", "immersive-vr"]) try {
+		if (await navigator.xr.isSessionSupported(mode)) return true;
+	} catch {}
+	return false;
+}
+//#endregion
 //#region src/core/Core.ts
 const EPSILON$1 = 1e-9;
 function loadSimulatorModule() {
@@ -5242,6 +5257,7 @@ var Core = class Core {
 		this.textureLoader = new THREE.TextureLoader();
 		this.webXRSettings = {};
 		this.shouldAutostartSimulator = false;
+		this.hasWarnedAboutInvalidFoveationLevel = false;
 		this.simulatorRunning = false;
 		this.onBeforeWebXRSessionStart = (event) => {
 			if (this.options?.framebufferScaleFactor === "native" && typeof XRWebGLLayer !== "undefined") {
@@ -5537,12 +5553,15 @@ var Core = class Core {
 		} else if (options.rendererBackend === "webgpu") {
 			const { WebGPURenderer } = await import("three/webgpu");
 			this.assertInitializing();
+			const forceWebGL = options.webgpuOptions?.forceWebGL ?? await isWebGPUXRUnavailable();
+			this.assertInitializing();
+			if (forceWebGL && options.webgpuOptions?.forceWebGL === void 0) console.info("WebXR with WebGPU is unavailable; WebGPURenderer will use its WebGL backend.");
 			this.renderer = new WebGPURenderer({
 				canvas: options.canvas,
 				antialias: options.antialias,
 				stencil: options.stencil,
 				alpha: true,
-				forceWebGL: options.webgpuOptions?.forceWebGL
+				forceWebGL
 			});
 			this.renderer.xr.enabled = true;
 			await this.renderer.init();
@@ -5610,7 +5629,7 @@ var Core = class Core {
 		const webXRRequiredFeatures = options.webxrRequiredFeatures;
 		const webXROptionalFeatures = options.webxrOptionalFeatures;
 		if (!webXROptionalFeatures.includes(options.referenceSpaceType)) webXROptionalFeatures.push(options.referenceSpaceType);
-		if (options.rendererBackend === "webgpu" && !isSerializerRenderer(this.renderer) && !webXROptionalFeatures.includes("webgpu")) webXROptionalFeatures.push("webgpu");
+		if (isWebGPURenderer(this.renderer) && "isWebGPUBackend" in this.renderer.backend && this.renderer.backend.isWebGPUBackend === true && !webXROptionalFeatures.includes("webgpu")) webXROptionalFeatures.push("webgpu");
 		if (options.deviceCamera?.enabled) webXROptionalFeatures.push("camera-access");
 		this.webXRSettings.requiredFeatures = webXRRequiredFeatures;
 		this.webXRSettings.optionalFeatures = webXROptionalFeatures;
@@ -5702,7 +5721,10 @@ var Core = class Core {
 	async onXRSessionStarted(session) {
 		if (!this.isLifecycleActive()) return;
 		this._environmentBlendMode = session?.environmentBlendMode;
-		if (session) this.additiveDisplaySimulation?.onXRSessionStarted(session);
+		if (session) {
+			this.applyXRSessionRenderingOptions(session);
+			this.additiveDisplaySimulation?.onXRSessionStarted(session);
+		}
 		if (session?.enabledFeatures?.includes("webgpu")) console.debug("WebXR session is using WebGPU");
 		if (session) this.xrReferenceSpaceCache.onXRSessionStart(session);
 		if (this.options.deviceCamera?.enabled) {
@@ -5710,6 +5732,32 @@ var Core = class Core {
 			if (!this.isLifecycleActive()) return;
 		}
 		this.scriptsManager.onXRSessionStarted(session);
+	}
+	applyXRSessionRenderingOptions(session) {
+		const { foveationLevel, targetFrameRate } = this.options;
+		if (foveationLevel !== void 0 && Number.isFinite(foveationLevel)) {
+			if ("setFoveation" in this.renderer.xr) this.renderer.xr.setFoveation(Math.max(0, Math.min(1, foveationLevel)));
+		} else if (foveationLevel !== void 0 && !this.hasWarnedAboutInvalidFoveationLevel) {
+			this.hasWarnedAboutInvalidFoveationLevel = true;
+			console.warn("Ignoring non-finite WebXR foveation level.");
+		}
+		if (targetFrameRate === void 0) return;
+		const { supportedFrameRates } = session;
+		if (!supportedFrameRates) return;
+		const normalizedFrameRate = Math.fround(targetFrameRate);
+		if (!supportedFrameRates.includes(normalizedFrameRate)) {
+			console.warn(`Requested WebXR target frame rate ${targetFrameRate} is not supported. Supported frame rates: ${supportedFrameRates.join(", ")}.`);
+			return;
+		}
+		if (typeof session.updateTargetFrameRate !== "function") return;
+		const warnOnFrameRateError = (error) => {
+			console.warn("Unable to set the WebXR session target frame rate.", error);
+		};
+		try {
+			session.updateTargetFrameRate(normalizedFrameRate).catch(warnOnFrameRateError);
+		} catch (error) {
+			warnOnFrameRateError(error);
+		}
 	}
 	isLifecycleActive() {
 		return this.lifecycleState === "initializing" || this.lifecycleState === "running";
@@ -7539,7 +7587,7 @@ const DEFAULT_EXIT_BUTTON_STYLE = Object.freeze({
 */
 var UIExitButton = class extends UIButton {
 	static {
-		this.dependencies = { sessionManager: WebXRSessionManager };
+		this.optionalDependencies = { sessionManager: WebXRSessionManager };
 	}
 	constructor({ label = "X", ariaLabel = "Exit XR", pointerEvents = "auto", style, onClick, onExit, sessionManager, ...rest } = {}) {
 		const mergedStyle = {
@@ -7554,14 +7602,26 @@ var UIExitButton = class extends UIButton {
 			onClick: () => {
 				this.handleExit(onClick);
 			},
-			...rest
+			...rest,
+			visible: false
 		});
 		this.name = "UIExitButton";
-		this.sessionManager = sessionManager;
+		this.onSessionStart = () => {
+			this.syncVisibility();
+		};
+		this.onSessionEnd = () => {
+			this.syncVisibility();
+		};
 		this._onExit = onExit;
+		if (sessionManager) this.setSessionManager(sessionManager);
 	}
 	init(dependencies = {}) {
-		if (dependencies.sessionManager) this.sessionManager = dependencies.sessionManager;
+		if (dependencies.sessionManager) this.setSessionManager(dependencies.sessionManager);
+	}
+	dispose() {
+		this.sessionManager?.removeEventListener("sessionstart", this.onSessionStart);
+		this.sessionManager?.removeEventListener("sessionend", this.onSessionEnd);
+		super.dispose();
 	}
 	async handleExit(customOnClick) {
 		if (this._onExit) {
@@ -7572,9 +7632,22 @@ var UIExitButton = class extends UIButton {
 			customOnClick();
 			return;
 		}
-		if (this.sessionManager) try {
+		if (this.sessionManager?.currentSession) try {
 			await this.sessionManager.endSession();
-		} catch {}
+		} catch (error) {
+			if (!(error instanceof Error && error.message === "No session to end")) console.error("Failed to end XR session", error);
+		}
+	}
+	setSessionManager(sessionManager) {
+		this.sessionManager?.removeEventListener("sessionstart", this.onSessionStart);
+		this.sessionManager?.removeEventListener("sessionend", this.onSessionEnd);
+		this.sessionManager = sessionManager;
+		sessionManager.addEventListener("sessionstart", this.onSessionStart);
+		sessionManager.addEventListener("sessionend", this.onSessionEnd);
+		this.syncVisibility();
+	}
+	syncVisibility() {
+		this.visible = !!this.sessionManager?.currentSession;
 	}
 };
 //#endregion

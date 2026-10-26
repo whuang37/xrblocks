@@ -3246,6 +3246,11 @@ export declare class Options {
     microphone: boolean;
   };
   xrSessionMode: XRSessionMode;
+  /**
+   * Falls back to `immersive-vr` when the browser supports it but not
+   * `immersive-ar`, unless `camera-access` or `depth-sensing` is required.
+   */
+  fallbackToVR: boolean;
   private _formFactor;
   get formFactor(): FormFactor;
   /**
@@ -6377,19 +6382,26 @@ export declare class WebXRSessionManager extends THREE.EventDispatcher<WebXRSess
   private renderer;
   private sessionInit;
   private mode;
+  private fallbackToVR;
   currentSession?: XRSession;
   private sessionOptions?;
   private xrModeSupported?;
   private waitingForXRSession;
   private disposed;
   private disposalPromise?;
-  constructor(renderer: WebGLOrWebGPURenderer, sessionInit: XRSessionInit, mode: XRSessionMode);
+  constructor(renderer: WebGLOrWebGPURenderer, sessionInit: XRSessionInit, mode: XRSessionMode, fallbackToVR?: boolean);
   /**
    * Checks for WebXR support and availability of the requested session mode.
    * This should be called to initialize the manager and trigger the first
    * events.
    */
   initialize(): Promise<void>;
+  /**
+   * Whether an unsupported immersive-ar request can use immersive-vr instead.
+   * A VR session may not grant camera access or depth sensing, so apps that
+   * require either keep the unsupported path.
+   */
+  private canFallBackToVR;
   /**
    * Requests and initializes a WebXR session.
    */
@@ -6811,6 +6823,8 @@ export declare class Depth {
   private requestedSecondaryViews;
   /** Whether a CPU depth query has requested GPU readback. */
   private requestedDepth;
+  /** Whether the GPU depth warning for WebGPU sessions has been shown. */
+  private warnedGPUDepthWithWebGPU;
   /**
    * Depth is a lightweight manager based on three.js to simply prototyping
    * with Depth in WebXR.
@@ -6960,20 +6974,23 @@ export type SimulatorHandPoseJoints = {
   s?: number[];
 }[];
 /**
- * Semantic biomechanical hand angles in radians, ordered as [x, y, z].
+ * Anatomical control-frame Euler angles in radians, composed in XYZ order.
  *
  * Long fingers:
  * - x: positive flexes toward the palm; negative extends away.
  * - y: positive abducts away from the middle-finger axis; negative adducts.
- * - z: positive axial roll toward the thumb; negative rolls away.
+ * - z: axial rotation about the segment, mirrored between hands.
  *
  * Middle finger:
  * - y: positive radial deviation toward index/thumb; negative ulnar deviation.
  *
- * Thumb:
+ * Thumb base:
  * - x: positive flexes across the palm; negative extends/repositions.
- * - y: positive palmar abduction away from the palm; negative adducts back.
- * - z: positive opposition/internal roll into the hand; negative repositions away.
+ * - y: positive palmar abduction toward the finger-pad side; negative adducts back.
+ * - z: axial rotation; opposition combines flexion, abduction, and rotation.
+ *
+ * Thumb phalanges: x flexes toward the thumb pad, y moves sideways, z twists.
+ * Angles are offsets from the rig neutral pose, not clinical anatomical-zero angles.
  */
 export type SimulatorHandJointRotationArray = [number, number, number];
 export type SimulatorHandPoseRotations = Partial<Record<JointName, SimulatorHandJointRotationArray>>;
@@ -7755,12 +7772,14 @@ export interface SimulatorObjectDetectionSource {
 export declare class ObjectDetector extends Script {
   static dependencies: {
     options: typeof WorldOptions;
-    ai: typeof AI;
-    aiOptions: typeof AIOptions;
     deviceCamera: typeof XRDeviceCamera;
     depth: typeof Depth;
     camera: typeof THREE.Camera;
     rendererHolder: typeof RendererHolder;
+  };
+  static optionalDependencies: {
+    ai: typeof AI;
+    aiOptions: typeof AIOptions;
   };
   /**
    * A map from the object's UUID to our custom `DetectedObject` instance.
@@ -7780,8 +7799,8 @@ export declare class ObjectDetector extends Script {
    */
   detectedObjects: DetectedObject<unknown>[];
   private options;
-  private ai;
-  private aiOptions;
+  private ai?;
+  private aiOptions?;
   private deviceCamera;
   private depth;
   private camera;
@@ -7799,8 +7818,8 @@ export declare class ObjectDetector extends Script {
    */
   init({ options, ai, aiOptions, deviceCamera, depth, camera, rendererHolder }: {
     options: WorldOptions;
-    ai: AI;
-    aiOptions: AIOptions;
+    ai?: AI;
+    aiOptions?: AIOptions;
     deviceCamera: XRDeviceCamera;
     depth: Depth;
     camera: THREE.PerspectiveCamera;

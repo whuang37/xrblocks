@@ -15,8 +15,8 @@
 *
 * @file xrblocks.js
 * @version v0.24.0
-* @commitid b89cf0d
-* @builddate 2026-10-29T01:00:40.867Z
+* @commitid 9a4ab86
+* @builddate 2026-11-09T16:54:38.149Z
 * @description XR Blocks SDK, built from source with the above commit ID.
 * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
 * and follow rules below:
@@ -151,12 +151,16 @@ function ScriptMixin(base) {
 		* @param _event - `event.target` is the logical object and
 		* `event.source.controller` identifies the controller.
 		* Call `event.stopPropagation()` to stop bubbling to ancestor Scripts.
+		* Call `event.stopGlobalPropagation()` to suppress global selection callbacks
+		* for the rest of this capture
 		*/
 		onObjectSelectStart(_event) {}
 		/**
 		* Called when a source stops selecting the object this Script represents.
 		* @param _event - The completed state and end reason.
 		* Call `event.stopPropagation()` to stop bubbling to ancestor Scripts.
+		* Call `event.stopGlobalPropagation()` to suppress global selection callbacks
+		* for the rest of this capture
 		*/
 		onObjectSelectEnd(_event) {}
 		/**
@@ -164,6 +168,8 @@ function ScriptMixin(base) {
 		* Manipulation captures do not emit this callback.
 		* @param _event - The controller and completed hold duration.
 		* Call `event.stopPropagation()` to stop bubbling to ancestor Scripts.
+		* Call `event.stopGlobalPropagation()` to suppress global selection callbacks
+		* for the rest of this capture
 		*/
 		onObjectLongSelect(_event) {}
 		/**
@@ -364,7 +370,8 @@ const STYLE_KEYS = /* @__PURE__ */ new Set([
 	":hover",
 	":active",
 	":disabled",
-	":focus"
+	":focus",
+	":checked"
 ]);
 const STATE_STYLE_KEYS = /* @__PURE__ */ new Set([
 	"backgroundColor",
@@ -744,7 +751,7 @@ function validateStyle(property, value, stateOnly) {
 	if ((property === "innerShadowFalloff" || property === "dropShadowFalloff") && typeof value === "number" && value <= 0) throw new Error(`UI style "${property}" must be positive.`);
 }
 function isStateStyleKey(property) {
-	return property === ":hover" || property === ":active" || property === ":disabled" || property === ":focus";
+	return property === ":hover" || property === ":active" || property === ":disabled" || property === ":focus" || property === ":checked";
 }
 function isUIUnit(value) {
 	return typeof value === "number" && Number.isFinite(value) || value === "auto" || typeof value === "string" && /^-?\d+(?:\.\d+)?%$/.test(value);
@@ -795,6 +802,94 @@ function cloneStyleValue(value) {
 	if (Array.isArray(value)) return value.map(cloneStyleValue);
 	if (!value || typeof value !== "object") return value;
 	return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, cloneStyleValue(nested)]));
+}
+//#endregion
+//#region src/utils/SceneGraphUtils.ts
+/**
+* Checks if a given object is a descendant of another object in the scene
+* graph. This function is useful for determining if an interaction (like a
+* raycast hit) has occurred on a component that is part of a larger, complex
+* entity.
+*
+* It uses an iterative approach to traverse up the hierarchy from the child.
+*
+* @param child - The potential descendant object.
+* @param parent - The potential ancestor object.
+* @returns True if `child` is the same as `parent` or is a descendant of
+*     `parent`.
+*/
+function objectIsDescendantOf(child, parent) {
+	let currentNode = child;
+	while (currentNode) {
+		if (currentNode === parent) return true;
+		currentNode = currentNode.parent;
+	}
+	return false;
+}
+/**
+* Traverses the scene graph from a given node, calling a callback function for
+* each node. The traversal stops if the callback returns true.
+*
+* This function is similar to THREE.Object3D.traverse, but allows for early
+* exit from the traversal based on the callback's return value.
+*
+* @param node - The starting node for the traversal.
+* @param callback - The function to call for each node. It receives the current
+*     node as an argument. If the callback returns `true`, the traversal will
+*     stop.
+* @returns Whether the callback returned true for any node.
+*/
+function traverseUtil(node, callback) {
+	if (callback(node)) return true;
+	for (const child of node.children) if (traverseUtil(child, callback)) return true;
+	return false;
+}
+/**
+* Gets a world-space point on an object's rendered geometry near a reference
+* position. Falls back to the object's world position when it has no mesh
+* triangles. `closest` measures from `from`; `center` measures from the
+* object's world bounding-box center.
+* UI elements use the center of their rendered bounds.
+*/
+function getObjectTargetPoint(object, from, out, mode = "closest") {
+	const presentation = getUIPresentationObject(object);
+	const renderedObject = presentation ?? object;
+	renderedObject.updateWorldMatrix(true, true);
+	if (presentation || isUIPresentationObject(object)) {
+		const bounds = new THREE.Box3();
+		const clippedBounds = getUIPresentationBounds(object, bounds);
+		if (clippedBounds === null) return renderedObject.getWorldPosition(out);
+		if (clippedBounds === void 0) bounds.setFromObject(renderedObject, true);
+		if (!bounds.isEmpty()) return bounds.getCenter(out);
+	}
+	const reference = mode === "center" ? new THREE.Box3().setFromObject(renderedObject, true).getCenter(new THREE.Vector3()) : from;
+	let closestDistanceSquared = Infinity;
+	const a = new THREE.Vector3();
+	const b = new THREE.Vector3();
+	const c = new THREE.Vector3();
+	const centroid = new THREE.Vector3();
+	renderedObject.traverse((child) => {
+		if (!(child instanceof THREE.Mesh) || !child.visible) return;
+		const position = child.geometry.getAttribute("position");
+		if (!position) return;
+		const index = child.geometry.index;
+		const vertexCount = index?.count ?? position.count;
+		for (let offset = 0; offset + 2 < vertexCount; offset += 3) {
+			child.getVertexPosition(index?.getX(offset) ?? offset, a);
+			child.getVertexPosition(index?.getX(offset + 1) ?? offset + 1, b);
+			child.getVertexPosition(index?.getX(offset + 2) ?? offset + 2, c);
+			a.applyMatrix4(child.matrixWorld);
+			b.applyMatrix4(child.matrixWorld);
+			c.applyMatrix4(child.matrixWorld);
+			centroid.copy(a).add(b).add(c).multiplyScalar(1 / 3);
+			const distanceSquared = centroid.distanceToSquared(reference);
+			if (distanceSquared < closestDistanceSquared) {
+				closestDistanceSquared = distanceSquared;
+				out.copy(centroid);
+			}
+		}
+	});
+	return closestDistanceSquared < Infinity ? out : object.getWorldPosition(out);
 }
 //#endregion
 //#region src/interaction/SemanticControl.ts
@@ -890,8 +985,8 @@ function validateUIAppearance(value) {
 //#region src/ui/components/UICard.ts
 /** The only world-transform root in a spatial UI tree. */
 var UICard = class extends UIElement {
-	constructor({ size, pixelSize = .001, anchorX = "center", anchorY = "center", appearance = "surface", manipulation, edge = false, ...options }) {
-		validateSize(size);
+	constructor({ size = {}, pixelSize = .001, anchorX = "center", anchorY = "center", appearance = "surface", manipulation, edge = false, ...options } = {}) {
+		const normalizedSize = normalizeSize(size);
 		validatePixelSize(pixelSize);
 		validateAnchor(anchorX, [
 			"left",
@@ -912,10 +1007,9 @@ var UICard = class extends UIElement {
 		this.anchorX = anchorX;
 		this.anchorY = anchorY;
 		this.appearance = appearance;
-		this.sizeTarget = { ...size };
+		this.sizeTarget = normalizedSize;
 		this.sizeProxy = new Proxy(this.sizeTarget, { set: (target, property, value) => {
-			if (property === "width") validateFixedSize(value);
-			else if (property === "height") validateHeight(value);
+			if (property === "width" || property === "height") validateDimension(value);
 			else throw new Error(`Unknown UICard size property "${String(property)}".`);
 			Reflect.set(target, property, value);
 			resolvedSizes.delete(this);
@@ -942,9 +1036,9 @@ var UICard = class extends UIElement {
 		return this.sizeProxy;
 	}
 	set size(value) {
-		validateSize(value);
-		this.sizeProxy.width = value.width;
-		this.sizeProxy.height = value.height;
+		const normalized = normalizeSize(value);
+		this.sizeProxy.width = normalized.width;
+		this.sizeProxy.height = normalized.height;
 	}
 	get manipulation() {
 		return this.xb?.manipulation;
@@ -979,15 +1073,15 @@ function getUICardEdgeOptions(card) {
 const resolvedSizes = /* @__PURE__ */ new WeakMap();
 /** Returns the current physical card size after layout resolves. */
 function getResolvedUICardSize(card) {
-	if (card.size.height !== "auto") return {
+	if (card.size.width !== "auto" && card.size.height !== "auto") return {
 		width: card.size.width,
 		height: card.size.height
 	};
 	return resolvedSizes.get(card);
 }
-/** Stores a backend-calculated physical size for an automatic-height card. */
+/** Stores a backend-calculated physical size for an automatically sized card. */
 function setResolvedUICardSize(card, size) {
-	if (card.size.height !== "auto") return;
+	if (card.size.width !== "auto" && card.size.height !== "auto") return;
 	resolvedSizes.set(card, size);
 }
 const contentMeasurers = /* @__PURE__ */ new WeakMap();
@@ -1054,15 +1148,20 @@ function normalizeCardManipulation(value) {
 		handle: value.handle ? { ...value.handle } : void 0
 	};
 }
-function validateSize(size) {
-	if (!size) throw new Error("UICard requires a size.");
-	validateFixedSize(size.width);
-	validateHeight(size.height);
+function normalizeSize(size) {
+	if (!size || typeof size !== "object") throw new Error("UICard size must be an object with optional width and height.");
+	const { width = "auto", height = "auto" } = size;
+	validateDimension(width);
+	validateDimension(height);
+	return {
+		width,
+		height
+	};
 }
 function validateFixedSize(value) {
-	if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw new Error("UICard fixed size values must be finite and nonnegative.");
+	if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw new Error("UICard size dimensions must be 'auto' or finite, nonnegative numbers.");
 }
-function validateHeight(value) {
+function validateDimension(value) {
 	if (value === "auto") return;
 	validateFixedSize(value);
 }
@@ -1073,6 +1172,6 @@ function validateAnchor(value, allowed, property) {
 	if (!allowed.includes(value)) throw new Error(`UICard ${property} has an invalid value.`);
 }
 //#endregion
-export { DEFAULT_GRADIENT_PANEL_PROPS as A, getUIPresentationBounds as C, isUIElement as D, getUIStructureRevision as E, Script as F, ScriptMixin as I, isDefaultScriptMethod as L, resumeTransformScripts as M, suspendTransformScripts as N, isUIPresentationObject as O, MeshScript as P, getUIElementKind as S, getUIRevision as T, isSemanticControlDisabled as _, measureUICardMinContentWidth as a, cloneUIStyle as b, validateUIAppearance as c, isManipulationActionEnabled as d, normalizeManipulationConfig as f, isSemanticControl as g, getSemanticControl as h, measureUICardContentHeight as i, TransformScript as j, registerUIPresentationObject as k, cloneScaleOptions as l, ManipulationAction as m, getResolvedUICardSize as n, setResolvedUICardSize as o, normalizeRotationAxis as p, getUICardEdgeOptions as r, setUICardContentMeasurer as s, UICard as t, isHandleAction as u, registerSemanticControl as v, getUIPresentationObject as w, collectUIRoots as x, UIElement as y };
+export { isUIElement as A, cloneUIStyle as C, getUIPresentationObject as D, getUIPresentationBounds as E, suspendTransformScripts as F, MeshScript as I, Script as L, DEFAULT_GRADIENT_PANEL_PROPS as M, TransformScript as N, getUIRevision as O, resumeTransformScripts as P, ScriptMixin as R, UIElement as S, getUIElementKind as T, isSemanticControlDisabled as _, measureUICardMinContentWidth as a, objectIsDescendantOf as b, validateUIAppearance as c, isManipulationActionEnabled as d, normalizeManipulationConfig as f, isSemanticControl as g, getSemanticControl as h, measureUICardContentHeight as i, registerUIPresentationObject as j, getUIStructureRevision as k, cloneScaleOptions as l, ManipulationAction as m, getResolvedUICardSize as n, setResolvedUICardSize as o, normalizeRotationAxis as p, getUICardEdgeOptions as r, setUICardContentMeasurer as s, UICard as t, isHandleAction as u, registerSemanticControl as v, collectUIRoots as w, traverseUtil as x, getObjectTargetPoint as y, isDefaultScriptMethod as z };
 
 //# sourceMappingURL=UICard.js.map

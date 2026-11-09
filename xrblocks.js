@@ -15,8 +15,8 @@
 *
 * @file xrblocks.js
 * @version v0.24.0
-* @commitid b89cf0d
-* @builddate 2026-10-29T01:00:40.867Z
+* @commitid 9a4ab86
+* @builddate 2026-11-09T16:54:38.149Z
 * @description XR Blocks SDK, built from source with the above commit ID.
 * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
 * and follow rules below:
@@ -41,12 +41,12 @@ or generate from primitive shapes of use vox formats for voxels or
 lego-styles.
 */
 import { t as __exportAll } from "./internal/rolldown-runtime.js";
-import { C as getUIPresentationBounds, D as isUIElement, F as Script, I as ScriptMixin, L as isDefaultScriptMethod, P as MeshScript, S as getUIElementKind, b as cloneUIStyle, f as normalizeManipulationConfig, h as getSemanticControl, j as TransformScript, m as ManipulationAction, n as getResolvedUICardSize, t as UICard, v as registerSemanticControl, w as getUIPresentationObject, x as collectUIRoots, y as UIElement } from "./internal/UICard.js";
-import { $n as GEMINI_DEFAULT_LIVE_MODEL, $t as getFingerJoint, A as DetectedObject, An as VideoStream, At as SoundOptions, B as GazeController, Bn as intrinsicsToProjectionMatrix, Bt as WebXRHandContext, C as AnchorManager, Cn as xrDepthMeshVisualizationOptions, Ct as defaultAnchorStorageKey, D as PlaneDetector, Dn as SceneVisibilityOptions, Dt as PlanesOptions, E as anchorCapability, En as SceneSetOfMarkOptions, Et as HumansOptions, F as ActiveControllers, Fn as getDeviceCameraClipFromView, Ft as StrokeRecognitionOptions, G as OcclusionUtils, Gn as xrDeviceCameraUserContinuousOptions, Gt as average, H as GamepadBindings, Hn as DeviceCameraOptions, Ht as HAND_INDEX_TO_LABEL, I as Input, In as getDeviceCameraWorldFromClip, It as OneDollarUnistrokeRecognizer, J as XRReferenceSpaceCache, Jn as OpenAI, Jt as getAdjacentFingerSpreads, K as OcclusionPass, Kn as xrDeviceCameraUserOptions, Kt as clamp01, L as Reticles, Ln as getDeviceCameraWorldFromView, Lt as HeadGestureRecognitionOptions, M as callInitWithDependencyInjection, Mn as cropImage, Mt as SpeechSynthesizerOptions, N as AudioListener, Nn as detectDeviceCameraTarget, Nt as PhysicsOptions, O as DetectedPlane, On as XRDeviceCamera, Ot as ObjectsOptions, P as Physics, Pn as getCameraParametersSnapshot, Pt as LightingOptions, Q as Interaction, Qn as GEMINI_DEFAULT_IMAGE_MODEL, Qt as getFingerDirection, R as MouseController, Rn as isDeviceCameraPoseAvailable, Rt as HeuristicHeadGestureRecognizer, S as DetectedMesh, Sn as xrDepthMeshPhysicsOptions, St as AnchorsOptions, T as LocalStorageAnchorStore, Tn as SceneOptions, Tt as FacesOptions, Un as xrDeviceCameraEnvironmentContinuousOptions, Ut as HeuristicGestureRecognizer, V as GamepadController, Vn as DEFAULT_RGB_TO_DEPTH_PARAMS, Vt as WebXRHandPoseEstimator, W as Depth, Wn as xrDeviceCameraEnvironmentOptions, Wt as FINGER_ORDER, X as Registry, Xn as AIOptions, Xt as getFingerBendAngles, Y as WaitFrame, Yn as Gemini, Yt as getBoneVectors, Z as DepthMesh, Zn as GEMINI_DEFAULT_FLASH_MODEL, Zt as getFingerCurl, _ as isBVHReady, _n as LayersOptions, _t as Options, a as resolveSimulatorRotationsFromKeypoints, an as getPalmNormal, ar as getUrlParamFloat, at as FORWARD, b as PoseJointName, bn as DepthOptions, bt as XRTransitionOptions, c as World, cn as getPalmUp, cr as getVec4ByColorString, ct as UP, d as DetectedFace, dn as getThumbBendAngles, dr as print, dt as getInteractionSource, en as getFingerPalmAlignment, er as GeminiOptions, f as FaceLandmarkName, fn as getThumbCurl, fr as urlParams, ft as getObjectTargetPoint, g as enableAcceleratedRaycast, gn as getThumbVerticalDirection, gt as InteractionOptions, h as disposeBVH, hn as getThumbStraightness, ht as InputOptions, i as resolveSimulatorHandPoseRotations, in as getFingertipPalmDistance, ir as getUrlParamBool, it as DOWN, j as placeObjectAtIntersectionFacingTarget, jn as DEVICE_CAMERA_PARAMETERS, jt as SpeechRecognizerOptions, k as ObjectDetector, kn as StreamState, kt as MeshDetectionOptions, l as Segmenter, ln as getPalmWidth, lr as lerp, lt as ZERO_VECTOR3, m as applyBVH, mn as getThumbOpposition, mt as traverseUtil, n as SIMULATOR_HAND_POSE_ROTATIONS, nn as getFingerStraightness, nr as clamp, nt as faceCameraSlerpAlpha, o as SIMULATOR_HAND_COMMON_BIOMECHANICAL_CONSTRAINTS_DEGREES, on as getPalmPose, or as getUrlParamInt, ot as LEFT, p as _getBvhImportStatus, pn as getThumbDirection, pt as objectIsDescendantOf, q as DepthTextures, qn as AI, qt as estimateHandScale, r as applySimulatorHandPoseRotationConstraints, rn as getFingertipDistance, rr as getColorHex, rt as BACK, s as parseSimulatorHandPoseRotations, sn as getPalmRight, sr as getUrlParameter, st as RIGHT, t as ModelLoader, tn as getFingerSpread, tr as OpenAIOptions, tt as faceCameraQuaternion, u as FaceRecognizer, un as getRelativeBoneAngles, ur as parseBase64DataURL, ut as ReticlePresenter, v as HumanRecognizer, vn as HandsOptions, vt as RENDERER_BACKENDS, w as SimulatorAnchor, wn as ContextOptions, wt as SegmentationOptions, x as MeshDetector, xn as xrDepthMeshOptions, xt as WorldOptions, y as DetectedBodyPose, yn as DepthMeshOptions, yt as ReticleOptions, z as HeadGestureRecognition, zn as transformRgbUvToWorld, zt as GestureRecognitionOptions } from "./internal/ModelLoader.js";
+import { A as isUIElement, C as cloneUIStyle, D as getUIPresentationObject, E as getUIPresentationBounds, I as MeshScript, L as Script, N as TransformScript, R as ScriptMixin, S as UIElement, T as getUIElementKind, b as objectIsDescendantOf, f as normalizeManipulationConfig, h as getSemanticControl, m as ManipulationAction, n as getResolvedUICardSize, t as UICard, v as registerSemanticControl, w as collectUIRoots, x as traverseUtil, y as getObjectTargetPoint, z as isDefaultScriptMethod } from "./internal/UICard.js";
+import { $n as GeminiOptions, $t as getFingerStraightness, A as DetectedObject, An as cropImage, At as PhysicsOptions, B as GazeController, Bn as DEFAULT_RGB_TO_DEPTH_PARAMS, Bt as HeuristicGestureRecognizer, C as AnchorManager, Cn as SceneSetOfMarkOptions, Ct as HumansOptions, D as PlaneDetector, Dn as VideoStream, Dt as SoundOptions, E as anchorCapability, En as StreamState, Et as MeshDetectionOptions, F as ActiveControllers, Fn as getDeviceCameraWorldFromView, Ft as HeuristicHeadGestureRecognizer, G as OcclusionUtils, Gn as xrDeviceCameraUserOptions, Gt as getAdjacentFingerSpreads, H as GamepadBindings, Hn as xrDeviceCameraEnvironmentContinuousOptions, Ht as average, I as Input, In as isDeviceCameraPoseAvailable, It as GestureRecognitionOptions, J as XRReferenceSpaceCache, Jn as Gemini, Jt as getFingerCurl, K as OcclusionPass, Kn as AI, Kt as getBoneVectors, L as Reticles, Ln as resolveDeviceCameraTarget, Lt as WebXRHandContext, M as callInitWithDependencyInjection, Mn as getCameraParametersSnapshot, Mt as StrokeRecognitionOptions, N as AudioListener, Nn as getDeviceCameraClipFromView, Nt as OneDollarUnistrokeRecognizer, O as DetectedPlane, On as DEVICE_CAMERA_PARAMETERS, Ot as SpeechRecognizerOptions, P as Physics, Pn as getDeviceCameraWorldFromClip, Pt as HeadGestureRecognitionOptions, Q as Interaction, Qn as GEMINI_DEFAULT_LIVE_MODEL, Qt as getFingerSpread, R as MouseController, Rn as transformRgbUvToWorld, Rt as WebXRHandPoseEstimator, S as DetectedMesh, Sn as SceneOptions, St as FacesOptions, T as LocalStorageAnchorStore, Tn as XRDeviceCamera, Tt as ObjectsOptions, Un as xrDeviceCameraEnvironmentOptions, Ut as clamp01, V as GamepadController, Vn as DeviceCameraOptions, Vt as FINGER_ORDER, W as Depth, Wn as xrDeviceCameraUserContinuousOptions, Wt as estimateHandScale, X as Registry, Xn as GEMINI_DEFAULT_FLASH_MODEL, Xt as getFingerJoint, Y as WaitFrame, Yn as AIOptions, Yt as getFingerDirection, Z as DepthMesh, Zn as GEMINI_DEFAULT_IMAGE_MODEL, Zt as getFingerPalmAlignment, _ as isBVHReady, _n as DepthOptions, _t as XRTransitionOptions, a as resolveSimulatorRotationsFromKeypoints, an as getPalmUp, ar as getUrlParamInt, at as FORWARD, b as PoseJointName, bn as xrDepthMeshVisualizationOptions, bt as defaultAnchorStorageKey, c as World, cn as getThumbBendAngles, cr as lerp, ct as UP, d as DetectedFace, dn as getThumbOpposition, dr as urlParams, dt as getInteractionSource, en as getFingertipDistance, er as OpenAIOptions, f as FaceLandmarkName, fn as getThumbStraightness, ft as InputOptions, g as enableAcceleratedRaycast, gn as DepthMeshOptions, gt as ReticleOptions, h as disposeBVH, hn as HandsOptions, ht as RENDERER_BACKENDS, i as resolveSimulatorHandPoseRotations, in as getPalmRight, ir as getUrlParamFloat, it as DOWN, j as placeObjectAtIntersectionFacingTarget, jn as detectDeviceCameraTarget, jt as LightingOptions, k as ObjectDetector, kn as assertDeviceCameraTarget, kt as SpeechSynthesizerOptions, l as Segmenter, ln as getThumbCurl, lr as parseBase64DataURL, lt as ZERO_VECTOR3, m as applyBVH, mn as LayersOptions, mt as Options, n as SIMULATOR_HAND_POSE_ROTATIONS, nn as getPalmNormal, nr as getColorHex, nt as faceCameraSlerpAlpha, o as SIMULATOR_HAND_COMMON_BIOMECHANICAL_CONSTRAINTS_DEGREES, on as getPalmWidth, or as getUrlParameter, ot as LEFT, p as _getBvhImportStatus, pn as getThumbVerticalDirection, pt as InteractionOptions, q as DepthTextures, qn as OpenAI, qt as getFingerBendAngles, r as applySimulatorHandPoseRotationConstraints, rn as getPalmPose, rr as getUrlParamBool, rt as BACK, s as parseSimulatorHandPoseRotations, sn as getRelativeBoneAngles, sr as getVec4ByColorString, st as RIGHT, t as ModelLoader, tn as getFingertipPalmDistance, tr as clamp, tt as faceCameraQuaternion, u as FaceRecognizer, un as getThumbDirection, ur as print, ut as ReticlePresenter, v as HumanRecognizer, vn as xrDepthMeshOptions, vt as WorldOptions, w as SimulatorAnchor, wn as SceneVisibilityOptions, wt as PlanesOptions, x as MeshDetector, xn as ContextOptions, xt as SegmentationOptions, y as DetectedBodyPose, yn as xrDepthMeshPhysicsOptions, yt as AnchorsOptions, z as HeadGestureRecognition, zn as intrinsicsToProjectionMatrix, zt as HAND_INDEX_TO_LABEL } from "./internal/ModelLoader.js";
 import { a as HAND_JOINT_IDX_CONNECTION_MAP, c as OCCLUDABLE_ITEMS_LAYER, d as XR_BLOCKS_ASSETS_PATH, i as HAND_JOINT_COUNT, l as RIGHT_VIEW_ONLY_LAYER, n as DEFAULT_DEVICE_CAMERA_WIDTH, o as LEFT_VIEW_ONLY_LAYER, r as HAND_BONE_IDX_CONNECTION_MAP, s as NUM_HANDS, t as DEFAULT_DEVICE_CAMERA_HEIGHT, u as VIEW_DEPTH_GAP } from "./internal/constants.js";
 import { a as SetSimulatorModeEvent, c as SimulatorMode, d as Handedness, f as Hands, i as ShowSimulatorInstructionsEvent, l as SimulatorOptions, n as SimulatorHandPose, o as SimulatorHandPoseChangeRequestEvent, p as HAND_JOINT_NAMES, r as SetSimulatorHandPhysicsEvent, s as SetSimulatorEnvironmentEvent, t as SIMULATOR_HAND_POSE_NAMES, u as Keycodes } from "./internal/HandPoses.js";
 import { a as disposeRenderableResources, c as isWebGPURenderer, i as disposeObjectTree, l as isSerializerRenderer, n as disposeMeshResources, o as RendererHolder, r as disposeObjectChildren, s as assertWebGLRenderer, t as disposeMaterial } from "./internal/ThreeDisposal.js";
-import { a as UIOverlay, c as UIScrollView, i as UIText, s as updatePanelBackfaceVisibility, t as UITextInput } from "./internal/UITextInput.js";
+import { a as UIOverlay, c as UIDropdown, d as UIScrollView, i as UIText, s as updatePanelBackfaceVisibility, t as UITextInput, u as closeDropdownsOutside } from "./internal/UITextInput.js";
 import { i as ensureWebGPUUIMaterials } from "./internal/PanelMaterialFactory.js";
 import * as THREE from "three";
 import { FullScreenQuad, Pass } from "three/addons/postprocessing/Pass.js";
@@ -611,6 +611,9 @@ function flipBufferVertically(buffer, width, height) {
 function setXrPresenting(renderer, value) {
 	renderer.xr.isPresenting = value;
 }
+function isArrayRenderTarget(target) {
+	return target?.texture.isArrayTexture === true;
+}
 var PendingScreenshotRequest = class {
 	constructor(resolve, reject, overlayOnCamera) {
 		this.resolve = resolve;
@@ -657,21 +660,27 @@ var ScreenshotSynthesizer = class {
 		const mainRenderTargetSize = new THREE.Vector2();
 		if (mainRenderTarget) mainRenderTargetSize.set(mainRenderTarget.width, mainRenderTarget.height);
 		else renderer.getSize(mainRenderTargetSize);
-		const mainRenderTargetSingleViewWidth = isRenderingStereo ? mainRenderTargetSize.x / 2 : mainRenderTargetSize.x;
+		const mainRenderTargetSingleViewWidth = isRenderingStereo && !isArrayRenderTarget(mainRenderTarget) ? mainRenderTargetSize.x / 2 : mainRenderTargetSize.x;
 		const scaledHeight = Math.round(mainRenderTargetSize.y * (this.renderTargetWidth / mainRenderTargetSingleViewWidth));
 		if (!this.virtualRenderTarget || this.virtualRenderTarget.width != this.renderTargetWidth) {
 			this.virtualRenderTarget?.dispose();
 			this.virtualRenderTarget = this.createRenderTarget(renderer, this.renderTargetWidth, scaledHeight);
 		}
 		const xrIsPresenting = renderer.xr.isPresenting;
-		setXrPresenting(renderer, false);
 		const virtualRenderTarget = this.virtualRenderTarget;
-		renderer.setRenderTarget(virtualRenderTarget);
-		renderer.clearColor();
-		renderer.clearDepth();
-		renderSceneFn();
-		renderer.setRenderTarget(mainRenderTarget);
-		setXrPresenting(renderer, xrIsPresenting);
+		try {
+			renderer.setRenderTarget(virtualRenderTarget);
+			setXrPresenting(renderer, false);
+			renderer.clearColor();
+			renderer.clearDepth();
+			renderSceneFn();
+		} finally {
+			try {
+				setXrPresenting(renderer, xrIsPresenting);
+			} finally {
+				renderer.setRenderTarget(mainRenderTarget);
+			}
+		}
 		const expectedBufferLength = virtualRenderTarget.width * virtualRenderTarget.height * 4;
 		if (this.virtualBuffer.length != expectedBufferLength) this.virtualBuffer = new Uint8Array(expectedBufferLength);
 		const buffer = this.virtualBuffer;
@@ -713,28 +722,42 @@ var ScreenshotSynthesizer = class {
 		const mainRenderTargetSize = new THREE.Vector2();
 		if (mainRenderTarget) mainRenderTargetSize.set(mainRenderTarget.width, mainRenderTarget.height);
 		else renderer.getSize(mainRenderTargetSize);
-		const mainRenderTargetSingleViewWidth = isRenderingStereo ? mainRenderTargetSize.x / 2 : mainRenderTargetSize.x;
+		const mainRenderTargetSingleViewWidth = isRenderingStereo && !isArrayRenderTarget(mainRenderTarget) ? mainRenderTargetSize.x / 2 : mainRenderTargetSize.x;
 		const scaledHeight = Math.round(mainRenderTargetSize.y * (this.renderTargetWidth / mainRenderTargetSingleViewWidth));
 		if (!this.virtualRealRenderTarget || this.virtualRealRenderTarget.height != scaledHeight) {
 			this.virtualRealRenderTarget?.dispose();
 			this.virtualRealRenderTarget = this.createRenderTarget(renderer, this.renderTargetWidth, scaledHeight);
 		}
 		const renderTarget = this.virtualRealRenderTarget;
-		renderer.setRenderTarget(renderTarget);
+		let webgpuQuad;
+		if (isWebGPURenderer(renderer)) webgpuQuad = await this.getWebGPUQuad();
 		const xrIsPresenting = renderer.xr.isPresenting;
-		setXrPresenting(renderer, false);
-		if (isWebGPURenderer(renderer)) {
-			const quad = await this.getWebGPUQuad();
-			quad.mesh.material.map = deviceCamera.texture;
-			renderer.render(quad.mesh, quad.camera);
-		} else {
-			const quad = this.getFullScreenQuad();
-			quad.material.map = deviceCamera.texture;
-			quad.render(renderer);
+		const autoClearColor = renderer.autoClearColor;
+		try {
+			renderer.setRenderTarget(renderTarget);
+			setXrPresenting(renderer, false);
+			if (isWebGPURenderer(renderer)) {
+				const quad = webgpuQuad;
+				quad.mesh.material.map = deviceCamera.texture;
+				renderer.render(quad.mesh, quad.camera);
+			} else {
+				const quad = this.getFullScreenQuad();
+				quad.material.map = deviceCamera.texture;
+				quad.render(renderer);
+			}
+			renderer.autoClearColor = false;
+			try {
+				renderSceneFn();
+			} finally {
+				renderer.autoClearColor = autoClearColor;
+			}
+		} finally {
+			try {
+				setXrPresenting(renderer, xrIsPresenting);
+			} finally {
+				renderer.setRenderTarget(mainRenderTarget);
+			}
 		}
-		renderSceneFn();
-		setXrPresenting(renderer, xrIsPresenting);
-		renderer.setRenderTarget(mainRenderTarget);
 		if (this.virtualRealBuffer.length != renderTarget.width * renderTarget.height * 4) this.virtualRealBuffer = new Uint8Array(renderTarget.width * renderTarget.height * 4);
 		const buffer = this.virtualRealBuffer;
 		await this.readRenderTargetInto(renderer, renderTarget, buffer);
@@ -1013,6 +1036,7 @@ function buildSemanticTree({ scene, registry, capturedAt, interaction }) {
 }
 function shouldPruneObject(object) {
 	if (object.userData.semantic?.hidden) return true;
+	if (isUIElement(object) && object.parent instanceof UIDropdown && !object.visible) return true;
 	return isSemanticInternalObject(object);
 }
 function describeSemanticObject(object, interaction) {
@@ -1036,6 +1060,8 @@ function describeSemanticObject(object, interaction) {
 		pointerEvents: object.xb?.pointerEvents ?? "auto",
 		interactionEnabled: object.xb?.interactionEnabled ?? true,
 		...inferValue(object),
+		...inferChecked(object),
+		...object instanceof UIDropdown ? { expanded: object.open } : {},
 		...inferEditingState(object)
 	};
 }
@@ -1065,8 +1091,12 @@ function inferRole(object) {
 		const kind = getUIElementKind(object);
 		if (kind === "button") return "button";
 		if (kind === "slider") return "slider";
+		if (kind === "toggle") return "switch";
+		if (kind === "progress") return "progressbar";
+		if (kind === "dropdown") return "combobox";
+		if (kind === "dropdownOption") return "option";
 		if (kind === "input") return "textbox";
-		if (kind === "scroll") return "region";
+		if (kind === "scroll") return object.parent instanceof UIDropdown ? "listbox" : "region";
 		if (kind === "text") return "text";
 		if (kind === "image" || kind === "icon") return "image";
 		return "group";
@@ -1083,6 +1113,7 @@ function inferName(object) {
 	return semanticObject.ariaLabel ?? semanticObject.label ?? semanticObject.text ?? semanticObject.icon ?? object.name ?? `${object.type}_${object.id}`;
 }
 function inferText(object) {
+	if (object instanceof UIDropdown) return object.options.find((option) => option.value === object.value)?.label;
 	return object.text;
 }
 function inferSource(object) {
@@ -1092,7 +1123,7 @@ function inferSource(object) {
 function inferTraits(object, disabled) {
 	const traits = /* @__PURE__ */ new Set();
 	if (object.xb?.manipulation) traits.add("manipulable");
-	if (isUIElement(object) && (getUIElementKind(object) === "button" || getUIElementKind(object) === "slider" || getUIElementKind(object) === "input") && object.xb?.interactionEnabled !== false && !disabled) traits.add("selectable");
+	if (isUIElement(object) && (getUIElementKind(object) === "button" || getUIElementKind(object) === "slider" || getUIElementKind(object) === "toggle" || getUIElementKind(object) === "dropdown" || getUIElementKind(object) === "dropdownOption" || getUIElementKind(object) === "input") && object.xb?.interactionEnabled !== false && !disabled) traits.add("selectable");
 	if (getSemanticControl(object)?.scroll) traits.add("scrollable");
 	if (isUIElement(object) && getUIElementKind(object) === "input" && !object.readOnly && !disabled) traits.add("editable");
 	return traits.size ? [...traits] : void 0;
@@ -1102,13 +1133,22 @@ function mergeTraits(inferred, explicit) {
 	return [.../* @__PURE__ */ new Set([...inferred ?? [], ...explicit ?? []])];
 }
 function inferValue(object) {
-	if (!isUIElement(object) || getUIElementKind(object) !== "slider") return {};
-	const slider = object;
+	if (object instanceof UIDropdown) return object.value === void 0 ? {} : { value: object.value };
+	if (!isUIElement(object)) return {};
+	const kind = getUIElementKind(object);
+	if (kind !== "slider" && kind !== "progress") return {};
+	const range = object;
 	return {
-		value: slider.value,
-		min: slider.min,
-		max: slider.max
+		value: range.value,
+		min: range.min,
+		max: range.max
 	};
+}
+function inferChecked(object) {
+	if (!isUIElement(object)) return {};
+	const kind = getUIElementKind(object);
+	if (kind !== "toggle" && kind !== "dropdownOption") return {};
+	return { checked: object.checked };
 }
 function inferDisabled(object) {
 	return getSemanticControl(object)?.isDisabled() ?? object.disabled;
@@ -1164,6 +1204,8 @@ function createSemanticNode(object, id, semantic, parentId) {
 	if (semantic.disabled !== void 0) node.disabled = semantic.disabled;
 	if (semantic.selected !== void 0) node.selected = semantic.selected;
 	if (semantic.hovered !== void 0) node.hovered = semantic.hovered;
+	if (semantic.checked !== void 0) node.checked = semantic.checked;
+	if (semantic.expanded !== void 0) node.expanded = semantic.expanded;
 	if (semantic.focused !== void 0) node.focused = semantic.focused;
 	if (semantic.readOnly !== void 0) node.readOnly = semantic.readOnly;
 	if (semantic.multiline !== void 0) node.multiline = semantic.multiline;
@@ -2062,7 +2104,8 @@ function controllerSelectEvent(controller) {
 	const type = controller.inputSource?.hand ? "hand-ray" : controller.userData.isMouse ? "mouse" : "controller-ray";
 	return {
 		source: getInteractionSource(controller, type),
-		stopPropagation() {}
+		stopPropagation() {},
+		stopGlobalPropagation() {}
 	};
 }
 function eventForTarget(argument, currentTarget) {
@@ -2913,6 +2956,10 @@ const UI_THEME_STYLE_ROLES = /* @__PURE__ */ new Set([
 	"text",
 	"button",
 	"slider",
+	"toggle",
+	"progress",
+	"dropdown",
+	"dropdownOption",
 	"scroll",
 	"input",
 	"image",
@@ -3007,6 +3054,7 @@ const colorfulTheme = createThemeSnapshot({
 		text: "#f8fafc",
 		secondaryText: "#cbd5e1",
 		outline: "#8ff0df",
+		sliderTrack: "#4f8f89",
 		disabledSurface: "rgba(71, 85, 105, 0.45)",
 		disabledText: "#94a3b8"
 	},
@@ -3066,6 +3114,7 @@ const glimmerOpaqueTheme = createGlimmerTheme({
 	primary: "#3b82f6",
 	secondaryText: "#cbd5e1",
 	outline: "rgba(255, 255, 255, 0.35)",
+	sliderTrack: "#64748b",
 	disabledSurface: "rgba(51, 65, 85, 0.5)",
 	disabledText: "#94a3b8",
 	borderStops: [
@@ -3228,6 +3277,7 @@ function createGlimmerTheme(options) {
 			text: "#ffffff",
 			secondaryText: options.secondaryText,
 			outline: options.outline,
+			...options.sliderTrack === void 0 ? {} : { sliderTrack: options.sliderTrack },
 			disabledSurface: options.disabledSurface,
 			disabledText: options.disabledText
 		},
@@ -3422,6 +3472,7 @@ var UIRenderer = class {
 		this.privateRoot.name = "XR Blocks private UI";
 		this.privateRoot.userData.xrblocksPrivate = true;
 		this.interaction.setSelectionFocusHandler((target) => {
+			closeDropdownsOutside(target);
 			if (this.backendState.kind === "ready") this.backendState.backend.handlePointerTarget?.(target);
 		});
 	}
@@ -4847,9 +4898,14 @@ const HEIGHT_SEGMENTS = 4;
 const RENDER_ORDER = Number.MAX_SAFE_INTEGER;
 const MIN_DIMMING = 0;
 const MAX_DIMMING = 1;
+function isValidDimming(dimming) {
+	return Number.isFinite(dimming) && dimming >= MIN_DIMMING && dimming <= MAX_DIMMING;
+}
 /** Simulates additive output while an alpha-blend XR session is presenting. */
 var AdditiveDisplaySimulation = class extends THREE.Mesh {
 	constructor(scene, camera, options) {
+		const initialDimming = options.simulatedDimming;
+		if (options.simulateAdditiveDisplay && !isValidDimming(initialDimming)) throw new RangeError(`Options.simulatedDimming must be between ${MIN_DIMMING} and ${MAX_DIMMING}.`);
 		super(new THREE.SphereGeometry(RADIUS, WIDTH_SEGMENTS, HEIGHT_SEGMENTS), new THREE.MeshBasicMaterial({
 			transparent: true,
 			premultipliedAlpha: true,
@@ -4868,17 +4924,20 @@ var AdditiveDisplaySimulation = class extends THREE.Mesh {
 		this.scene = scene;
 		this.camera = camera;
 		this.options = options;
+		this.lastValidDimming = MIN_DIMMING;
+		this.warnedInvalidDimming = false;
 		this.name = NAME;
 		this.renderOrder = RENDER_ORDER;
 		this.frustumCulled = false;
 		this.userData.xrblocksPrivate = true;
 		this.userData.xrblocksAdditiveDisplaySimulation = true;
 		this.raycast = () => {};
+		this.lastValidDimming = isValidDimming(initialDimming) ? initialDimming : MIN_DIMMING;
 	}
 	onXRSessionStarted(session) {
 		this.onXRSessionEnded();
 		if (!this.options.simulateAdditiveDisplay || session.environmentBlendMode !== "alpha-blend") return;
-		this.material.opacity = this.validateDimming();
+		this.material.opacity = this.readDimming();
 		this.position.setFromMatrixPosition(this.camera.matrixWorld);
 		this.scene.add(this);
 	}
@@ -4887,12 +4946,19 @@ var AdditiveDisplaySimulation = class extends THREE.Mesh {
 	}
 	update() {
 		if (!this.parent) return;
-		this.material.opacity = this.validateDimming();
+		this.material.opacity = this.readDimming();
 		this.position.setFromMatrixPosition(this.camera.matrixWorld);
 	}
-	validateDimming() {
+	readDimming() {
 		const dimming = this.options.simulatedDimming;
-		if (!Number.isFinite(dimming) || dimming < MIN_DIMMING || dimming > MAX_DIMMING) throw new RangeError(`Options.simulatedDimming must be between ${MIN_DIMMING} and ${MAX_DIMMING}.`);
+		if (!isValidDimming(dimming)) {
+			if (!this.warnedInvalidDimming) {
+				this.warnedInvalidDimming = true;
+				console.warn(`Options.simulatedDimming must be between ${MIN_DIMMING} and ${MAX_DIMMING}; keeping the last valid value.`);
+			}
+			return this.lastValidDimming;
+		}
+		this.lastValidDimming = dimming;
 		return dimming;
 	}
 	dispose() {
@@ -5738,10 +5804,7 @@ var Core = class Core {
 	async onXRSessionStarted(session) {
 		if (!this.isLifecycleActive()) return;
 		this._environmentBlendMode = session?.environmentBlendMode;
-		if (session) {
-			this.applyXRSessionRenderingOptions(session);
-			this.additiveDisplaySimulation?.onXRSessionStarted(session);
-		}
+		if (session) this.applyXRSessionRenderingOptions(session);
 		if (session?.enabledFeatures?.includes("webgpu")) console.debug("WebXR session is using WebGPU");
 		if (session) this.xrReferenceSpaceCache.onXRSessionStart(session);
 		if (this.options.deviceCamera?.enabled) {
@@ -5749,6 +5812,7 @@ var Core = class Core {
 			if (!this.isLifecycleActive()) return;
 		}
 		this.scriptsManager.onXRSessionStarted(session);
+		if (session) this.additiveDisplaySimulation?.onXRSessionStarted(session);
 	}
 	applyXRSessionRenderingOptions(session) {
 		const { foveationLevel, targetFrameRate } = this.options;
@@ -6726,9 +6790,13 @@ var StrokeRecognizer = class extends Script {
 				this.isRecording = true;
 				this.gestureStartTime = currentTime;
 				this.clearPoints();
-				this.activeHand = 0;
-				if (this.user.isSelecting?.(0)) this.activeHand = 0;
-				else if (this.user.isSelecting?.(1)) this.activeHand = 1;
+				const side = this.user.input?.controllers.find((controller) => controller.userData.selected)?.inputSource?.handedness;
+				if (side === "left" || side === "right") this.activeHand = side === "left" ? 0 : 1;
+				else {
+					this.activeHand = 0;
+					if (this.user.isSelecting?.(0)) this.activeHand = 0;
+					else if (this.user.isSelecting?.(1)) this.activeHand = 1;
+				}
 				this.dispatchEvent({
 					type: "unistrokestart",
 					target: this,
@@ -7564,9 +7632,11 @@ var UIButton = class extends UIElement {
 	}
 	onObjectSelectStart(event) {
 		event.stopPropagation();
+		event.stopGlobalPropagation();
 	}
 	onObjectSelectEnd(event) {
 		event.stopPropagation();
+		event.stopGlobalPropagation();
 	}
 	add(...objects) {
 		if (objects.some(isUIElement) && (this._label !== void 0 || this._icon !== void 0)) throw new Error("UIButton convenience label/icon content cannot be combined with children.");
@@ -7776,8 +7846,8 @@ var UISlider = class extends UIElement {
 	constructor({ ariaLabel, min = 0, max = 1, step = .01, value = 0, disabled = false, onInput, onChange, ...options }) {
 		if (!ariaLabel) throw new Error("UISlider requires ariaLabel.");
 		if (typeof disabled !== "boolean") throw new Error("UISlider disabled must be a boolean.");
-		validateRange(min, max, step);
-		validateValue(value);
+		validateRange$1(min, max, step);
+		validateValue$1(value);
 		super("slider", options);
 		this.name = "UISlider";
 		this.interactionChanged = false;
@@ -7803,7 +7873,7 @@ var UISlider = class extends UIElement {
 		return this._min;
 	}
 	set min(value) {
-		validateRange(value, this._max, this._step);
+		validateRange$1(value, this._max, this._step);
 		this._min = value;
 		this.requantizeInteraction();
 	}
@@ -7811,7 +7881,7 @@ var UISlider = class extends UIElement {
 		return this._max;
 	}
 	set max(value) {
-		validateRange(this._min, value, this._step);
+		validateRange$1(this._min, value, this._step);
 		this._max = value;
 		this.requantizeInteraction();
 	}
@@ -7819,7 +7889,7 @@ var UISlider = class extends UIElement {
 		return this._step;
 	}
 	set step(value) {
-		validateRange(this._min, this._max, value);
+		validateRange$1(this._min, this._max, value);
 		this._step = value;
 		this.requantizeInteraction();
 	}
@@ -7840,9 +7910,11 @@ var UISlider = class extends UIElement {
 	}
 	onObjectSelectStart(event) {
 		event.stopPropagation();
+		event.stopGlobalPropagation();
 	}
 	onObjectSelectEnd(event) {
 		event.stopPropagation();
+		event.stopGlobalPropagation();
 	}
 	beginInput(input) {
 		this.interactionStart = this._value;
@@ -7876,7 +7948,7 @@ var UISlider = class extends UIElement {
 		this.onInput?.(original);
 	}
 	setProgrammaticValue(value) {
-		validateValue(value);
+		validateValue$1(value);
 		const next = quantize(value, this._min, this._max, this._step);
 		if (this.interactionStart !== void 0) {
 			this.interactionStart = next;
@@ -7896,15 +7968,110 @@ var UISlider = class extends UIElement {
 		this.markUIDirty();
 	}
 };
-function validateRange(min, max, step) {
+function validateRange$1(min, max, step) {
 	if (!Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(step) || min > max || step <= 0) throw new Error("UISlider requires finite values with min <= max and step > 0.");
 }
-function validateValue(value) {
+function validateValue$1(value) {
 	if (!Number.isFinite(value)) throw new Error("UISlider value must be finite.");
 }
 function quantize(value, min, max, step) {
 	const stepped = min + Math.round((value - min) / step) * step;
 	return clamp(Number(stepped.toPrecision(12)), min, max);
+}
+//#endregion
+//#region src/ui/components/UIToggle.ts
+/** An on/off switch that flips after a valid captured press and release. */
+var UIToggle = class extends UIElement {
+	constructor({ ariaLabel, checked = false, disabled = false, onChange, ...options }) {
+		if (!ariaLabel) throw new Error("UIToggle requires ariaLabel.");
+		validateBoolean("checked", checked);
+		validateBoolean("disabled", disabled);
+		super("toggle", options);
+		this.name = "UIToggle";
+		this.ariaLabel = ariaLabel;
+		this._checked = checked;
+		this._disabled = disabled;
+		this.onChange = onChange;
+		registerSemanticControl(this, {
+			kind: "button",
+			isDisabled: () => this._disabled,
+			activate: () => {
+				this._checked = !this._checked;
+				this.markUIDirty();
+				this.onChange?.(this._checked);
+			}
+		});
+	}
+	get checked() {
+		return this._checked;
+	}
+	set checked(value) {
+		validateBoolean("checked", value);
+		if (value === this._checked) return;
+		this._checked = value;
+		this.markUIDirty();
+	}
+	get disabled() {
+		return this._disabled;
+	}
+	set disabled(value) {
+		validateBoolean("disabled", value);
+		if (value === this._disabled) return;
+		this._disabled = value;
+		this.markUIDirty();
+	}
+	onObjectSelectStart(event) {
+		event.stopPropagation();
+		event.stopGlobalPropagation();
+	}
+	onObjectSelectEnd(event) {
+		event.stopPropagation();
+		event.stopGlobalPropagation();
+	}
+};
+function validateBoolean(property, value) {
+	if (typeof value !== "boolean") throw new Error(`UIToggle ${property} must be a boolean.`);
+}
+//#endregion
+//#region src/ui/components/UIProgress.ts
+/**
+* A display-only bar whose fill shows how far a task has progressed. `value`
+* is clamped to `[min, max]`; `min` and `max` are fixed at construction.
+*/
+var UIProgress = class extends UIElement {
+	constructor({ ariaLabel, value = 0, min = 0, max = 1, ...options }) {
+		if (!ariaLabel) throw new Error("UIProgress requires ariaLabel.");
+		validateRange(min, max);
+		validateValue(value);
+		super("progress", options);
+		this.name = "UIProgress";
+		this.ariaLabel = ariaLabel;
+		this._min = min;
+		this._max = max;
+		this._value = clamp(value, min, max);
+	}
+	get min() {
+		return this._min;
+	}
+	get max() {
+		return this._max;
+	}
+	get value() {
+		return this._value;
+	}
+	set value(value) {
+		validateValue(value);
+		const next = clamp(value, this._min, this._max);
+		if (next === this._value) return;
+		this._value = next;
+		this.markUIDirty();
+	}
+};
+function validateRange(min, max) {
+	if (!Number.isFinite(min) || !Number.isFinite(max) || min >= max) throw new Error("UIProgress requires finite values with min < max.");
+}
+function validateValue(value) {
+	if (!Number.isFinite(value)) throw new Error("UIProgress value must be finite.");
 }
 //#endregion
 //#region src/utils/ModelUtils.ts
@@ -8793,16 +8960,19 @@ registerDebugGlobals(/* @__PURE__ */ __exportAll({
 	TransformScript: () => TransformScript,
 	UIButton: () => UIButton,
 	UICard: () => UICard,
+	UIDropdown: () => UIDropdown,
 	UIElement: () => UIElement,
 	UIExitButton: () => UIExitButton,
 	UIIcon: () => UIIcon,
 	UIImage: () => UIImage,
 	UIOverlay: () => UIOverlay,
 	UIPanel: () => UIPanel,
+	UIProgress: () => UIProgress,
 	UIScrollView: () => UIScrollView,
 	UISlider: () => UISlider,
 	UIText: () => UIText,
 	UITextInput: () => UITextInput,
+	UIToggle: () => UIToggle,
 	UP: () => UP,
 	User: () => User,
 	VIEW_DEPTH_GAP: () => VIEW_DEPTH_GAP,
@@ -8834,6 +9004,7 @@ registerDebugGlobals(/* @__PURE__ */ __exportAll({
 	applyBVH: () => applyBVH,
 	applySimulatorHandPoseRotationConstraints: () => applySimulatorHandPoseRotationConstraints,
 	aspectRatioOf: () => aspectRatioOf,
+	assertDeviceCameraTarget: () => assertDeviceCameraTarget,
 	assertWebGLRenderer: () => assertWebGLRenderer,
 	average: () => average,
 	buildDisplacementMap: () => buildDisplacementMap,
@@ -8920,6 +9091,7 @@ registerDebugGlobals(/* @__PURE__ */ __exportAll({
 	poseInFrontOfCamera: () => poseInFrontOfCamera,
 	print: () => print,
 	quaternionFacingCamera: () => quaternionFacingCamera,
+	resolveDeviceCameraTarget: () => resolveDeviceCameraTarget,
 	resolveSerializerRenderer: () => resolveSerializerRenderer,
 	resolveSimulatorHandPoseRotations: () => resolveSimulatorHandPoseRotations,
 	resolveSimulatorRotationsFromKeypoints: () => resolveSimulatorRotationsFromKeypoints,
@@ -8945,6 +9117,6 @@ registerDebugGlobals(/* @__PURE__ */ __exportAll({
 	xrDeviceCameraUserOptions: () => xrDeviceCameraUserOptions
 }));
 //#endregion
-export { AI, AIOptions, ActiveControllers, Agent, AnchorManager, AnchoredObjects, AnchorsOptions, AudioListener, AudioPlayer, BACK, BackgroundMusic, CategoryVolumes, Context, ContextOptions, Core, CoreSound, DEFAULT_DEVICE_CAMERA_HEIGHT, DEFAULT_DEVICE_CAMERA_WIDTH, DEFAULT_EXIT_BUTTON_STYLE, DEFAULT_RGB_TO_DEPTH_PARAMS, DEVICE_CAMERA_PARAMETERS, DOWN, Depth, DepthMesh, DepthMeshOptions, DepthOptions, DepthTextures, DetectedBodyPose, DetectedFace, DetectedMesh, DetectedObject, DetectedPlane, DeviceCameraOptions, FINGER_ORDER, FORWARD, FaceCamera, FaceLandmarkName, FaceRecognizer, FacesOptions, FollowHead, FollowObject, GEMINI_DEFAULT_FLASH_MODEL, GEMINI_DEFAULT_IMAGE_MODEL, GEMINI_DEFAULT_LIVE_MODEL, GamepadBindings, GamepadController, GazeController, Gemini, GeminiOptions, GenerateSkyboxTool, GestureRecognition, GestureRecognitionOptions, GetWeatherTool, HAND_BONE_IDX_CONNECTION_MAP, HAND_INDEX_TO_LABEL, HAND_JOINT_COUNT, HAND_JOINT_IDX_CONNECTION_MAP, HAND_JOINT_NAMES, Handedness, Hands, HandsOptions, HeadGestureRecognition, HeadGestureRecognitionOptions, HeuristicGestureRecognizer, HeuristicHeadGestureRecognizer, HumanRecognizer, HumansOptions, Input, InputOptions, Interaction, InteractionOptions, Keycodes, LEFT, LEFT_VIEW_ONLY_LAYER, LayerManager, LayersOptions, Lighting, LightingOptions, LoadingSpinnerManager, LocalStorageAnchorStore, ManipulationAction, MediaPipeHandContext, MediaPipeHandPoseEstimator, MeshDetectionOptions, MeshDetector, MeshScript, ModelLoader, ModelViewer, MouseController, NUM_HANDS, OCCLUDABLE_ITEMS_LAYER, ObjectDetector, ObjectsOptions, OcclusionPass, OcclusionUtils, OpenAI, OpenAIOptions, Options, Orbit, Physics, PhysicsOptions, PlaneDetector, PlanesOptions, PoseJointName, RENDERER_BACKENDS, RIGHT, RIGHT_VIEW_ONLY_LAYER, Registry, ReticleOptions, Reticles, SIMULATOR_HAND_COMMON_BIOMECHANICAL_CONSTRAINTS_DEGREES, SIMULATOR_HAND_POSE_NAMES, SIMULATOR_HAND_POSE_ROTATIONS, SOUND_PRESETS, SceneDetector, SceneOptions, SceneSetOfMarkOptions, SceneVisibilityOptions, ScreenshotSynthesizer, Script, ScriptMixin, ScriptsManager, ScriptsManagerEventType, SegmentCategory, SegmentationOptions, Segmenter, SetSimulatorEnvironmentEvent, SetSimulatorHandPhysicsEvent, SetSimulatorModeEvent, ShowSimulatorInstructionsEvent, SimulatorAnchor, SimulatorHandPose, SimulatorHandPoseChangeRequestEvent, SimulatorMode, SimulatorOptions, SkyboxAgent, SoundOptions, SoundSynthesizer, SparkRendererHolder, SpatialAudio, SpeechRecognizer, SpeechRecognizerOptions, SpeechSynthesizer, SpeechSynthesizerOptions, StreamState, StrokeRecognizer, StylizedFace, TensorFlowHandPoseEstimator, Tool, TransformScript, UIButton, UICard, UIElement, UIExitButton, UIIcon, UIImage, UIOverlay, UIPanel, UIScrollView, UISlider, UIText, UITextInput, UP, User, VIEW_DEPTH_GAP, VideoFileStream, VideoLayer, VideoStream, VisibilityTransition, VolumeCategory, WaitFrame, WebXRHandContext, WebXRHandPoseEstimator, WebXRSessionEventType, WebXRSessionManager, World, WorldOptions, XRButton, XRDeviceCamera, XREffects, XRPass, XRReferenceSpaceCache, XRTransitionOptions, XR_BLOCKS_ASSETS_PATH, ZERO_VECTOR3, ZERO_VISEME, _getBvhImportStatus, add, ai, anchorCapability, applyBVH, applySimulatorHandPoseRotationConstraints, aspectRatioOf, assertWebGLRenderer, average, buildDisplacementMap, callInitWithDependencyInjection, camera, clamp, clamp01, clampRotationToAngle, computeBillboardScale, context, core, cropImage, defaultAnchorStorageKey, depth, detectDeviceCameraTarget, disposeBVH, disposeMaterial, disposeMeshResources, disposeObjectChildren, disposeObjectTree, disposeRenderableResources, enableAcceleratedRaycast, estimateBackgroundColor, estimateHandScale, extractYaw, getAdjacentFingerSpreads, getBoneVectors, getCameraParametersSnapshot, getColorHex, getDeltaTime, getDeviceCameraClipFromView, getDeviceCameraWorldFromClip, getDeviceCameraWorldFromView, getElapsedTime, getFingerBendAngles, getFingerCurl, getFingerDirection, getFingerJoint, getFingerPalmAlignment, getFingerSpread, getFingerStraightness, getFingertipDistance, getFingertipPalmDistance, getObjectTargetPoint, getPalmNormal, getPalmPose, getPalmRight, getPalmUp, getPalmWidth, getRelativeBoneAngles, getThumbBendAngles, getThumbCurl, getThumbDirection, getThumbOpposition, getThumbStraightness, getThumbVerticalDirection, getUIPresentationObject, getUrlParamBool, getUrlParamFloat, getUrlParamInt, getUrlParameter, getVec4ByColorString, getXrCameraLeft, getXrCameraRight, init, initScript, input, intrinsicsToProjectionMatrix, isBVHReady, isDeviceCameraPoseAvailable, isLayerCapable, isSerializerRenderer, isWebGPURenderer, keyOutBackground, layerCapability, lerp, loadStereoImageAsTextures, loadingSpinnerManager, lookAtRotation, objectIsDescendantOf, parseBase64DataURL, parseSimulatorHandPoseRotations, placeObjectAtIntersectionFacingTarget, poseInFrontOfCamera, print, quaternionFacingCamera, resolveSerializerRenderer, resolveSimulatorHandPoseRotations, resolveSimulatorRotationsFromKeypoints, scene, showOnlyInLeftEye, showOnlyInRightEye, sound, timer, transformRgbUvToWorld, traverseUtil, ui, urlParams, user, visualizeDepth, visualizeDepthMap, world, xrDepthMeshOptions, xrDepthMeshPhysicsOptions, xrDepthMeshVisualizationOptions, xrDeviceCameraEnvironmentContinuousOptions, xrDeviceCameraEnvironmentOptions, xrDeviceCameraUserContinuousOptions, xrDeviceCameraUserOptions };
+export { AI, AIOptions, ActiveControllers, Agent, AnchorManager, AnchoredObjects, AnchorsOptions, AudioListener, AudioPlayer, BACK, BackgroundMusic, CategoryVolumes, Context, ContextOptions, Core, CoreSound, DEFAULT_DEVICE_CAMERA_HEIGHT, DEFAULT_DEVICE_CAMERA_WIDTH, DEFAULT_EXIT_BUTTON_STYLE, DEFAULT_RGB_TO_DEPTH_PARAMS, DEVICE_CAMERA_PARAMETERS, DOWN, Depth, DepthMesh, DepthMeshOptions, DepthOptions, DepthTextures, DetectedBodyPose, DetectedFace, DetectedMesh, DetectedObject, DetectedPlane, DeviceCameraOptions, FINGER_ORDER, FORWARD, FaceCamera, FaceLandmarkName, FaceRecognizer, FacesOptions, FollowHead, FollowObject, GEMINI_DEFAULT_FLASH_MODEL, GEMINI_DEFAULT_IMAGE_MODEL, GEMINI_DEFAULT_LIVE_MODEL, GamepadBindings, GamepadController, GazeController, Gemini, GeminiOptions, GenerateSkyboxTool, GestureRecognition, GestureRecognitionOptions, GetWeatherTool, HAND_BONE_IDX_CONNECTION_MAP, HAND_INDEX_TO_LABEL, HAND_JOINT_COUNT, HAND_JOINT_IDX_CONNECTION_MAP, HAND_JOINT_NAMES, Handedness, Hands, HandsOptions, HeadGestureRecognition, HeadGestureRecognitionOptions, HeuristicGestureRecognizer, HeuristicHeadGestureRecognizer, HumanRecognizer, HumansOptions, Input, InputOptions, Interaction, InteractionOptions, Keycodes, LEFT, LEFT_VIEW_ONLY_LAYER, LayerManager, LayersOptions, Lighting, LightingOptions, LoadingSpinnerManager, LocalStorageAnchorStore, ManipulationAction, MediaPipeHandContext, MediaPipeHandPoseEstimator, MeshDetectionOptions, MeshDetector, MeshScript, ModelLoader, ModelViewer, MouseController, NUM_HANDS, OCCLUDABLE_ITEMS_LAYER, ObjectDetector, ObjectsOptions, OcclusionPass, OcclusionUtils, OpenAI, OpenAIOptions, Options, Orbit, Physics, PhysicsOptions, PlaneDetector, PlanesOptions, PoseJointName, RENDERER_BACKENDS, RIGHT, RIGHT_VIEW_ONLY_LAYER, Registry, ReticleOptions, Reticles, SIMULATOR_HAND_COMMON_BIOMECHANICAL_CONSTRAINTS_DEGREES, SIMULATOR_HAND_POSE_NAMES, SIMULATOR_HAND_POSE_ROTATIONS, SOUND_PRESETS, SceneDetector, SceneOptions, SceneSetOfMarkOptions, SceneVisibilityOptions, ScreenshotSynthesizer, Script, ScriptMixin, ScriptsManager, ScriptsManagerEventType, SegmentCategory, SegmentationOptions, Segmenter, SetSimulatorEnvironmentEvent, SetSimulatorHandPhysicsEvent, SetSimulatorModeEvent, ShowSimulatorInstructionsEvent, SimulatorAnchor, SimulatorHandPose, SimulatorHandPoseChangeRequestEvent, SimulatorMode, SimulatorOptions, SkyboxAgent, SoundOptions, SoundSynthesizer, SparkRendererHolder, SpatialAudio, SpeechRecognizer, SpeechRecognizerOptions, SpeechSynthesizer, SpeechSynthesizerOptions, StreamState, StrokeRecognizer, StylizedFace, TensorFlowHandPoseEstimator, Tool, TransformScript, UIButton, UICard, UIDropdown, UIElement, UIExitButton, UIIcon, UIImage, UIOverlay, UIPanel, UIProgress, UIScrollView, UISlider, UIText, UITextInput, UIToggle, UP, User, VIEW_DEPTH_GAP, VideoFileStream, VideoLayer, VideoStream, VisibilityTransition, VolumeCategory, WaitFrame, WebXRHandContext, WebXRHandPoseEstimator, WebXRSessionEventType, WebXRSessionManager, World, WorldOptions, XRButton, XRDeviceCamera, XREffects, XRPass, XRReferenceSpaceCache, XRTransitionOptions, XR_BLOCKS_ASSETS_PATH, ZERO_VECTOR3, ZERO_VISEME, _getBvhImportStatus, add, ai, anchorCapability, applyBVH, applySimulatorHandPoseRotationConstraints, aspectRatioOf, assertDeviceCameraTarget, assertWebGLRenderer, average, buildDisplacementMap, callInitWithDependencyInjection, camera, clamp, clamp01, clampRotationToAngle, computeBillboardScale, context, core, cropImage, defaultAnchorStorageKey, depth, detectDeviceCameraTarget, disposeBVH, disposeMaterial, disposeMeshResources, disposeObjectChildren, disposeObjectTree, disposeRenderableResources, enableAcceleratedRaycast, estimateBackgroundColor, estimateHandScale, extractYaw, getAdjacentFingerSpreads, getBoneVectors, getCameraParametersSnapshot, getColorHex, getDeltaTime, getDeviceCameraClipFromView, getDeviceCameraWorldFromClip, getDeviceCameraWorldFromView, getElapsedTime, getFingerBendAngles, getFingerCurl, getFingerDirection, getFingerJoint, getFingerPalmAlignment, getFingerSpread, getFingerStraightness, getFingertipDistance, getFingertipPalmDistance, getObjectTargetPoint, getPalmNormal, getPalmPose, getPalmRight, getPalmUp, getPalmWidth, getRelativeBoneAngles, getThumbBendAngles, getThumbCurl, getThumbDirection, getThumbOpposition, getThumbStraightness, getThumbVerticalDirection, getUIPresentationObject, getUrlParamBool, getUrlParamFloat, getUrlParamInt, getUrlParameter, getVec4ByColorString, getXrCameraLeft, getXrCameraRight, init, initScript, input, intrinsicsToProjectionMatrix, isBVHReady, isDeviceCameraPoseAvailable, isLayerCapable, isSerializerRenderer, isWebGPURenderer, keyOutBackground, layerCapability, lerp, loadStereoImageAsTextures, loadingSpinnerManager, lookAtRotation, objectIsDescendantOf, parseBase64DataURL, parseSimulatorHandPoseRotations, placeObjectAtIntersectionFacingTarget, poseInFrontOfCamera, print, quaternionFacingCamera, resolveDeviceCameraTarget, resolveSerializerRenderer, resolveSimulatorHandPoseRotations, resolveSimulatorRotationsFromKeypoints, scene, showOnlyInLeftEye, showOnlyInRightEye, sound, timer, transformRgbUvToWorld, traverseUtil, ui, urlParams, user, visualizeDepth, visualizeDepthMap, world, xrDepthMeshOptions, xrDepthMeshPhysicsOptions, xrDepthMeshVisualizationOptions, xrDeviceCameraEnvironmentContinuousOptions, xrDeviceCameraEnvironmentOptions, xrDeviceCameraUserContinuousOptions, xrDeviceCameraUserOptions };
 
 //# sourceMappingURL=xrblocks.js.map

@@ -15,8 +15,8 @@
 *
 * @file xrblocks.js
 * @version v0.24.0
-* @commitid b89cf0d
-* @builddate 2026-10-29T01:00:40.867Z
+* @commitid 9a4ab86
+* @builddate 2026-11-09T16:54:38.149Z
 * @description XR Blocks SDK, built from source with the above commit ID.
 * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
 * and follow rules below:
@@ -40,7 +40,7 @@ physical world space, also add locomotion methods like pinch to teleport.
 or generate from primitive shapes of use vox formats for voxels or
 lego-styles.
 */
-import { C as getUIPresentationBounds, D as isUIElement, F as Script, M as resumeTransformScripts, N as suspendTransformScripts, O as isUIPresentationObject, P as MeshScript, S as getUIElementKind, _ as isSemanticControlDisabled, a as measureUICardMinContentWidth, d as isManipulationActionEnabled, f as normalizeManipulationConfig, g as isSemanticControl, h as getSemanticControl, i as measureUICardContentHeight, l as cloneScaleOptions, m as ManipulationAction, n as getResolvedUICardSize, p as normalizeRotationAxis, u as isHandleAction, w as getUIPresentationObject } from "./UICard.js";
+import { A as isUIElement, F as suspendTransformScripts, I as MeshScript, L as Script, P as resumeTransformScripts, T as getUIElementKind, _ as isSemanticControlDisabled, a as measureUICardMinContentWidth, b as objectIsDescendantOf, d as isManipulationActionEnabled, f as normalizeManipulationConfig, g as isSemanticControl, h as getSemanticControl, i as measureUICardContentHeight, l as cloneScaleOptions, m as ManipulationAction, n as getResolvedUICardSize, p as normalizeRotationAxis, u as isHandleAction } from "./UICard.js";
 import { a as HAND_JOINT_IDX_CONNECTION_MAP, n as DEFAULT_DEVICE_CAMERA_WIDTH, r as HAND_BONE_IDX_CONNECTION_MAP } from "./constants.js";
 import { h as deepMerge, l as SimulatorOptions, m as deepFreeze, p as HAND_JOINT_NAMES } from "./HandPoses.js";
 import { c as isWebGPURenderer, i as disposeObjectTree, l as isSerializerRenderer, o as RendererHolder, r as disposeObjectChildren, s as assertWebGLRenderer, t as disposeMaterial } from "./ThreeDisposal.js";
@@ -602,7 +602,9 @@ var Gemini = class extends BaseAIModel {
 	/**
 	* Shares a pending connection between concurrent starts. Stopping or disposing
 	* invalidates that start; any session returned later is closed and the start
-	* rejects with AbortError. The provider cannot be aborted before it returns.
+	* rejects with AbortError. A socket close during setup rejects promptly even
+	* if the SDK's connect promise stalls. The token provider cannot be aborted
+	* before it returns.
 	*/
 	async startLiveSession(params = {}, model) {
 		if (!this.isLiveAvailable()) throw new Error("Live API not available. Make sure @google/genai module is loaded.");
@@ -612,6 +614,12 @@ var Gemini = class extends BaseAIModel {
 		this.liveSessionStopped = false;
 		const isCurrent = () => generation === this.liveSessionGeneration;
 		const isRunning = () => isCurrent() && !this.liveSessionStopped;
+		let isConnecting = true;
+		let setupCloseEvent;
+		let rejectClosedDuringSetup;
+		const closedDuringSetup = new Promise((_, reject) => {
+			rejectClosedDuringSetup = reject;
+		});
 		const defaultConfig = {
 			responseModalities: [Modality.AUDIO],
 			speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } } },
@@ -639,12 +647,21 @@ var Gemini = class extends BaseAIModel {
 				},
 				onclose: (event) => {
 					if (!isCurrent()) return;
+					if (isConnecting) {
+						isConnecting = false;
+						setupCloseEvent = event;
+						const closeError = isRunning() ? Object.assign(new Error(event.reason || `Live socket closed during setup (code ${event.code}).`), {
+							name: "GeminiLiveSessionClosedError",
+							code: event.code,
+							reason: event.reason
+						}) : new DOMException("Live session start cancelled.", "AbortError");
+						rejectClosedDuringSetup(closeError);
+					}
 					this.liveSessionStopped = true;
 					this.liveSessionPromise = void 0;
 					this.isLiveMode = false;
 					this.liveSession = void 0;
-					if (event.reason) console.warn("🔒 Live session closed:", event);
-					else console.warn("🔒 Live session closed without reason.");
+					console.warn("🔒 Live session closed:", event.code, event.reason);
 					if (this.liveCallbacks?.onclose) this.liveCallbacks.onclose(event);
 				}
 			},
@@ -654,7 +671,19 @@ var Gemini = class extends BaseAIModel {
 			try {
 				if (!isRunning()) throw new DOMException("Live session start cancelled.", "AbortError");
 				console.log("Connecting with params:", connectParams);
-				const session = await this.ai.live.connect(connectParams);
+				const liveClient = this.options.tokenProvider ? await this.createLiveClient() : this.ai;
+				if (!isRunning()) throw new DOMException("Live session start cancelled.", "AbortError");
+				const connection = liveClient.live.connect(connectParams);
+				connection.then((lateSession) => {
+					if (!setupCloseEvent) return;
+					try {
+						lateSession.close();
+					} catch (error) {
+						console.error("Failed to close a Gemini Live session returned after socket close:", error);
+					}
+				}, () => {});
+				const session = await Promise.race([connection, closedDuringSetup]);
+				isConnecting = false;
 				if (!isRunning()) {
 					session.close();
 					throw new DOMException("Live session start cancelled.", "AbortError");
@@ -669,10 +698,22 @@ var Gemini = class extends BaseAIModel {
 				console.error("❌ Failed to start live session:", error);
 				throw error;
 			} finally {
+				isConnecting = false;
 				if (isCurrent()) this.liveSessionPromise = void 0;
 			}
 		});
 		return this.liveSessionPromise;
+	}
+	/** Creates a Live-only client with a fresh ephemeral token when configured. */
+	async createLiveClient() {
+		if (!this.options.tokenProvider) return this.ai;
+		const token = await this.options.tokenProvider();
+		if (typeof token !== "string" || token.length === 0) throw new Error("Gemini tokenProvider must return a non-empty token.");
+		if (!GoogleGenAI) throw new Error("The '@google/genai' module is not loaded.");
+		return new GoogleGenAI({
+			apiKey: token,
+			httpOptions: { apiVersion: "v1alpha" }
+		});
 	}
 	async stopLiveSession() {
 		this.closeLiveSession();
@@ -924,7 +965,9 @@ var AI = class extends Script {
 		const keyBypassesPrompt = resolvedKey.source === "url" || resolvedKey.source === "keys.json";
 		if (this.options.promptForApiKey && !keyBypassesPrompt && !isRunningInGeminiCanvas()) apiKey = await promptForApiKey(this.options.model, apiKey);
 		if (!apiKey || !this.isValidApiKey(apiKey)) {
+			const hasGeminiLiveTokenProvider = modelOptions instanceof GeminiOptions && !!modelOptions.tokenProvider;
 			if (isRunningInGeminiCanvas()) console.warn(`No explicit API key found for ${this.options.model}. Relying on Gemini Canvas host-injected credentials; if queries fail, verify your Google login or report bugs on GitHub.`);
+			else if (hasGeminiLiveTokenProvider) console.warn("No API key found for Gemini queries or image generation. Gemini Live will use tokenProvider; configure a key or server-side proxy for non-Live requests.");
 			else console.warn(`No valid API key found for ${this.options.model}. Provide one via AIOptions, the ?key= URL parameter, or keys.json; queries will fail until a key is configured.`);
 		}
 		modelOptions.apiKey = apiKey || "";
@@ -1128,7 +1171,7 @@ const xrDeviceCameraUserContinuousOptions = deepFreeze(new DeviceCameraOptions({
 }));
 //#endregion
 //#region src/camera/CameraParameterUtils.ts
-function intrinsicsToProjectionMatrix(K, width, height, near, far, target) {
+function intrinsicsToProjectionMatrix(K, width, height, near, far, target = new THREE.Matrix4()) {
 	const fx = K[0];
 	const fy = K[4];
 	const cx = K[2];
@@ -1141,6 +1184,25 @@ function intrinsicsToProjectionMatrix(K, width, height, near, far, target) {
 	const d = -(2 * far * near) / (far - near);
 	target.set(x, 0, a, 0, 0, y, b, 0, 0, 0, c, d, 0, 0, -1, 0);
 	return target;
+}
+const AURA_PROJECTION_MATRIX = intrinsicsToProjectionMatrix([
+	850,
+	0,
+	640,
+	0,
+	850,
+	360,
+	0,
+	0,
+	1
+], 1280, 720, .1, 1e3, new THREE.Matrix4());
+const AURA_CAMERA_POSE_POSITION = new THREE.Vector3(0, 0, -.06);
+const AURA_CAMERA_POSE_ROTATION = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, 0, "YXZ"));
+const AURA_CAMERA_POSE_SCALE = new THREE.Vector3(1, 1, 1);
+new THREE.Matrix4().compose(AURA_CAMERA_POSE_POSITION, AURA_CAMERA_POSE_ROTATION, new THREE.Vector3(1, 1, 1));
+function getAuraCameraPose(camera, _xrCameras, target) {
+	target.compose(AURA_CAMERA_POSE_POSITION, AURA_CAMERA_POSE_ROTATION, AURA_CAMERA_POSE_SCALE);
+	target.premultiply(camera.matrixWorld);
 }
 const MOOHAN_PROJECTION_MATRIX = intrinsicsToProjectionMatrix([
 	800,
@@ -1187,6 +1249,10 @@ const DEVICE_CAMERA_PARAMETERS = {
 		projectionMatrix: MOOHAN_PROJECTION_MATRIX,
 		getCameraPose: getMoohanCameraPose
 	},
+	aura: {
+		projectionMatrix: AURA_PROJECTION_MATRIX,
+		getCameraPose: getAuraCameraPose
+	},
 	quest3: {
 		projectionMatrix: QUEST_3_PROJECTION_MATRIX,
 		getCameraPose: getQuestCameraPose
@@ -1202,6 +1268,39 @@ const DEVICE_CAMERA_PARAMETERS = {
 */
 function detectDeviceCameraTarget(userAgent = typeof navigator !== "undefined" ? navigator.userAgent : "") {
 	return /OculusBrowser|Quest/i.test(userAgent) ? "quest3" : "galaxyxr";
+}
+/**
+* Resolves the {@link DEVICE_CAMERA_PARAMETERS} profile for this page: a
+* `?camera=<profile>` URL parameter (matched case-insensitively), then
+* `configured` (an exact key), then {@link detectDeviceCameraTarget}. Unknown
+* names are ignored with a console warning. `XRDeviceCamera` resolves its
+* `targetDevice` this way when it is created.
+* @param configured - The profile chosen in code, normally
+*     `options.deviceCamera.targetDevice`.
+*/
+function resolveDeviceCameraTarget(configured) {
+	const fromUrl = getUrlParameter("camera")?.trim();
+	if (fromUrl) {
+		const target = Object.keys(DEVICE_CAMERA_PARAMETERS).find((key) => key.toLowerCase() === fromUrl.toLowerCase());
+		if (target) return target;
+		warnUnknownDeviceCameraTarget(fromUrl, "?camera=");
+	}
+	if (configured) {
+		if (Object.hasOwn(DEVICE_CAMERA_PARAMETERS, configured)) return configured;
+		warnUnknownDeviceCameraTarget(configured, "targetDevice");
+	}
+	return detectDeviceCameraTarget();
+}
+/**
+* Throws unless `targetDevice` is a {@link DEVICE_CAMERA_PARAMETERS} key. Keys
+* are exact, so a different case or an inherited name such as `'toString'`
+* throws.
+*/
+function assertDeviceCameraTarget(targetDevice) {
+	if (!Object.hasOwn(DEVICE_CAMERA_PARAMETERS, targetDevice)) throw new Error(`Unknown device camera profile "${targetDevice}"; expected one of: ${Object.keys(DEVICE_CAMERA_PARAMETERS).join(", ")}.`);
+}
+function warnUnknownDeviceCameraTarget(name, source) {
+	console.warn(`[xrblocks] Ignoring unknown device camera profile "${name}" in ${source}; expected one of: ${Object.keys(DEVICE_CAMERA_PARAMETERS).join(", ")}.`);
 }
 function getDeviceCameraClipFromView(renderCamera, deviceCamera, targetDevice) {
 	if (deviceCamera.simulatorCamera) {
@@ -1272,7 +1371,7 @@ function getCameraParametersSnapshot(camera, xrCameras, deviceCamera, targetDevi
 	const clipFromView = getDeviceCameraClipFromView(camera, deviceCamera, targetDevice);
 	if (!clipFromView) throw new Error("Could not get clip from view");
 	return {
-		clipFromView,
+		clipFromView: clipFromView.clone(),
 		viewFromClip: clipFromView.clone().invert(),
 		worldFromClip: getDeviceCameraWorldFromClip(camera, xrCameras, deviceCamera, targetDevice),
 		worldFromView: getDeviceCameraWorldFromView(camera, xrCameras, deviceCamera, targetDevice)
@@ -1615,6 +1714,20 @@ var XRDeviceCamera = class XRDeviceCamera extends VideoStream {
 		this.mediaTexture_ = this.texture;
 		this.videoConstraints_ = options.videoConstraints ?? { facingMode: "environment" };
 		this.rgbToDepthParams = options.rgbToDepthParams ?? DEFAULT_RGB_TO_DEPTH_PARAMS;
+		this.targetDevice_ = resolveDeviceCameraTarget(options.targetDevice);
+	}
+	/**
+	* The `DEVICE_CAMERA_PARAMETERS` profile used for this camera's intrinsics
+	* and pose, resolved once from `?camera=`, `options.targetDevice` and the
+	* user agent (see `resolveDeviceCameraTarget`). Assign an exact profile key
+	* to switch it at runtime; unknown keys throw.
+	*/
+	get targetDevice() {
+		return this.targetDevice_;
+	}
+	set targetDevice(targetDevice) {
+		assertDeviceCameraTarget(targetDevice);
+		this.targetDevice_ = targetDevice;
 	}
 	/**
 	* Retrieves the list of available video input devices.
@@ -2776,7 +2889,7 @@ var WebXRHandPoseEstimator = class {
 		if (!this.user?.hands) return null;
 		const hand = this.user.hands.hands[handedness];
 		const handLabel = HAND_INDEX_TO_LABEL[handedness];
-		if (!hand?.joints || !handLabel) return null;
+		if (!hand?.visible || !hand.joints || !handLabel) return null;
 		const joints = /* @__PURE__ */ new Map();
 		const jointRotations = /* @__PURE__ */ new Map();
 		const position = new THREE.Vector3();
@@ -4306,7 +4419,12 @@ var Options = class {
 	*/
 	enableCamera(facingMode = "environment") {
 		this.permissions.camera = true;
-		this.deviceCamera = new DeviceCameraOptions(facingMode === "environment" ? xrDeviceCameraEnvironmentOptions : xrDeviceCameraUserOptions);
+		const preset = facingMode === "environment" ? xrDeviceCameraEnvironmentOptions : xrDeviceCameraUserOptions;
+		this.deviceCamera = new DeviceCameraOptions({
+			...this.deviceCamera,
+			enabled: preset.enabled,
+			videoConstraints: preset.videoConstraints
+		});
 		return this;
 	}
 	/**
@@ -4440,94 +4558,6 @@ var Options = class {
 		return this;
 	}
 };
-//#endregion
-//#region src/utils/SceneGraphUtils.ts
-/**
-* Checks if a given object is a descendant of another object in the scene
-* graph. This function is useful for determining if an interaction (like a
-* raycast hit) has occurred on a component that is part of a larger, complex
-* entity.
-*
-* It uses an iterative approach to traverse up the hierarchy from the child.
-*
-* @param child - The potential descendant object.
-* @param parent - The potential ancestor object.
-* @returns True if `child` is the same as `parent` or is a descendant of
-*     `parent`.
-*/
-function objectIsDescendantOf(child, parent) {
-	let currentNode = child;
-	while (currentNode) {
-		if (currentNode === parent) return true;
-		currentNode = currentNode.parent;
-	}
-	return false;
-}
-/**
-* Traverses the scene graph from a given node, calling a callback function for
-* each node. The traversal stops if the callback returns true.
-*
-* This function is similar to THREE.Object3D.traverse, but allows for early
-* exit from the traversal based on the callback's return value.
-*
-* @param node - The starting node for the traversal.
-* @param callback - The function to call for each node. It receives the current
-*     node as an argument. If the callback returns `true`, the traversal will
-*     stop.
-* @returns Whether the callback returned true for any node.
-*/
-function traverseUtil(node, callback) {
-	if (callback(node)) return true;
-	for (const child of node.children) if (traverseUtil(child, callback)) return true;
-	return false;
-}
-/**
-* Gets a world-space point on an object's rendered geometry near a reference
-* position. Falls back to the object's world position when it has no mesh
-* triangles. `closest` measures from `from`; `center` measures from the
-* object's world bounding-box center.
-* UI elements use the center of their rendered bounds.
-*/
-function getObjectTargetPoint(object, from, out, mode = "closest") {
-	const presentation = getUIPresentationObject(object);
-	const renderedObject = presentation ?? object;
-	renderedObject.updateWorldMatrix(true, true);
-	if (presentation || isUIPresentationObject(object)) {
-		const bounds = new THREE.Box3();
-		const clippedBounds = getUIPresentationBounds(object, bounds);
-		if (clippedBounds === null) return renderedObject.getWorldPosition(out);
-		if (clippedBounds === void 0) bounds.setFromObject(renderedObject, true);
-		if (!bounds.isEmpty()) return bounds.getCenter(out);
-	}
-	const reference = mode === "center" ? new THREE.Box3().setFromObject(renderedObject, true).getCenter(new THREE.Vector3()) : from;
-	let closestDistanceSquared = Infinity;
-	const a = new THREE.Vector3();
-	const b = new THREE.Vector3();
-	const c = new THREE.Vector3();
-	const centroid = new THREE.Vector3();
-	renderedObject.traverse((child) => {
-		if (!(child instanceof THREE.Mesh) || !child.visible) return;
-		const position = child.geometry.getAttribute("position");
-		if (!position) return;
-		const index = child.geometry.index;
-		const vertexCount = index?.count ?? position.count;
-		for (let offset = 0; offset + 2 < vertexCount; offset += 3) {
-			child.getVertexPosition(index?.getX(offset) ?? offset, a);
-			child.getVertexPosition(index?.getX(offset + 1) ?? offset + 1, b);
-			child.getVertexPosition(index?.getX(offset + 2) ?? offset + 2, c);
-			a.applyMatrix4(child.matrixWorld);
-			b.applyMatrix4(child.matrixWorld);
-			c.applyMatrix4(child.matrixWorld);
-			centroid.copy(a).add(b).add(c).multiplyScalar(1 / 3);
-			const distanceSquared = centroid.distanceToSquared(reference);
-			if (distanceSquared < closestDistanceSquared) {
-				closestDistanceSquared = distanceSquared;
-				out.copy(centroid);
-			}
-		}
-	});
-	return closestDistanceSquared < Infinity ? out : object.getWorldPosition(out);
-}
 //#endregion
 //#region src/interaction/DirectTouch.ts
 /**
@@ -4728,10 +4758,17 @@ var HitRegistry = class {
 		};
 	}
 	setWorldTouchCandidates(objects) {
-		const next = new Set(objects);
+		const next = /* @__PURE__ */ new Set();
+		const visit = (object) => {
+			if (!object.visible || object.xb?.pointerEvents === "none" || object.userData.xrblocksPrivate === true) return;
+			if (object.geometry) next.add(object);
+			for (const child of object.children) visit(child);
+		};
+		for (const object of objects) visit(object);
 		for (const [physical, entry] of this.touchCandidates) if (!this.registered.has(entry)) this.touchCandidates.delete(physical);
 		for (const object of next) {
 			if (this.touchCandidates.has(object)) continue;
+			if (this.resolve(object).physical !== object) continue;
 			this.touchCandidates.set(object, {
 				physical: object,
 				logical: object
@@ -4759,7 +4796,7 @@ var HitRegistry = class {
 	}
 	containsPoint(physical, point, padding = 0) {
 		if (physical.xb?.pointerEvents === "none" || !effectiveVisible(physical)) return false;
-		const box = new THREE.Box3().setFromObject(physical);
+		const box = touchBounds(physical, new THREE.Box3(), true);
 		if (padding > 0) box.expandByScalar(padding);
 		return !box.isEmpty() && box.containsPoint(point) && this.resolve(physical).containsPoint?.(point, padding) !== false;
 	}
@@ -4789,11 +4826,12 @@ var HitRegistry = class {
 		const intersections = [];
 		const box = new THREE.Box3();
 		const center = new THREE.Vector3();
-		for (const { physical, containsPoint, touchTarget } of this.touchCandidates.values()) {
+		for (const entry of this.touchCandidates.values()) {
+			const { physical, containsPoint, touchTarget } = entry;
 			if (physical.xb?.pointerEvents === "none") continue;
 			if (!effectiveVisible(physical)) continue;
 			try {
-				box.setFromObject(physical);
+				touchBounds(physical, box, this.registered.has(entry));
 			} catch {
 				continue;
 			}
@@ -4875,6 +4913,29 @@ function effectiveVisible(object) {
 		current = current.parent;
 	}
 	return true;
+}
+function touchBounds(object, bounds, recursive) {
+	bounds.makeEmpty();
+	const localBounds = new THREE.Box3();
+	const visit = (node) => {
+		if (!node.visible || node.xb?.pointerEvents === "none") return;
+		node.updateWorldMatrix(true, false);
+		const geometry = node.geometry;
+		if (geometry) {
+			const bounded = node;
+			if (bounded.boundingBox !== void 0) {
+				if (bounded.boundingBox === null) bounded.computeBoundingBox();
+				localBounds.copy(bounded.boundingBox);
+			} else {
+				if (geometry.boundingBox === null) geometry.computeBoundingBox();
+				localBounds.copy(geometry.boundingBox);
+			}
+			bounds.union(localBounds.applyMatrix4(node.matrixWorld));
+		}
+		if (recursive) for (const child of node.children) visit(child);
+	};
+	visit(object);
+	return bounds;
 }
 //#endregion
 //#region src/interaction/HitResolver.ts
@@ -5278,7 +5339,8 @@ var ResizeDriver = class {
 			const content = measureUICardMinContentWidth(card);
 			if (content !== void 0) minSize.width = Math.min(Math.max(minSize.width, content), maxSize.width);
 		}
-		const { width } = card.size;
+		const width = card.size.width === "auto" ? getResolvedUICardSize(card)?.width : card.size.width;
+		if (width === void 0) return void 0;
 		const height = card.size.height === "auto" ? getResolvedUICardSize(card)?.height ?? "auto" : card.size.height;
 		if (!(width > 0) || height !== "auto" && !(height > 0)) return;
 		const matrixWorld = card.matrixWorld.clone();
@@ -5309,6 +5371,7 @@ var ResizeDriver = class {
 			corner,
 			cardAnchor,
 			autoHeight: card.size.height === "auto",
+			autoWidth: card.size.width === "auto",
 			options: {
 				anchor,
 				minSize,
@@ -5351,8 +5414,8 @@ var ResizeDriver = class {
 		const position = worldPositionToLocal(worldPosition, parent?.matrixWorld);
 		if (!Number.isFinite(width) || !isFiniteVector(position)) return void 0;
 		if (height !== "auto" && !Number.isFinite(height)) return void 0;
-		const unchanged = baseline.autoHeight && Math.abs(width - baseline.width) < SIZE_EPSILON && (height === "auto" || Math.abs(height - baseline.height) < SIZE_EPSILON);
-		const proposedHeight = unchanged ? "auto" : height;
+		const unchanged = (baseline.autoWidth || baseline.autoHeight) && Math.abs(width - baseline.width) < SIZE_EPSILON && (height === "auto" || Math.abs(height - baseline.height) < SIZE_EPSILON);
+		const proposedHeight = unchanged && baseline.autoHeight ? "auto" : height;
 		return {
 			action: this.action,
 			width,
@@ -6187,7 +6250,7 @@ var Interaction = class {
 					this.updateLongSelect(capture, snapshot, deltaSeconds);
 					this.updateSemantic(capture, snapshot);
 				}
-				this.callbacks.invokeGlobal("onSelecting", this.createSelectEvent(snapshot.controller, capture));
+				this.invokeGlobal(capture, "onSelecting", this.createSelectEvent(snapshot.controller, capture));
 			} catch (error) {
 				this.cancelFailedCapture(snapshot.controller, error);
 			}
@@ -6207,7 +6270,11 @@ var Interaction = class {
 	registerHitSurface(physical, logical, options) {
 		return this.registry.register(physical, logical, options);
 	}
-	/** Installs the UI runtime's focus policy without owning a second input path. */
+	/**
+	* Installs the UI runtime's focus policy without owning a second input path.
+	* The handler runs when any source starts a selection, before object
+	* callbacks, with the pressed surface or undefined for empty space.
+	*/
 	setSelectionFocusHandler(handler) {
 		this.focusHandler = handler;
 	}
@@ -6414,16 +6481,16 @@ var Interaction = class {
 			this.runCaptureTransition(controller, () => {
 				this.clearResolvedRay(controller);
 				this.reticle.clear(controller);
-				this.callbacks.invokeGlobal("onSelectStart", this.createSelectEvent(controller, capture));
+				this.invokeGlobal(capture, "onSelectStart", this.createSelectEvent(controller, capture));
 			});
 			return;
 		}
 		if (!resolved?.target) {
-			this.focusHandler?.();
+			this.focusHandler?.(resolved?.surface);
 			const capture = { kind: "none" };
 			this.installCapture(controller, capture);
 			this.runCaptureTransition(controller, () => {
-				this.callbacks.invokeGlobal("onSelectStart", this.createSelectEvent(controller, capture));
+				this.invokeGlobal(capture, "onSelectStart", this.createSelectEvent(controller, capture));
 			});
 			return;
 		}
@@ -6474,7 +6541,7 @@ var Interaction = class {
 			dispatchInteractionPath(this.callbacks, selection.scriptPath, "onObjectSelectStart", event);
 			if (action === "manipulate" && !this.manipulation.tryStart(selection, snapshot)) capture.action = "none";
 			if (capture.action === "semantic") this.invokeSemantic(capture, () => semantic?.begin?.(semanticInput(snapshot, resolved, sliderProjector, physicalSurface)));
-			this.callbacks.invokeGlobal("onSelectStart", event);
+			this.invokeGlobal(capture, "onSelectStart", event);
 		});
 		return capture;
 	}
@@ -6508,9 +6575,15 @@ var Interaction = class {
 			dispatchInteractionPath(this.callbacks, capture.selection.scriptPath, "onObjectSelectEnd", endEvent);
 		}
 		const globalEvent = this.createSelectEvent(controller, capture);
-		if (completed) this.callbacks.invokeGlobal("onSelect", globalEvent);
-		this.callbacks.invokeGlobal("onSelectEnd", {
+		if (completed) this.invokeGlobal(capture, "onSelect", globalEvent);
+		this.invokeGlobal(capture, "onSelectEnd", {
 			...globalEvent,
+			completed,
+			reason: endReason
+		});
+		controller.dispatchEvent({
+			type: "selectionend",
+			target: controller,
 			completed,
 			reason: endReason
 		});
@@ -6529,7 +6602,13 @@ var Interaction = class {
 			if (capture.action !== "scroll") this.invokeSemantic(capture, () => capture.semantic?.cancel?.());
 			dispatchInteractionPath(this.callbacks, capture.selection.scriptPath, "onObjectSelectEnd", event);
 		}
-		this.callbacks.invokeGlobal("onSelectEnd", event);
+		this.invokeGlobal(capture, "onSelectEnd", event);
+		controller.dispatchEvent({
+			type: "selectionend",
+			target: controller,
+			completed: false,
+			reason
+		});
 	}
 	processTouchContact(contact) {
 		const snapshot = this.updateTouchSnapshot(contact);
@@ -6748,7 +6827,7 @@ var Interaction = class {
 			duration: capture.longSelectDuration
 		};
 		dispatchInteractionPath(this.callbacks, capture.selection.scriptPath, "onObjectLongSelect", event);
-		this.callbacks.invokeGlobal("onLongSelect", event);
+		this.invokeGlobal(capture, "onLongSelect", event);
 	}
 	setResolvedRay(controller, snapshot, resolved) {
 		const previous = this.resolvedRays.get(controller);
@@ -6812,6 +6891,9 @@ var Interaction = class {
 			manipulation: resolved.manipulation
 		};
 	}
+	invokeGlobal(capture, hook, event) {
+		if (!capture.globalPropagationStopped) this.callbacks.invokeGlobal(hook, event);
+	}
 	createSelectEvent(controller, capture) {
 		const targetCapture = capture.kind === "target" ? capture : void 0;
 		const resolved = this.resolvedRays.get(controller);
@@ -6822,7 +6904,10 @@ var Interaction = class {
 			target: targetCapture?.selection.target,
 			surface,
 			intersection,
-			stopPropagation: NOOP_PROPAGATION
+			stopPropagation: NOOP_PROPAGATION,
+			stopGlobalPropagation() {
+				capture.globalPropagationStopped = true;
+			}
 		};
 	}
 	hasDeliberateInput(frame) {
@@ -9910,6 +9995,7 @@ var PinchFilter = class {
 };
 //#endregion
 //#region src/input/Input.ts
+const NUM_CONTROLLER_SLOTS = 4;
 var ActiveControllers = class extends THREE.Group {
 	constructor(..._args) {
 		super(..._args);
@@ -9932,6 +10018,8 @@ var Input = class {
 		this.controllers = [];
 		this.controllerGrips = [];
 		this.hands = [];
+		this.controllerHands = [];
+		this.placeholderHands = [];
 		this.pivotsEnabled = false;
 		this.gazeController = new GazeController();
 		this.mouseController = new MouseController();
@@ -9983,21 +10071,24 @@ var Input = class {
 		if (!options.controllers.enabled) return;
 		const controllers = this.controllers;
 		const controllerGrips = this.controllerGrips;
-		for (let i = 0; i < 2; ++i) {
+		for (let i = 0; i < NUM_CONTROLLER_SLOTS; ++i) {
 			controllers.push(renderer.xr.getController(i));
 			controllers[i].userData.id = i;
 			this.builtInControllers.add(controllers[i]);
 			this.activeControllers.add(this.controllers[i]);
 		}
+		this.gazeController.userData.id = controllers.length;
 		controllers.push(this.gazeController);
+		this.mouseController.userData.id = controllers.length;
 		controllers.push(this.mouseController);
 		this.activeControllers.add(this.mouseController);
+		this.gamepadController.userData.id = controllers.length;
 		controllers.push(this.gamepadController);
 		this.activeControllers.add(this.gamepadController);
 		if (options.controllers.enabled) {
 			if (options.controllers.visualization) {
 				const controllerModelFactory = new XRControllerModelFactory();
-				for (let i = 0; i < 2; ++i) {
+				for (let i = 0; i < NUM_CONTROLLER_SLOTS; ++i) {
 					controllerGrips.push(renderer.xr.getControllerGrip(i));
 					controllerGrips[i].add(controllerModelFactory.createControllerModel(controllerGrips[i]));
 					this.activeControllers.add(controllerGrips[i]);
@@ -10005,38 +10096,48 @@ var Input = class {
 			}
 			if (options.hands.enabled) {
 				for (let i = 0; i < 2; ++i) {
-					this.hands.push(renderer.xr.getHand(i));
-					this.activeControllers.add(this.hands[i]);
+					const placeholder = Object.assign(new THREE.Group(), {
+						joints: {},
+						inputState: { pinching: false }
+					});
+					placeholder.visible = false;
+					this.placeholderHands.push(placeholder);
+					this.hands.push(placeholder);
+				}
+				for (let i = 0; i < NUM_CONTROLLER_SLOTS; ++i) {
+					const hand = renderer.xr.getHand(i);
+					this.controllerHands.push(hand);
+					this.activeControllers.add(hand);
 				}
 				if (options.hands.visualization) {
 					if (options.hands.visualizeJoints) {
 						console.log("Visualize hand joints.");
 						const handModelFactory = new XRHandModelFactory();
-						for (let i = 0; i < 2; ++i) {
-							const handModel = handModelFactory.createHandModel(this.hands[i], "boxes");
+						for (let i = 0; i < NUM_CONTROLLER_SLOTS; ++i) {
+							const handModel = handModelFactory.createHandModel(this.controllerHands[i], "boxes");
 							handModel.xb = {
 								...handModel.xb,
 								pointerEvents: "none"
 							};
-							this.hands[i].add(handModel);
+							this.controllerHands[i].add(handModel);
 						}
 					}
 					if (options.hands.visualizeMeshes) {
 						console.log("Visualize hand meshes.");
 						const handModelFactory = new XRHandModelFactory();
-						for (let i = 0; i < 2; ++i) {
-							const handModel = handModelFactory.createHandModel(this.hands[i], "mesh");
+						for (let i = 0; i < NUM_CONTROLLER_SLOTS; ++i) {
+							const handModel = handModelFactory.createHandModel(this.controllerHands[i], "mesh");
 							handModel.xb = {
 								...handModel.xb,
 								pointerEvents: "none"
 							};
-							this.hands[i].add(handModel);
+							this.controllerHands[i].add(handModel);
 						}
 					}
 				}
 			}
 		}
-		if (options.controllers.visualizeRays) for (let i = 0; i < 2; ++i) controllers[i].add(new ControllerRayVisual());
+		if (options.controllers.visualizeRays) for (let i = 0; i < NUM_CONTROLLER_SLOTS; ++i) controllers[i].add(new ControllerRayVisual());
 		for (const controller of controllers) this.setupNativeSelectTracking(controller);
 		this.bindSelectStart(this.defaultOnSelectStart.bind(this));
 		this.bindSelectEnd(this.defaultOnSelectEnd.bind(this));
@@ -10140,6 +10241,11 @@ var Input = class {
 		controller.userData.connected = true;
 		controller.gamepad = event.data?.gamepad;
 		controller.inputSource = event.data;
+		const handIndex = this.getHandIndex(event.data?.handedness);
+		const hand = this.controllerHands[controller.userData.id];
+		if (event.data?.hand && handIndex !== void 0 && hand) this.setHandAlias(handIndex, hand);
+		if (event.data?.handedness !== "left" && this.leftController === controller) this.leftController = this.findConnectedController("left", controller);
+		if (event.data?.handedness !== "right" && this.rightController === controller) this.rightController = this.findConnectedController("right", controller);
 		switch (event.data?.handedness) {
 			case "left":
 				this.leftController = controller;
@@ -10149,6 +10255,7 @@ var Input = class {
 	}
 	defaultOnDisconnected(event) {
 		const controller = event.target;
+		const inputSource = event.data ?? controller.inputSource;
 		const wasSelected = controller.userData.selected === true;
 		const shouldKeepTransientPointer = this.nativeSelectControllers.delete(controller) && (wasSelected || this.releasedControllers.has(controller)) && (event.data?.targetRayMode ?? controller.inputSource?.targetRayMode) === "transient-pointer";
 		if (shouldKeepTransientPointer) {
@@ -10182,8 +10289,17 @@ var Input = class {
 		if (controller.reticle) controller.reticle.visible = false;
 		if (!shouldKeepTransientPointer) this.releasedControllers.delete(controller);
 		delete controller?.gamepad;
-		if (this.leftController === controller) this.leftController = void 0;
-		if (this.rightController === controller) this.rightController = void 0;
+		if (this.leftController === controller) this.leftController = this.findConnectedController("left", controller);
+		if (this.rightController === controller) this.rightController = this.findConnectedController("right", controller);
+		const handIndex = this.getHandIndex(inputSource?.handedness);
+		const hand = this.controllerHands[controller.userData.id];
+		if (inputSource?.hand && hand) {
+			this.clearHandAliases(hand);
+			if (handIndex !== void 0) {
+				const replacement = this.findConnectedHand(handIndex, controller);
+				if (replacement) this.setHandAlias(handIndex, replacement);
+			}
+		}
 	}
 	setupNativeSelectTracking(controller) {
 		controller.addEventListener("selectstart", this.captureNativeSelectEvent);
@@ -10343,11 +10459,15 @@ var Input = class {
 	updateDirectTouchInputs() {
 		this.directTouchInputs.length = 0;
 		for (let handIndex = 0; handIndex < 2; handIndex++) {
-			const controller = this.controllers[handIndex];
 			const hand = this.hands[handIndex];
+			if (!hand) continue;
+			const placeholderSlot = hand === this.placeholderHands[handIndex] ? handIndex : -1;
+			const physicalSlot = this.controllerHands.indexOf(hand);
+			const controllerSlot = placeholderSlot >= 0 ? placeholderSlot : physicalSlot >= 0 ? physicalSlot : handIndex;
+			const controller = this.controllers[controllerSlot];
 			const indexTip = hand?.joints?.["index-finger-tip"];
 			if (!controller || !hand?.visible || !indexTip?.visible) continue;
-			let input = this.directTouchSlots[handIndex];
+			let input = this.directTouchSlots[controllerSlot];
 			if (!input) {
 				input = {
 					controller,
@@ -10356,9 +10476,10 @@ var Input = class {
 					orientation: new THREE.Quaternion(),
 					selected: false
 				};
-				this.directTouchSlots[handIndex] = input;
+				this.directTouchSlots[controllerSlot] = input;
 			}
 			input.controller = controller;
+			input.handIndex = handIndex;
 			input.hand = hand.joints?.wrist;
 			indexTip.getWorldPosition(input.point);
 			controller.getWorldQuaternion(input.orientation);
@@ -10394,6 +10515,28 @@ var Input = class {
 		}
 		this.setupNativeSelectTracking(controller);
 		this.pinchFilter.setupController(controller, this.listeners.keys());
+	}
+	getHandIndex(handedness) {
+		switch (handedness) {
+			case "left": return 0;
+			case "right": return 1;
+			default: return;
+		}
+	}
+	setHandAlias(handIndex, hand) {
+		this.clearHandAliases(hand);
+		this.hands[handIndex] = hand;
+	}
+	clearHandAliases(hand) {
+		for (let handIndex = 0; handIndex < 2; handIndex++) if (this.hands[handIndex] === hand) this.hands[handIndex] = this.placeholderHands[handIndex];
+	}
+	findConnectedController(handedness, exclude) {
+		return this.controllers.find((controller) => controller !== exclude && controller.userData.connected === true && controller.inputSource?.handedness === handedness);
+	}
+	findConnectedHand(handIndex, exclude) {
+		const handedness = handIndex === 0 ? "left" : "right";
+		const controller = this.controllers.find((candidate) => candidate !== exclude && candidate.userData.connected === true && Boolean(candidate.inputSource?.hand) && candidate.inputSource?.handedness === handedness);
+		return controller ? this.controllerHands[controller.userData.id] : void 0;
 	}
 	enableController(controller) {
 		if (this.removingControllers.has(controller)) return;
@@ -11161,7 +11304,6 @@ var ObjectDetector = class extends Script {
 		this.initialized = false;
 		this.disposed = false;
 		this.detectedObjects = [];
-		this.targetDevice = "galaxyxr";
 	}
 	static {
 		this.dependencies = {
@@ -11179,6 +11321,19 @@ var ObjectDetector = class extends Script {
 		};
 	}
 	/**
+	* Target device profile used to look up RGB camera intrinsics and pose
+	* for converting detection bounding boxes into world space. Follows the
+	* device camera's `targetDevice` unless assigned here. Assign `undefined` to
+	* follow it again; unknown profile keys throw.
+	*/
+	get targetDevice() {
+		return this.targetDeviceOverride ?? this.deviceCamera?.targetDevice ?? resolveDeviceCameraTarget();
+	}
+	set targetDevice(targetDevice) {
+		if (targetDevice !== void 0) assertDeviceCameraTarget(targetDevice);
+		this.targetDeviceOverride = targetDevice;
+	}
+	/**
 	* Initializes the ObjectDetector.
 	* @override
 	*/
@@ -11192,7 +11347,6 @@ var ObjectDetector = class extends Script {
 		this.renderer = rendererHolder.renderer;
 		this.initialized = true;
 		this.disposed = false;
-		if (this.targetDevice === "galaxyxr") this.targetDevice = detectDeviceCameraTarget();
 		if (this.options.objects.showDebugVisualizations) {
 			this._debugVisualsGroup = new THREE.Group();
 			this._debugVisualsGroup.raycast = () => {};
@@ -13083,15 +13237,16 @@ async function placeOnHorizontalSurface(objectToPlace, camera, scene, planes, me
 			continue;
 		}
 		const collidableObjects = [];
-		scene.traverse((child) => {
-			if (!child.visible) return;
+		const collectObstacles = (child) => {
+			if (!child.visible || child.userData.xrblocksPrivate === true) return;
 			if (child === objectToPlace || isDescendantOf(child, objectToPlace)) return;
-			if (child === planes) return;
 			if (meshes && isDescendantOf(child, meshes)) return;
-			if (child === camera || child === scene) return;
+			if (child === camera) return;
 			if (child.name && (child.name.includes("controller") || child.name.includes("reticle") || child.name.includes("helper"))) return;
 			if (child.isMesh) collidableObjects.push(child);
-		});
+			for (const descendant of child.children) collectObstacles(descendant);
+		};
+		collectObstacles(scene);
 		const candidates = [];
 		const cameraPos = camera.getWorldPosition(new THREE.Vector3());
 		const cameraForward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
@@ -13813,7 +13968,6 @@ var HumanRecognizer = class extends Script {
 		this.lastContinuousDetectionStartedAtMs = -Infinity;
 		this.disposed = false;
 		this.poses = [];
-		this.targetDevice = "galaxyxr";
 	}
 	static {
 		this.dependencies = {
@@ -13823,6 +13977,18 @@ var HumanRecognizer = class extends Script {
 			camera: THREE.Camera,
 			rendererHolder: RendererHolder
 		};
+	}
+	/**
+	* Device camera profile used to place detected poses in world space.
+	* Follows the device camera's `targetDevice` unless assigned here. Assign
+	* `undefined` to follow it again; unknown profile keys throw.
+	*/
+	get targetDevice() {
+		return this.targetDeviceOverride ?? this.deviceCamera?.targetDevice ?? resolveDeviceCameraTarget();
+	}
+	set targetDevice(targetDevice) {
+		if (targetDevice !== void 0) assertDeviceCameraTarget(targetDevice);
+		this.targetDeviceOverride = targetDevice;
 	}
 	init({ options, deviceCamera, depth, camera, rendererHolder }) {
 		this.options = options;
@@ -14383,7 +14549,6 @@ var FaceRecognizer = class extends Script {
 		this.lastContinuousDetectionStartedAtMs = -Infinity;
 		this.disposed = false;
 		this.detectedFaces = [];
-		this.targetDevice = "galaxyxr";
 		this.cachedDepthMeshSnapshot = null;
 		this.cachedDepthMeshSource = null;
 		this.cachedDepthMeshVersion = -1;
@@ -14396,6 +14561,18 @@ var FaceRecognizer = class extends Script {
 			camera: THREE.Camera,
 			rendererHolder: RendererHolder
 		};
+	}
+	/**
+	* Device camera profile used to place detected faces in world space.
+	* Follows the device camera's `targetDevice` unless assigned here. Assign
+	* `undefined` to follow it again; unknown profile keys throw.
+	*/
+	get targetDevice() {
+		return this.targetDeviceOverride ?? this.deviceCamera?.targetDevice ?? resolveDeviceCameraTarget();
+	}
+	set targetDevice(targetDevice) {
+		if (targetDevice !== void 0) assertDeviceCameraTarget(targetDevice);
+		this.targetDeviceOverride = targetDevice;
 	}
 	init({ options, deviceCamera, depth, camera, rendererHolder }) {
 		this.options = options;
@@ -17229,6 +17406,6 @@ var ModelLoader = class {
 	}
 };
 //#endregion
-export { DEFAULT_FACE_CAMERA_CAPSULE_HALF_HEIGHT as $, GEMINI_DEFAULT_LIVE_MODEL as $n, getFingerJoint as $t, DetectedObject as A, VideoStream as An, SoundOptions as At, GazeController as B, intrinsicsToProjectionMatrix as Bn, WebXRHandContext as Bt, AnchorManager as C, xrDepthMeshVisualizationOptions as Cn, defaultAnchorStorageKey as Ct, PlaneDetector as D, SceneVisibilityOptions as Dn, PlanesOptions as Dt, anchorCapability as E, SceneSetOfMarkOptions as En, HumansOptions as Et, ActiveControllers as F, getDeviceCameraClipFromView as Fn, StrokeRecognitionOptions as Ft, OcclusionUtils as G, xrDeviceCameraUserContinuousOptions as Gn, average as Gt, GamepadBindings as H, DeviceCameraOptions as Hn, HAND_INDEX_TO_LABEL as Ht, Input as I, getDeviceCameraWorldFromClip as In, OneDollarUnistrokeRecognizer as It, XRReferenceSpaceCache as J, OpenAI as Jn, getAdjacentFingerSpreads as Jt, OcclusionPass as K, xrDeviceCameraUserOptions as Kn, clamp01 as Kt, Reticles as L, getDeviceCameraWorldFromView as Ln, HeadGestureRecognitionOptions as Lt, callInitWithDependencyInjection as M, cropImage as Mn, SpeechSynthesizerOptions as Mt, AudioListener as N, detectDeviceCameraTarget as Nn, PhysicsOptions as Nt, DetectedPlane as O, XRDeviceCamera as On, ObjectsOptions as Ot, Physics as P, getCameraParametersSnapshot as Pn, LightingOptions as Pt, Interaction as Q, GEMINI_DEFAULT_IMAGE_MODEL as Qn, getFingerDirection as Qt, MouseController as R, isDeviceCameraPoseAvailable as Rn, HeuristicHeadGestureRecognizer as Rt, DetectedMesh as S, xrDepthMeshPhysicsOptions as Sn, AnchorsOptions as St, LocalStorageAnchorStore as T, SceneOptions as Tn, FacesOptions as Tt, Reticle as U, xrDeviceCameraEnvironmentContinuousOptions as Un, HeuristicGestureRecognizer as Ut, GamepadController as V, DEFAULT_RGB_TO_DEPTH_PARAMS as Vn, WebXRHandPoseEstimator as Vt, Depth as W, xrDeviceCameraEnvironmentOptions as Wn, FINGER_ORDER as Wt, Registry as X, AIOptions as Xn, getFingerBendAngles as Xt, WaitFrame as Y, Gemini as Yn, getBoneVectors as Yt, DepthMesh as Z, GEMINI_DEFAULT_FLASH_MODEL as Zn, getFingerCurl as Zt, isBVHReady as _, LayersOptions as _n, Options as _t, resolveSimulatorRotationsFromKeypoints as a, getPalmNormal as an, getUrlParamFloat as ar, FORWARD as at, PoseJointName as b, DepthOptions as bn, XRTransitionOptions as bt, World as c, getPalmUp as cn, getVec4ByColorString as cr, UP as ct, DetectedFace as d, getThumbBendAngles as dn, print as dr, getInteractionSource as dt, getFingerPalmAlignment as en, GeminiOptions as er, DEFAULT_FACE_CAMERA_SMOOTHING as et, FaceLandmarkName as f, getThumbCurl as fn, urlParams as fr, getObjectTargetPoint as ft, enableAcceleratedRaycast as g, getThumbVerticalDirection as gn, InteractionOptions as gt, disposeBVH as h, getThumbStraightness as hn, InputOptions as ht, resolveSimulatorHandPoseRotations as i, getFingertipPalmDistance as in, getUrlParamBool as ir, DOWN as it, placeObjectAtIntersectionFacingTarget as j, DEVICE_CAMERA_PARAMETERS as jn, SpeechRecognizerOptions as jt, ObjectDetector as k, StreamState as kn, MeshDetectionOptions as kt, Segmenter as l, getPalmWidth as ln, lerp as lr, ZERO_VECTOR3 as lt, applyBVH as m, getThumbOpposition as mn, traverseUtil as mt, SIMULATOR_HAND_POSE_ROTATIONS as n, getFingerStraightness as nn, clamp$1 as nr, faceCameraSlerpAlpha as nt, SIMULATOR_HAND_COMMON_BIOMECHANICAL_CONSTRAINTS_DEGREES as o, getPalmPose as on, getUrlParamInt as or, LEFT as ot, _getBvhImportStatus as p, getThumbDirection as pn, objectIsDescendantOf as pt, DepthTextures as q, AI as qn, estimateHandScale as qt, applySimulatorHandPoseRotationConstraints as r, getFingertipDistance as rn, getColorHex as rr, BACK as rt, parseSimulatorHandPoseRotations as s, getPalmRight as sn, getUrlParameter as sr, RIGHT as st, ModelLoader as t, getFingerSpread as tn, OpenAIOptions as tr, faceCameraQuaternion as tt, FaceRecognizer as u, getRelativeBoneAngles as un, parseBase64DataURL as ur, ReticlePresenter as ut, HumanRecognizer as v, HandsOptions as vn, RENDERER_BACKENDS as vt, SimulatorAnchor as w, ContextOptions as wn, SegmentationOptions as wt, MeshDetector as x, xrDepthMeshOptions as xn, WorldOptions as xt, DetectedBodyPose as y, DepthMeshOptions as yn, ReticleOptions as yt, HeadGestureRecognition as z, transformRgbUvToWorld as zn, GestureRecognitionOptions as zt };
+export { DEFAULT_FACE_CAMERA_CAPSULE_HALF_HEIGHT as $, GeminiOptions as $n, getFingerStraightness as $t, DetectedObject as A, cropImage as An, PhysicsOptions as At, GazeController as B, DEFAULT_RGB_TO_DEPTH_PARAMS as Bn, HeuristicGestureRecognizer as Bt, AnchorManager as C, SceneSetOfMarkOptions as Cn, HumansOptions as Ct, PlaneDetector as D, VideoStream as Dn, SoundOptions as Dt, anchorCapability as E, StreamState as En, MeshDetectionOptions as Et, ActiveControllers as F, getDeviceCameraWorldFromView as Fn, HeuristicHeadGestureRecognizer as Ft, OcclusionUtils as G, xrDeviceCameraUserOptions as Gn, getAdjacentFingerSpreads as Gt, GamepadBindings as H, xrDeviceCameraEnvironmentContinuousOptions as Hn, average as Ht, Input as I, isDeviceCameraPoseAvailable as In, GestureRecognitionOptions as It, XRReferenceSpaceCache as J, Gemini as Jn, getFingerCurl as Jt, OcclusionPass as K, AI as Kn, getBoneVectors as Kt, Reticles as L, resolveDeviceCameraTarget as Ln, WebXRHandContext as Lt, callInitWithDependencyInjection as M, getCameraParametersSnapshot as Mn, StrokeRecognitionOptions as Mt, AudioListener as N, getDeviceCameraClipFromView as Nn, OneDollarUnistrokeRecognizer as Nt, DetectedPlane as O, DEVICE_CAMERA_PARAMETERS as On, SpeechRecognizerOptions as Ot, Physics as P, getDeviceCameraWorldFromClip as Pn, HeadGestureRecognitionOptions as Pt, Interaction as Q, GEMINI_DEFAULT_LIVE_MODEL as Qn, getFingerSpread as Qt, MouseController as R, transformRgbUvToWorld as Rn, WebXRHandPoseEstimator as Rt, DetectedMesh as S, SceneOptions as Sn, FacesOptions as St, LocalStorageAnchorStore as T, XRDeviceCamera as Tn, ObjectsOptions as Tt, Reticle as U, xrDeviceCameraEnvironmentOptions as Un, clamp01 as Ut, GamepadController as V, DeviceCameraOptions as Vn, FINGER_ORDER as Vt, Depth as W, xrDeviceCameraUserContinuousOptions as Wn, estimateHandScale as Wt, Registry as X, GEMINI_DEFAULT_FLASH_MODEL as Xn, getFingerJoint as Xt, WaitFrame as Y, AIOptions as Yn, getFingerDirection as Yt, DepthMesh as Z, GEMINI_DEFAULT_IMAGE_MODEL as Zn, getFingerPalmAlignment as Zt, isBVHReady as _, DepthOptions as _n, XRTransitionOptions as _t, resolveSimulatorRotationsFromKeypoints as a, getPalmUp as an, getUrlParamInt as ar, FORWARD as at, PoseJointName as b, xrDepthMeshVisualizationOptions as bn, defaultAnchorStorageKey as bt, World as c, getThumbBendAngles as cn, lerp as cr, UP as ct, DetectedFace as d, getThumbOpposition as dn, urlParams as dr, getInteractionSource as dt, getFingertipDistance as en, OpenAIOptions as er, DEFAULT_FACE_CAMERA_SMOOTHING as et, FaceLandmarkName as f, getThumbStraightness as fn, InputOptions as ft, enableAcceleratedRaycast as g, DepthMeshOptions as gn, ReticleOptions as gt, disposeBVH as h, HandsOptions as hn, RENDERER_BACKENDS as ht, resolveSimulatorHandPoseRotations as i, getPalmRight as in, getUrlParamFloat as ir, DOWN as it, placeObjectAtIntersectionFacingTarget as j, detectDeviceCameraTarget as jn, LightingOptions as jt, ObjectDetector as k, assertDeviceCameraTarget as kn, SpeechSynthesizerOptions as kt, Segmenter as l, getThumbCurl as ln, parseBase64DataURL as lr, ZERO_VECTOR3 as lt, applyBVH as m, LayersOptions as mn, Options as mt, SIMULATOR_HAND_POSE_ROTATIONS as n, getPalmNormal as nn, getColorHex as nr, faceCameraSlerpAlpha as nt, SIMULATOR_HAND_COMMON_BIOMECHANICAL_CONSTRAINTS_DEGREES as o, getPalmWidth as on, getUrlParameter as or, LEFT as ot, _getBvhImportStatus as p, getThumbVerticalDirection as pn, InteractionOptions as pt, DepthTextures as q, OpenAI as qn, getFingerBendAngles as qt, applySimulatorHandPoseRotationConstraints as r, getPalmPose as rn, getUrlParamBool as rr, BACK as rt, parseSimulatorHandPoseRotations as s, getRelativeBoneAngles as sn, getVec4ByColorString as sr, RIGHT as st, ModelLoader as t, getFingertipPalmDistance as tn, clamp$1 as tr, faceCameraQuaternion as tt, FaceRecognizer as u, getThumbDirection as un, print as ur, ReticlePresenter as ut, HumanRecognizer as v, xrDepthMeshOptions as vn, WorldOptions as vt, SimulatorAnchor as w, SceneVisibilityOptions as wn, PlanesOptions as wt, MeshDetector as x, ContextOptions as xn, SegmentationOptions as xt, DetectedBodyPose as y, xrDepthMeshPhysicsOptions as yn, AnchorsOptions as yt, HeadGestureRecognition as z, intrinsicsToProjectionMatrix as zn, HAND_INDEX_TO_LABEL as zt };
 
 //# sourceMappingURL=ModelLoader.js.map

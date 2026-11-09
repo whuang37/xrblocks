@@ -15,8 +15,8 @@
 *
 * @file xrblocks.js
 * @version v0.24.0
-* @commitid b89cf0d
-* @builddate 2026-10-29T01:00:40.867Z
+* @commitid 9a4ab86
+* @builddate 2026-11-09T16:54:38.149Z
 * @description XR Blocks SDK, built from source with the above commit ID.
 * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
 * and follow rules below:
@@ -40,8 +40,8 @@ physical world space, also add locomotion methods like pinch to teleport.
 or generate from primitive shapes of use vox formats for voxels or
 lego-styles.
 */
-import { A as DEFAULT_GRADIENT_PANEL_PROPS, D as isUIElement, E as getUIStructureRevision, S as getUIElementKind, T as getUIRevision, f as normalizeManipulationConfig, h as getSemanticControl, j as TransformScript, k as registerUIPresentationObject, m as ManipulationAction, o as setResolvedUICardSize, r as getUICardEdgeOptions, s as setUICardContentMeasurer, t as UICard, w as getUIPresentationObject } from "./UICard.js";
-import { a as UIOverlay, c as UIScrollView, i as UIText, l as bindScrollView, n as bindTextInput, o as PANEL_BACKFACE_MARKER, r as normalizeTextInputValue, t as UITextInput, u as updateScrollViewLayout } from "./UITextInput.js";
+import { A as isUIElement, D as getUIPresentationObject, M as DEFAULT_GRADIENT_PANEL_PROPS, N as TransformScript, O as getUIRevision, T as getUIElementKind, f as normalizeManipulationConfig, h as getSemanticControl, j as registerUIPresentationObject, k as getUIStructureRevision, m as ManipulationAction, n as getResolvedUICardSize, o as setResolvedUICardSize, r as getUICardEdgeOptions, s as setUICardContentMeasurer, t as UICard } from "./UICard.js";
+import { a as UIOverlay, c as UIDropdown, d as UIScrollView, f as bindScrollView, i as UIText, l as UIDropdownOption, n as bindTextInput, o as PANEL_BACKFACE_MARKER, p as updateScrollViewLayout, r as normalizeTextInputValue, t as UITextInput } from "./UITextInput.js";
 import { i as ensureWebGPUUIMaterials, n as createCardEdgeMaterial, r as createUnifiedPanelMaterial } from "./PanelMaterialFactory.js";
 import { a as resolveLineHeight, i as graphemes, n as fontShorthand, o as resolveRasterScale, s as DEFAULT_TEXT_LINE_HEIGHT, t as cssColor } from "./CanvasTextStyle.js";
 import * as THREE from "three";
@@ -1407,6 +1407,172 @@ function glyphProperties(properties) {
 		pointerEvents: "none"
 	};
 }
+const LIST_OFFSET = "110%";
+const LIST_CORNER_RADIUS = 12;
+const ICON_SIZE = 20;
+const svg = (path) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="#ffffff" d="${path}"/></svg>`;
+const CHEVRON_DOWN = svg("M4.6 8.2 12 15.6l7.4-7.4 1.4 1.4-8.8 8.8-8.8-8.8z");
+const CHEVRON_UP = svg("M4.6 15.8 12 8.4l7.4 7.4 1.4-1.4L12 5.6l-8.8 8.8z");
+const CHECK = svg("M3.4 12.6 4.8 11.2l4.4 4.4 10-10 1.4 1.4-11.4 11.4z");
+const LABEL_ALIGN = { verticalAlign: "top" };
+const BELOW = {
+	positionTop: LIST_OFFSET,
+	positionBottom: void 0
+};
+const ABOVE = {
+	positionTop: void 0,
+	positionBottom: LIST_OFFSET
+};
+const edgePoint = new THREE.Vector3();
+/**
+* Private trigger content and option list of a UIDropdown. Option nodes mount
+* inside `list`, which is absolutely positioned against the trigger, so the
+* open list never changes the card layout.
+*/
+var DropdownPresentation = class {
+	constructor(dropdown, trigger) {
+		this.dropdown = dropdown;
+		this.trigger = trigger;
+		this.above = false;
+		this.label = new Text({
+			text: "",
+			flexShrink: 1,
+			pointerEvents: "none",
+			...LABEL_ALIGN
+		});
+		this.label.name = "UIDropdownLabel";
+		this.chevron = new MergedSvg({
+			content: CHEVRON_DOWN,
+			width: ICON_SIZE,
+			height: ICON_SIZE,
+			flexShrink: 0,
+			pointerEvents: "none"
+		});
+		this.chevron.name = "UIDropdownChevron";
+		this.list = new GradientPanel({
+			...BELOW,
+			positionType: "absolute",
+			positionLeft: 0,
+			minWidth: "100%",
+			flexDirection: "column",
+			alignItems: "stretch",
+			cornerRadius: LIST_CORNER_RADIUS,
+			strokeWidth: 1,
+			visibility: "hidden",
+			pointerEvents: "none"
+		});
+		this.list.name = "UIDropdownList";
+		trigger.add(this.label, this.chevron, this.list);
+	}
+	commit(theme, color, renderOrder) {
+		const { colors } = theme;
+		const dropdown = this.dropdown;
+		const chosen = dropdown.options.find((option) => option.value === dropdown.value);
+		const textColor = color ?? colors.text;
+		this.label.setProperties({
+			text: chosen?.label ?? dropdown.placeholder,
+			color: normalizeAlphaHexColor(chosen || dropdown.disabled ? textColor : colors.secondaryText)
+		});
+		this.chevron.setProperties({
+			content: dropdown.open ? CHEVRON_UP : CHEVRON_DOWN,
+			color: normalizeAlphaHexColor(textColor)
+		});
+		const { color: surface } = parseColorWithAlpha(colors.surface);
+		this.list.setProperties({
+			fillColor: `#${surface.getHexString()}`,
+			strokeColor: colors.outline,
+			visibility: dropdown.open ? void 0 : "hidden",
+			renderOrder: renderOrder === void 0 ? void 0 : renderOrder + 1e5
+		});
+		this.syncZIndex();
+	}
+	/** Opens the list above the trigger when it would pass the root's bottom. */
+	afterLayout() {
+		this.syncZIndex();
+		const above = this.opensAbove();
+		if (above === void 0 || above === this.above) return;
+		this.above = above;
+		this.list.setProperties(above ? ABOVE : BELOW);
+	}
+	dispose() {
+		for (const node of [
+			this.label,
+			this.chevron,
+			this.list
+		]) {
+			node.removeFromParent();
+			node.dispose();
+		}
+	}
+	/**
+	* Keeps the list one uikit zIndex step above its trigger. uikit zIndex is
+	* absolute, not relative to the parent, and each step also biases hit
+	* distance by 1 cm, so a fixed value falls under a trigger inside a stacked
+	* overlay or panel. The list is mounted before this first runs: a
+	* GradientPanel built detached with a zIndex stopped later siblings from
+	* drawing while the list was hidden.
+	*/
+	syncZIndex() {
+		const zIndex = (this.trigger.orderInfo.peek()?.majorIndex ?? 0) + 1;
+		if (zIndex === this.zIndex) return;
+		this.zIndex = zIndex;
+		this.list.setProperties({ zIndex });
+	}
+	opensAbove() {
+		const trigger = this.trigger.globalPanelMatrix.peek();
+		const list = this.list.globalPanelMatrix.peek();
+		const root = this.trigger.root.peek().component.globalPanelMatrix.peek();
+		if (!trigger || !list || !root) return void 0;
+		const triggerTop = edgeY(trigger, .5);
+		const triggerHeight = triggerTop - edgeY(trigger, -.5);
+		const listHeight = edgeY(list, .5) - edgeY(list, -.5);
+		const gap = triggerHeight * .1;
+		const roomBelow = triggerTop - triggerHeight - gap - edgeY(root, -.5);
+		const roomAbove = edgeY(root, .5) - triggerTop - gap;
+		return listHeight > roomBelow && roomAbove > roomBelow + gap;
+	}
+};
+/** Adds the check mark and label of one option row. */
+function createDropdownOptionContent(row) {
+	const check = new MergedSvg({
+		content: CHECK,
+		width: ICON_SIZE,
+		height: ICON_SIZE,
+		flexShrink: 0,
+		pointerEvents: "none"
+	});
+	check.name = "UIDropdownCheck";
+	const label = new Text({
+		text: "",
+		flexShrink: 1,
+		pointerEvents: "none",
+		...LABEL_ALIGN
+	});
+	label.name = "UIDropdownOptionLabel";
+	row.add(check, label);
+	return {
+		update: (option, theme, color) => {
+			const { colors } = theme;
+			check.setProperties({
+				color: normalizeAlphaHexColor(option.disabled ? colors.disabledText : colors.primary),
+				visibility: option.checked ? void 0 : "hidden"
+			});
+			label.setProperties({
+				text: option.label,
+				color: normalizeAlphaHexColor(color ?? colors.text)
+			});
+		},
+		dispose: () => {
+			for (const node of [check, label]) {
+				node.removeFromParent();
+				node.dispose();
+			}
+		}
+	};
+}
+function edgeY(matrix, y) {
+	return edgePoint.set(0, y, 0).applyMatrix4(matrix).y;
+}
 //#endregion
 //#region src/ui/internal/ScrollViewPresentation.ts
 /** Keeps scroll clipping inside the decorative shell instead of clipping its shadows. */
@@ -1470,7 +1636,10 @@ var ScrollViewPresentation = class {
 			gapRow: properties.rowGap ?? properties.gap,
 			gapColumn: properties.columnGap ?? properties.gap
 		});
-		this.viewport.setProperties({ scrollbarColor: properties.color ?? "#888888" });
+		this.viewport.setProperties({
+			flexBasis: properties.height === "auto" ? "auto" : 0,
+			scrollbarColor: properties.color ?? "#888888"
+		});
 	}
 	afterLayout() {
 		const size = this.viewport.size.peek();
@@ -2208,6 +2377,10 @@ const CARD_SIZE_PROPERTY_KEYS = /* @__PURE__ */ new Set([
 	"sizeX",
 	"sizeY"
 ]);
+const TOGGLE_THUMB_SIZE = 28;
+const TOGGLE_WIDTH = 60;
+const TOGGLE_HEIGHT = 36;
+const PROGRESS_HEIGHT = 10;
 const imageTextureLoader = new THREE.TextureLoader();
 var UIKitMount = class {
 	constructor(root, icons) {
@@ -2359,7 +2532,9 @@ var UIKitMount = class {
 	* that no longer fits overflows and narrows the search.
 	*/
 	measureCardMinContentWidth(card) {
-		const current = card.size.width / card.pixelSize;
+		const resolvedWidth = card.size.width === "auto" ? getResolvedUICardSize(card)?.width : card.size.width;
+		if (resolvedWidth === void 0) return void 0;
+		const current = resolvedWidth / card.pixelSize;
 		if (!(current > 0)) return void 0;
 		if (this.cachedMinContentWidth !== void 0 && this.cachedMinContentWidth <= current * card.pixelSize) return this.cachedMinContentWidth;
 		const width = this.withAutoHeightLayout((yoga) => {
@@ -2396,6 +2571,7 @@ var UIKitMount = class {
 		} finally {
 			yoga.setWidth(yogaDimension(previousWidth));
 			yoga.setHeight(yogaDimension(previousHeight));
+			yoga.calculateLayout(void 0, void 0);
 		}
 	}
 	updateViewport(viewport) {
@@ -2505,6 +2681,7 @@ var UIKitNodeBinding = class UIKitNodeBinding {
 		else this.node = new Container(toContainerProperties(properties));
 		if (element instanceof UIScrollView && this.node instanceof Container) this.scrollView = new ScrollViewPresentation(element, this.node);
 		if (element instanceof UITextInput && this.node instanceof Container) this.textInput = new TextFieldPresentation(element, this.node, this.notifyResource);
+		if (element instanceof UIDropdown && this.node instanceof Container) this.dropdown = new DropdownPresentation(element, this.node);
 		this.hitRegion = new UIHitRegion(this.node);
 		this.unregisterPresentationObject = registerUIPresentationObject(this.element, this.node, this.hitRegion.bounds);
 		this.baseProperties = properties;
@@ -2522,7 +2699,7 @@ var UIKitNodeBinding = class UIKitNodeBinding {
 	}
 	reconcileTree(context) {
 		if (!isContainerNode(this.node)) return;
-		const content = this.scrollView?.content ?? this.node;
+		const content = this.scrollView?.content ?? this.dropdown?.list ?? this.node;
 		const nextOrder = this.element.children.filter(isUIElement);
 		const next = /* @__PURE__ */ new Map();
 		for (const child of nextOrder) {
@@ -2553,11 +2730,13 @@ var UIKitNodeBinding = class UIKitNodeBinding {
 			hitMappingsChanged: false,
 			contentChanged: false
 		};
-		const order = context.rootStack === void 0 ? void 0 : context.rootStack + Number(this.element.style.zIndex ?? 0) * 1e3 + context.sequence.value++;
+		const order = context.rootStack === void 0 ? void 0 : context.rootStack + stackZIndex(this.element) * 1e3 + context.sequence.value++;
 		const orderChanged = order !== this.renderOrder;
 		const revision = getUIRevision(this.element);
 		const nextPointerEvents = this.element.xb?.pointerEvents;
-		const needsProperties = revision !== this.revision || context.theme !== this.theme || orderChanged || nextPointerEvents !== this.pointerEvents || this.resourceRevision !== this.appliedResourceRevision;
+		const visible = this.element.visible;
+		const checked = isChecked(this.element);
+		const needsProperties = revision !== this.revision || context.theme !== this.theme || orderChanged || nextPointerEvents !== this.pointerEvents || this.resourceRevision !== this.appliedResourceRevision || checked !== this.checked || visible !== this.visible && !hidesWithMount(this.element);
 		let hitMappingsChanged = orderChanged;
 		let contentChanged = false;
 		if (needsProperties) {
@@ -2573,13 +2752,15 @@ var UIKitNodeBinding = class UIKitNodeBinding {
 			this.revision = revision;
 			this.theme = context.theme;
 			this.pointerEvents = nextPointerEvents;
+			this.visible = visible;
+			this.checked = checked;
 			this.appliedResourceRevision = this.resourceRevision;
 			this.ensurePrivateNodes(context.theme);
 			this.scrollView?.commit(this.contentProperties);
 			this.textInput?.commit(context.theme);
 			if (this.syncEdge(properties)) hitMappingsChanged = true;
 		}
-		this.node.visible = this.element.visible;
+		this.node.visible = visible;
 		this.syncImage();
 		this.setHitEnabled(this.baseProperties);
 		for (const child of this.childOrder) {
@@ -2595,12 +2776,24 @@ var UIKitNodeBinding = class UIKitNodeBinding {
 	present(stateFor) {
 		if (this.disposed) return;
 		const rawState = stateFor(this.element, this.edge ? this.cursorPoints : void 0);
+		let { hovered, active } = rawState;
+		const { disabled, cursorPointCount } = rawState;
+		if (this.dropdown) for (const option of this.childOrder) {
+			const optionState = stateFor(option);
+			if (optionState.hovered) hovered = false;
+			if (optionState.active) active = false;
+		}
 		const focused = this.element instanceof UITextInput && this.element.focused;
-		const key = Number(rawState.hovered) | Number(rawState.active) << 1 | Number(rawState.disabled) << 2 | Number(focused) << 3;
+		const checked = isChecked(this.element);
+		const key = Number(hovered) | Number(active) << 1 | Number(disabled) << 2 | Number(focused) << 3 | Number(checked) << 4;
 		if (key !== this.presentationKey) {
 			const state = {
-				...rawState,
-				focused
+				hovered,
+				active,
+				disabled,
+				cursorPointCount,
+				focused,
+				checked
 			};
 			const context = {
 				theme: this.theme,
@@ -2615,7 +2808,7 @@ var UIKitNodeBinding = class UIKitNodeBinding {
 			this.scrollView?.commit(this.contentProperties);
 			this.textInput?.commit(this.theme);
 		}
-		this.edge?.setCursorPoints(rawState.cursorPointCount > 0 ? this.cursorPoints[0] : void 0, rawState.cursorPointCount > 1 ? this.cursorPoints[1] : void 0);
+		this.edge?.setCursorPoints(cursorPointCount > 0 ? this.cursorPoints[0] : void 0, cursorPointCount > 1 ? this.cursorPoints[1] : void 0);
 		for (const child of this.childOrder) this.children.get(child).present(stateFor);
 	}
 	hitMappings() {
@@ -2647,6 +2840,7 @@ var UIKitNodeBinding = class UIKitNodeBinding {
 	}
 	afterLayout(deltaSeconds) {
 		this.scrollView?.afterLayout();
+		this.dropdown?.afterLayout();
 		this.textInput?.update(deltaSeconds);
 		for (const child of this.childOrder) this.children.get(child).afterLayout(deltaSeconds);
 	}
@@ -2668,6 +2862,10 @@ var UIKitNodeBinding = class UIKitNodeBinding {
 		this.buttonLabel?.removeFromParent();
 		this.buttonLabel?.dispose();
 		this.sliderContent?.dispose();
+		this.toggleContent?.dispose();
+		this.progressContent?.dispose();
+		this.dropdown?.dispose();
+		this.dropdownOption?.dispose();
 		this.scrollView?.dispose();
 		this.textInput?.dispose();
 		if (this.ownsImageTexture) this.imageTexture?.dispose();
@@ -2678,6 +2876,7 @@ var UIKitNodeBinding = class UIKitNodeBinding {
 	propertiesFor(context, state, renderOrder) {
 		const resolvedStyle = resolveStyle(this.element, state, context.theme);
 		const style = toUIKitStyle(resolvedStyle);
+		if (!this.element.visible && !hidesWithMount(this.element)) style.visibility = "hidden";
 		if (renderOrder !== void 0) {
 			style.depthTest = false;
 			style.depthWrite = false;
@@ -2741,6 +2940,19 @@ var UIKitNodeBinding = class UIKitNodeBinding {
 		if (kind === "slider") {
 			this.sliderContent ??= createSliderContent(this.node);
 			this.sliderContent.update(this.element, theme);
+		}
+		if (kind === "toggle") {
+			this.toggleContent ??= createToggleContent(this.node);
+			this.toggleContent.update(this.element, theme, this.presentedProperties.color);
+		}
+		if (kind === "progress") {
+			this.progressContent ??= createProgressContent(this.node);
+			this.progressContent.update(this.element, theme, this.presentedProperties);
+		}
+		this.dropdown?.commit(theme, this.presentedProperties.color, this.renderOrder);
+		if (kind === "dropdownOption") {
+			this.dropdownOption ??= createDropdownOptionContent(this.node);
+			this.dropdownOption.update(this.element, theme, this.presentedProperties.color);
 		}
 	}
 	updateButtonContent(theme) {
@@ -2850,7 +3062,7 @@ var UIKitNodeBinding = class UIKitNodeBinding {
 	}
 	setHitEnabled(properties) {
 		const kind = getUIElementKind(this.element);
-		const blocksHits = kind === "button" || kind === "slider" || kind === "scroll" || kind === "input" || !isTransparent(properties.fillColor);
+		const blocksHits = kind === "button" || kind === "slider" || kind === "toggle" || kind === "dropdown" || kind === "dropdownOption" || kind === "scroll" || kind === "input" || !isTransparent(properties.fillColor);
 		const pointerEvents = this.element.xb?.pointerEvents;
 		const enabled = blocksHits && pointerEvents !== "none";
 		if (pointerEvents === this.pointerEvents && enabled === this.hitEnabled) return;
@@ -2929,8 +3141,30 @@ function baseState(element) {
 		active: false,
 		disabled: getSemanticControl(element)?.isDisabled() ?? false,
 		focused: element instanceof UITextInput && element.focused,
+		checked: isChecked(element),
 		cursorPointCount: 0
 	};
+}
+/** A checked toggle, or the option row of a dropdown's current value. */
+function isChecked(element) {
+	const kind = getUIElementKind(element);
+	return kind === "toggle" && element.checked || kind === "dropdownOption" && element.checked;
+}
+function hidesWithMount(element) {
+	const kind = getUIElementKind(element);
+	return kind === "card" || kind === "overlay";
+}
+/** Lifts a dropdown's internal scroll view and option rows above its list. */
+function stackZIndex(element) {
+	const zIndex = Number(element.style.zIndex ?? 0);
+	if (getUIElementKind(element) !== "dropdownOption" && !(element.parent instanceof UIDropdown)) return zIndex;
+	return zIndex + dropdownZIndex(element) + 100;
+}
+/** The zIndex of the dropdown whose list contains an element. */
+function dropdownZIndex(element) {
+	let node = element.parent;
+	while (node && !(node instanceof UIDropdown)) node = node.parent;
+	return node instanceof UIDropdown ? Number(node.style.zIndex ?? 0) : 0;
 }
 function setPhysicalHitEnabled(object, enabled) {
 	object.xb ??= {};
@@ -2964,9 +3198,12 @@ function resolveStyle(element, state, theme) {
 			fontSize: 24,
 			padding: 8
 		} : {},
+		...dropdownDefaults(element, state, theme),
 		...surfaceStyle,
 		...themeStyle,
 		...style,
+		...state.checked ? themeStyle[":checked"] : void 0,
+		...state.checked ? style[":checked"] : void 0,
 		...state.hovered ? surfaceStyle?.[":hover"] : void 0,
 		...state.hovered ? themeStyle[":hover"] : void 0,
 		...state.hovered ? style[":hover"] : void 0,
@@ -2980,8 +3217,41 @@ function resolveStyle(element, state, theme) {
 		...state.focused ? style[":focus"] : void 0
 	};
 }
+/** Built-in dropdown look, below theme and element styles like input's. */
+function dropdownDefaults(element, state, theme) {
+	const { colors } = theme;
+	if (element instanceof UIDropdown) return {
+		flexDirection: "row",
+		alignItems: "center",
+		justifyContent: "space-between",
+		gap: 12,
+		paddingTop: 10,
+		paddingBottom: 10,
+		paddingLeft: 16,
+		paddingRight: 12,
+		backgroundColor: element.disabled ? colors.disabledSurface : colors.raisedSurface,
+		borderColor: element.open || state.hovered && !state.disabled ? colors.primary : colors.outline,
+		borderWidth: 1,
+		borderRadius: 8,
+		fontSize: 24,
+		color: element.disabled ? colors.disabledText : colors.text
+	};
+	if (element instanceof UIDropdownOption) return {
+		flexDirection: "row",
+		alignItems: "center",
+		gap: 10,
+		paddingTop: 10,
+		paddingBottom: 10,
+		paddingLeft: 12,
+		paddingRight: 20,
+		borderRadius: 8,
+		color: element.disabled ? colors.disabledText : colors.text,
+		...state.hovered && !state.disabled ? { backgroundColor: colors.raisedSurface } : {}
+	};
+	return {};
+}
 function stateKey(state) {
-	return Number(state.hovered) | Number(state.active) << 1 | Number(state.disabled) << 2 | Number(state.focused) << 3;
+	return Number(state.hovered) | Number(state.active) << 1 | Number(state.disabled) << 2 | Number(state.focused) << 3 | Number(state.checked) << 4;
 }
 function isTransparent(color) {
 	if (color === void 0 || color === "transparent") return true;
@@ -3006,6 +3276,7 @@ function paintVisible(color, width) {
 */
 function requiresGradientPanel(element, properties) {
 	if (element instanceof GradientPanel) return true;
+	if (element instanceof UIDropdownOption) return true;
 	if (paintVisible(properties.fillColor ?? properties.backgroundColor)) return true;
 	const stroke = properties.strokeColor ?? properties.borderColor;
 	const strokeWidth = properties.strokeWidth ?? properties.borderWidth;
@@ -3080,12 +3351,29 @@ function panelDefaults(element, theme, style) {
 		defaults.alignItems = style.alignItems ?? "stretch";
 	}
 	if (kind === "panel") defaults.flexShrink = style.flexShrink ?? 1;
+	if (kind === "toggle") {
+		const toggle = element;
+		const height = style.height ?? TOGGLE_HEIGHT;
+		defaults.fillColor = style.fillColor ?? (toggle.disabled ? theme.colors.disabledSurface : toggle.checked ? theme.colors.primary : theme.colors.sliderTrack ?? theme.colors.outline);
+		defaults.width = style.width ?? TOGGLE_WIDTH;
+		defaults.height = height;
+		defaults.cornerRadius = style.cornerRadius ?? (typeof height === "number" ? height : TOGGLE_HEIGHT) / 2;
+	}
+	if (kind === "progress") {
+		const height = style.height ?? PROGRESS_HEIGHT;
+		defaults.fillColor = style.fillColor ?? theme.colors.sliderTrack ?? theme.colors.outline;
+		defaults.alignSelf = style.alignSelf ?? "stretch";
+		defaults.height = height;
+		defaults.cornerRadius = style.cornerRadius ?? (typeof height === "number" ? height : PROGRESS_HEIGHT) / 2;
+	}
 	if (kind === "card") {
 		const card = element;
 		defaults.backfaceColor = defaults.fillColor;
 		defaults.pixelSize = card.pixelSize;
-		defaults.sizeX = card.size.width;
-		defaults.width = card.size.width / card.pixelSize;
+		if (card.size.width !== "auto") {
+			defaults.sizeX = card.size.width;
+			defaults.width = card.size.width / card.pixelSize;
+		}
 		if (card.size.height !== "auto") {
 			defaults.sizeY = card.size.height;
 			defaults.height = card.size.height / card.pixelSize;
@@ -3221,7 +3509,8 @@ function createSliderContent(panel) {
 		transformTranslateY: "-50%",
 		height: 10,
 		borderRadius: 5,
-		pointerEvents: "none"
+		pointerEvents: "none",
+		zIndexOffset: 1
 	});
 	const thumb = new Container({
 		positionType: "absolute",
@@ -3231,7 +3520,8 @@ function createSliderContent(panel) {
 		width: thumbSize,
 		height: thumbSize,
 		borderRadius: thumbSize / 2,
-		pointerEvents: "none"
+		pointerEvents: "none",
+		zIndexOffset: 2
 	});
 	const update = (slider, theme) => {
 		const ratio = slider.max === slider.min ? 0 : (slider.value - slider.min) / (slider.max - slider.min);
@@ -3259,6 +3549,75 @@ function createSliderContent(panel) {
 			thumb.dispose();
 			rail.removeFromParent();
 			rail.dispose();
+		}
+	};
+}
+function createToggleContent(panel) {
+	const rail = new Container({
+		positionType: "absolute",
+		positionLeft: 18,
+		positionRight: 18,
+		positionTop: "50%",
+		transformTranslateY: "-50%",
+		height: TOGGLE_THUMB_SIZE,
+		pointerEvents: "none"
+	});
+	const thumb = new Container({
+		positionType: "absolute",
+		positionTop: "50%",
+		transformTranslateX: "-50%",
+		transformTranslateY: "-50%",
+		width: TOGGLE_THUMB_SIZE,
+		height: TOGGLE_THUMB_SIZE,
+		borderRadius: TOGGLE_THUMB_SIZE / 2,
+		pointerEvents: "none"
+	});
+	thumb.name = "UIToggleThumb";
+	rail.add(thumb);
+	panel.add(rail);
+	return {
+		update: (toggle, theme, color) => {
+			const { color: surface } = parseColorWithAlpha(theme.colors.surface);
+			thumb.setProperties({
+				positionLeft: toggle.checked ? "100%" : "0%",
+				backgroundColor: normalizeAlphaHexColor(color ?? (toggle.disabled ? theme.colors.disabledText : toggle.checked ? [
+					surface.r,
+					surface.g,
+					surface.b,
+					1
+				] : theme.colors.text))
+			});
+		},
+		dispose: () => {
+			thumb.removeFromParent();
+			thumb.dispose();
+			rail.removeFromParent();
+			rail.dispose();
+		}
+	};
+}
+function createProgressContent(panel) {
+	const fill = new Container({
+		positionType: "absolute",
+		positionLeft: 0,
+		positionTop: 0,
+		height: "100%",
+		pointerEvents: "none"
+	});
+	fill.name = "UIProgressFill";
+	panel.add(fill);
+	return {
+		update: (progress, theme, properties) => {
+			const ratio = (progress.value - progress.min) / (progress.max - progress.min);
+			fill.setProperties({
+				width: `${ratio * 100}%`,
+				borderRadius: numericCornerRadius(properties.cornerRadius),
+				backgroundColor: normalizeAlphaHexColor(properties.color ?? theme.colors.text)
+			});
+		},
+		dispose: () => {
+			fill.removeFromParent();
+			fill.dispose();
 		}
 	};
 }

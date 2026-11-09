@@ -15,8 +15,8 @@
 *
 * @file xrblocks.js
 * @version v0.24.0
-* @commitid b89cf0d
-* @builddate 2026-10-29T01:00:40.867Z
+* @commitid 9a4ab86
+* @builddate 2026-11-09T16:54:38.149Z
 * @description XR Blocks SDK, built from source with the above commit ID.
 * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
 * and follow rules below:
@@ -40,8 +40,8 @@ physical world space, also add locomotion methods like pinch to teleport.
 or generate from primitive shapes of use vox formats for voxels or
 lego-styles.
 */
-import { F as Script } from "./UICard.js";
-import { I as Input, M as callInitWithDependencyInjection, On as XRDeviceCamera, P as Physics, Q as Interaction, U as Reticle, W as Depth, X as Registry, Y as WaitFrame, _t as Options, c as World, i as resolveSimulatorHandPoseRotations, n as SIMULATOR_HAND_POSE_ROTATIONS, r as applySimulatorHandPoseRotationConstraints, t as ModelLoader } from "./ModelLoader.js";
+import { L as Script } from "./UICard.js";
+import { I as Input, M as callInitWithDependencyInjection, P as Physics, Q as Interaction, Tn as XRDeviceCamera, U as Reticle, W as Depth, X as Registry, Y as WaitFrame, c as World, i as resolveSimulatorHandPoseRotations, mt as Options, n as SIMULATOR_HAND_POSE_ROTATIONS, r as applySimulatorHandPoseRotationConstraints, t as ModelLoader } from "./ModelLoader.js";
 import { a as SetSimulatorModeEvent, i as ShowSimulatorInstructionsEvent, l as SimulatorOptions, n as SimulatorHandPose, o as SimulatorHandPoseChangeRequestEvent, p as HAND_JOINT_NAMES, r as SetSimulatorHandPhysicsEvent, s as SetSimulatorEnvironmentEvent, u as Keycodes } from "./HandPoses.js";
 import { c as isWebGPURenderer, i as disposeObjectTree, r as disposeObjectChildren } from "./ThreeDisposal.js";
 import { n as BaseSimulatorCompositor, t as WebGLDirectCompositor } from "./WebGLDirectCompositor.js";
@@ -645,7 +645,6 @@ var SimulatorPointerLockController = class extends Script {
 		this.type = "SimulatorPointerLockController";
 		this.name = "Simulator Pointer Lock Controller";
 		this.userData = {
-			id: 4,
 			connected: false,
 			selected: false
 		};
@@ -1544,13 +1543,13 @@ var SimulatorHands = class {
 	showHands() {
 		this.leftController.visible = true;
 		this.rightController.visible = true;
-		for (let i = 0; i < this.input.hands.length; i++) this.input.hands[i].visible = true;
+		for (const hand of this.input.hands) if (hand) hand.visible = true;
 		this.updateHandPosePanel();
 	}
 	hideHands() {
 		this.leftController.visible = false;
 		this.rightController.visible = false;
-		for (let i = 0; i < this.input.hands.length; i++) this.input.hands[i].visible = false;
+		for (const hand of this.input.hands) if (hand) hand.visible = false;
 		this.updateHandPosePanel();
 	}
 	updateHandPosePanel() {

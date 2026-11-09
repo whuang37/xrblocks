@@ -140,8 +140,17 @@ export declare const GEMINI_DEFAULT_IMAGE_MODEL = "gemini-nano-banana-2.1";
  * history/state parameters are not accepted here.
  */
 export type GeminiInteractionConfig = Omit<GoogleGenAITypes.Interactions.CreateModelInteractionParamsNonStreaming, 'model' | 'input' | 'stream' | 'store' | 'previous_interaction_id'>;
+/** Supplies a fresh Gemini ephemeral auth token for each Live session start. */
+export type GeminiTokenProvider = () => Promise<string>;
 export declare class GeminiOptions {
   apiKey: string;
+  /**
+   * Optional async provider for Gemini Live ephemeral tokens. The returned
+   * string should be the `name` from `authTokens.create()` (for example,
+   * `auth_tokens/...`). It is called for every new Live session; it does not
+   * replace `apiKey` for queries or image generation.
+   */
+  tokenProvider?: GeminiTokenProvider;
   urlParam: string;
   keyValid: boolean;
   enabled: boolean;
@@ -246,6 +255,14 @@ export declare class DeviceCameraOptions {
    */
   rgbToDepthParams: RgbToDepthParams;
   cameraLabel?: string;
+  /**
+   * The `DEVICE_CAMERA_PARAMETERS` key (such as `'galaxyxr'`, `'aura'` or
+   * `'quest3'`) whose intrinsics and pose describe the headset camera. When
+   * unset, the profile comes from the user agent, which cannot tell Aura from
+   * Galaxy XR. A valid `?camera=<profile>` URL parameter overrides this. Read or
+   * switch the active profile at runtime with `XRDeviceCamera.targetDevice`.
+   */
+  targetDevice?: string;
   constructor(options?: DeepReadonly<DeepPartial<DeviceCameraOptions>>);
 }
 export declare const xrDeviceCameraEnvironmentOptions: {
@@ -418,6 +435,7 @@ export declare const xrDeviceCameraEnvironmentOptions: {
     readonly yc: number;
   };
   readonly cameraLabel?: string;
+  readonly targetDevice?: string;
 };
 export declare const xrDeviceCameraUserOptions: {
   readonly enabled: boolean;
@@ -589,6 +607,7 @@ export declare const xrDeviceCameraUserOptions: {
     readonly yc: number;
   };
   readonly cameraLabel?: string;
+  readonly targetDevice?: string;
 };
 export declare const xrDeviceCameraEnvironmentContinuousOptions: {
   readonly enabled: boolean;
@@ -760,6 +779,7 @@ export declare const xrDeviceCameraEnvironmentContinuousOptions: {
     readonly yc: number;
   };
   readonly cameraLabel?: string;
+  readonly targetDevice?: string;
 };
 export declare const xrDeviceCameraUserContinuousOptions: {
   readonly enabled: boolean;
@@ -931,6 +951,7 @@ export declare const xrDeviceCameraUserContinuousOptions: {
     readonly yc: number;
   };
   readonly cameraLabel?: string;
+  readonly targetDevice?: string;
 };
 //#endregion
 //#region src/context/scene/SceneOptions.d.ts
@@ -1419,6 +1440,16 @@ interface ControllerEventMap extends THREE.Object3DEventMap {
     target: Controller;
     data?: XRInputSource;
   };
+  /**
+   * Dispatched by Interaction when this controller's selection ends, even if a
+   * target stopped global propagation. `completed` marks a successful
+   * selection.
+   */
+  selectionend: {
+    target: Controller;
+    completed: boolean;
+    reason: SelectionEndReason;
+  };
 }
 interface Controller extends THREE.Object3D<ControllerEventMap> {
   reticle?: Reticle;
@@ -1830,6 +1861,8 @@ export declare class Input {
   controllers: Controller[];
   controllerGrips: THREE.Group[];
   hands: THREE.XRHandSpace[];
+  private controllerHands;
+  private placeholderHands;
   /** Completed head gestures, when enabled before initialization. */
   headGestures?: HeadGestureRecognition;
   pivotsEnabled: boolean;
@@ -1960,6 +1993,11 @@ export declare class Input {
   enableGazeController(): void;
   disableGazeController(): void;
   private registerController;
+  private getHandIndex;
+  private setHandAlias;
+  private clearHandAliases;
+  private findConnectedController;
+  private findConnectedHand;
   enableController(controller: Controller): void;
   disableController(controller: Controller): void;
   /**
@@ -2022,7 +2060,11 @@ export declare class Interaction {
   update(frame: InteractionFrameInput, deltaSeconds?: number): void;
   clear(): void;
   registerHitSurface(physical: THREE.Object3D, logical: THREE.Object3D, options?: HitSurfaceOptions): () => void;
-  /** Installs the UI runtime's focus policy without owning a second input path. */
+  /**
+   * Installs the UI runtime's focus policy without owning a second input path.
+   * The handler runs when any source starts a selection, before object
+   * callbacks, with the pressed surface or undefined for empty space.
+   */
   setSelectionFocusHandler(handler?: (target?: THREE.Object3D) => void): void;
   /** Refreshes bounded direct-touch candidates found by the lifecycle pass. */
   syncTouchCandidates(candidates: Iterable<THREE.Object3D>): void;
@@ -2072,6 +2114,7 @@ export declare class Interaction {
   private updateTouchSnapshot;
   private getSourceState;
   private createSelection;
+  private invokeGlobal;
   private createSelectEvent;
   private hasDeliberateInput;
   private installCapture;
@@ -3735,6 +3778,7 @@ export interface SelectEvent {
   /** Current ray intersection on `surface`, when the source still hits it. */
   readonly intersection?: THREE.Intersection;
   stopPropagation(): void;
+  stopGlobalPropagation(): void;
 }
 export type SelectionEndReason = 'released' | 'released-outside' | 'source-lost' | 'pointer-cancel' | 'removed' | 'hidden' | 'disabled';
 export interface SelectEndEvent extends SelectEvent {
@@ -3772,7 +3816,7 @@ export interface ObjectGrabEvent {
   readonly touchPosition: THREE.Vector3;
   stopPropagation(): void;
 }
-export interface HoverEvent extends SelectEvent {
+export interface HoverEvent extends Omit<SelectEvent, 'stopGlobalPropagation'> {
   readonly intersection?: THREE.Intersection;
 }
 export interface KeyEvent {
@@ -3823,6 +3867,8 @@ export declare function ScriptMixin<TBase extends Constructor<THREE.Object3D>>(b
     frustumCulled: boolean;
     renderOrder: number;
     animations: THREE.AnimationClip[];
+    customDepthMaterial?: THREE.Material | undefined;
+    customDistanceMaterial?: THREE.Material | undefined;
     isXRScript: boolean;
     /**
      * Initializes an instance with XR controllers, grips, hands, and default
@@ -3895,12 +3941,16 @@ export declare function ScriptMixin<TBase extends Constructor<THREE.Object3D>>(b
      * @param _event - `event.target` is the logical object and
      * `event.source.controller` identifies the controller.
      * Call `event.stopPropagation()` to stop bubbling to ancestor Scripts.
+     * Call `event.stopGlobalPropagation()` to suppress global selection callbacks
+     * for the rest of this capture
      */
     onObjectSelectStart(_event: SelectEvent): void;
     /**
      * Called when a source stops selecting the object this Script represents.
      * @param _event - The completed state and end reason.
      * Call `event.stopPropagation()` to stop bubbling to ancestor Scripts.
+     * Call `event.stopGlobalPropagation()` to suppress global selection callbacks
+     * for the rest of this capture
      */
     onObjectSelectEnd(_event: SelectEndEvent): void;
     /**
@@ -3908,6 +3958,8 @@ export declare function ScriptMixin<TBase extends Constructor<THREE.Object3D>>(b
      * Manipulation captures do not emit this callback.
      * @param _event - The controller and completed hold duration.
      * Call `event.stopPropagation()` to stop bubbling to ancestor Scripts.
+     * Call `event.stopGlobalPropagation()` to suppress global selection callbacks
+     * for the rest of this capture
      */
     onObjectLongSelect(_event: LongSelectEvent): void;
     /**
@@ -3973,8 +4025,6 @@ export declare function ScriptMixin<TBase extends Constructor<THREE.Object3D>>(b
     hasEventListener<T extends Extract<keyof THREE.Object3DEventMap, string>>(type: T, listener: THREE.EventListener<THREE.Object3DEventMap[T], T, /*elided*/ any>): boolean;
     removeEventListener<T extends Extract<keyof THREE.Object3DEventMap, string>>(type: T, listener: THREE.EventListener<THREE.Object3DEventMap[T], T, /*elided*/ any>): void;
     dispatchEvent<T extends Extract<keyof THREE.Object3DEventMap, string>>(event: THREE.BaseEvent<T> & THREE.Object3DEventMap[T]): void;
-    customDepthMaterial?: THREE.Material | undefined;
-    customDistanceMaterial?: THREE.Material | undefined;
     static: boolean;
     userData: Record<string, any>;
     pivot: THREE.Vector3 | null;
@@ -4069,6 +4119,8 @@ declare const ScriptMixinObject3D: {
     frustumCulled: boolean;
     renderOrder: number;
     animations: THREE.AnimationClip[];
+    customDepthMaterial?: THREE.Material | undefined;
+    customDistanceMaterial?: THREE.Material | undefined;
     isXRScript: boolean;
     /**
      * Initializes an instance with XR controllers, grips, hands, and default
@@ -4141,12 +4193,16 @@ declare const ScriptMixinObject3D: {
      * @param _event - `event.target` is the logical object and
      * `event.source.controller` identifies the controller.
      * Call `event.stopPropagation()` to stop bubbling to ancestor Scripts.
+     * Call `event.stopGlobalPropagation()` to suppress global selection callbacks
+     * for the rest of this capture
      */
     onObjectSelectStart(_event: SelectEvent): void;
     /**
      * Called when a source stops selecting the object this Script represents.
      * @param _event - The completed state and end reason.
      * Call `event.stopPropagation()` to stop bubbling to ancestor Scripts.
+     * Call `event.stopGlobalPropagation()` to suppress global selection callbacks
+     * for the rest of this capture
      */
     onObjectSelectEnd(_event: SelectEndEvent): void;
     /**
@@ -4154,6 +4210,8 @@ declare const ScriptMixinObject3D: {
      * Manipulation captures do not emit this callback.
      * @param _event - The controller and completed hold duration.
      * Call `event.stopPropagation()` to stop bubbling to ancestor Scripts.
+     * Call `event.stopGlobalPropagation()` to suppress global selection callbacks
+     * for the rest of this capture
      */
     onObjectLongSelect(_event: LongSelectEvent): void;
     /**
@@ -4219,8 +4277,6 @@ declare const ScriptMixinObject3D: {
     hasEventListener<T extends Extract<keyof THREE.Object3DEventMap, string>>(type: T, listener: THREE.EventListener<THREE.Object3DEventMap[T], T, /*elided*/ any>): boolean;
     removeEventListener<T extends Extract<keyof THREE.Object3DEventMap, string>>(type: T, listener: THREE.EventListener<THREE.Object3DEventMap[T], T, /*elided*/ any>): void;
     dispatchEvent<T extends Extract<keyof THREE.Object3DEventMap, string>>(event: THREE.BaseEvent<T> & THREE.Object3DEventMap[T]): void;
-    customDepthMaterial?: THREE.Material | undefined;
-    customDistanceMaterial?: THREE.Material | undefined;
     static: boolean;
     userData: Record<string, any>;
     pivot: THREE.Vector3 | null;
@@ -4318,6 +4374,8 @@ declare const ScriptMixinMeshScript: {
     frustumCulled: boolean;
     renderOrder: number;
     animations: THREE.AnimationClip[];
+    customDepthMaterial?: THREE.Material | undefined;
+    customDistanceMaterial?: THREE.Material | undefined;
     isXRScript: boolean;
     /**
      * Initializes an instance with XR controllers, grips, hands, and default
@@ -4390,12 +4448,16 @@ declare const ScriptMixinMeshScript: {
      * @param _event - `event.target` is the logical object and
      * `event.source.controller` identifies the controller.
      * Call `event.stopPropagation()` to stop bubbling to ancestor Scripts.
+     * Call `event.stopGlobalPropagation()` to suppress global selection callbacks
+     * for the rest of this capture
      */
     onObjectSelectStart(_event: SelectEvent): void;
     /**
      * Called when a source stops selecting the object this Script represents.
      * @param _event - The completed state and end reason.
      * Call `event.stopPropagation()` to stop bubbling to ancestor Scripts.
+     * Call `event.stopGlobalPropagation()` to suppress global selection callbacks
+     * for the rest of this capture
      */
     onObjectSelectEnd(_event: SelectEndEvent): void;
     /**
@@ -4403,6 +4465,8 @@ declare const ScriptMixinMeshScript: {
      * Manipulation captures do not emit this callback.
      * @param _event - The controller and completed hold duration.
      * Call `event.stopPropagation()` to stop bubbling to ancestor Scripts.
+     * Call `event.stopGlobalPropagation()` to suppress global selection callbacks
+     * for the rest of this capture
      */
     onObjectLongSelect(_event: LongSelectEvent): void;
     /**
@@ -4468,8 +4532,6 @@ declare const ScriptMixinMeshScript: {
     hasEventListener<T extends Extract<keyof THREE.Object3DEventMap, string>>(type: T, listener: THREE.EventListener<THREE.Object3DEventMap[T], T, /*elided*/ any>): boolean;
     removeEventListener<T extends Extract<keyof THREE.Object3DEventMap, string>>(type: T, listener: THREE.EventListener<THREE.Object3DEventMap[T], T, /*elided*/ any>): void;
     dispatchEvent<T extends Extract<keyof THREE.Object3DEventMap, string>>(event: THREE.BaseEvent<T> & THREE.Object3DEventMap[T]): void;
-    customDepthMaterial?: THREE.Material | undefined;
-    customDistanceMaterial?: THREE.Material | undefined;
     static: boolean;
     userData: Record<string, any>;
     pivot: THREE.Vector3 | null;
@@ -4653,9 +4715,13 @@ export declare class Gemini extends BaseAIModel {
   /**
    * Shares a pending connection between concurrent starts. Stopping or disposing
    * invalidates that start; any session returned later is closed and the start
-   * rejects with AbortError. The provider cannot be aborted before it returns.
+   * rejects with AbortError. A socket close during setup rejects promptly even
+   * if the SDK's connect promise stalls. The token provider cannot be aborted
+   * before it returns.
    */
   startLiveSession(params?: GoogleGenAITypes.LiveConnectConfig, model?: string): Promise<GoogleGenAITypes.Session>;
+  /** Creates a Live-only client with a fresh ephemeral token when configured. */
+  private createLiveClient;
   stopLiveSession(): Promise<void>;
   /** Invalidates live work synchronously without creating a teardown promise. */
   dispose(): void;
@@ -5756,10 +5822,19 @@ export declare class XRDeviceCamera extends VideoStream<XRDeviceCameraDetails> {
   private pendingXRCameraCaptures_;
   private xrCameraAccessTimeout_;
   private disposed_;
+  private targetDevice_;
   /**
    * @param options - The configuration options.
    */
   constructor(options: DeviceCameraOptions);
+  /**
+   * The `DEVICE_CAMERA_PARAMETERS` profile used for this camera's intrinsics
+   * and pose, resolved once from `?camera=`, `options.targetDevice` and the
+   * user agent (see `resolveDeviceCameraTarget`). Assign an exact profile key
+   * to switch it at runtime; unknown keys throw.
+   */
+  get targetDevice(): string;
+  set targetDevice(targetDevice: string);
   /**
    * Retrieves the list of available video input devices.
    * @returns A promise that resolves with an
@@ -5871,6 +5946,22 @@ export declare const DEVICE_CAMERA_PARAMETERS: {
  * @param userAgent - Defaults to `navigator.userAgent` when available.
  */
 export declare function detectDeviceCameraTarget(userAgent?: string): string;
+/**
+ * Resolves the {@link DEVICE_CAMERA_PARAMETERS} profile for this page: a
+ * `?camera=<profile>` URL parameter (matched case-insensitively), then
+ * `configured` (an exact key), then {@link detectDeviceCameraTarget}. Unknown
+ * names are ignored with a console warning. `XRDeviceCamera` resolves its
+ * `targetDevice` this way when it is created.
+ * @param configured - The profile chosen in code, normally
+ *     `options.deviceCamera.targetDevice`.
+ */
+export declare function resolveDeviceCameraTarget(configured?: string): string;
+/**
+ * Throws unless `targetDevice` is a {@link DEVICE_CAMERA_PARAMETERS} key. Keys
+ * are exact, so a different case or an inherited name such as `'toString'`
+ * throws.
+ */
+export declare function assertDeviceCameraTarget(targetDevice: string): void;
 export declare function getDeviceCameraClipFromView(renderCamera: THREE.PerspectiveCamera, deviceCamera: XRDeviceCamera, targetDevice: string): THREE.Matrix4;
 export declare function getDeviceCameraWorldFromView(renderCamera: THREE.PerspectiveCamera, xrCameras: THREE.WebXRArrayCamera | null, deviceCamera: XRDeviceCamera, targetDevice: string): THREE.Matrix4;
 export declare function getDeviceCameraWorldFromClip(renderCamera: THREE.PerspectiveCamera, xrCameras: THREE.WebXRArrayCamera | null, deviceCamera: XRDeviceCamera, targetDevice: string): THREE.Matrix4;
@@ -5925,7 +6016,7 @@ export declare function transformRgbUvToWorld(rgbUv: THREE.Vector2, depthMeshSna
 export declare function cropImage(imageSource: string | ImageData, boundingBox: THREE.Box2): Promise<string>;
 //#endregion
 //#region src/camera/CameraParameterUtils.d.ts
-export declare function intrinsicsToProjectionMatrix(K: number[], width: number, height: number, near: number, far: number, target: THREE.Matrix4): THREE.Matrix4;
+export declare function intrinsicsToProjectionMatrix(K: number[], width: number, height: number, near: number, far: number, target?: THREE.Matrix4): THREE.Matrix4;
 //#endregion
 //#region src/constants.d.ts
 /**
@@ -6081,11 +6172,19 @@ export interface SemanticNode {
   disabled?: boolean;
   selected?: boolean;
   hovered?: boolean;
+  /**
+   * On/off state of a switch such as `UIToggle`, or whether a dropdown option
+   * is the selected one.
+   */
+  checked?: boolean;
+  /** Whether a combobox such as `UIDropdown` is showing its options. */
+  expanded?: boolean;
   focused?: boolean;
   readOnly?: boolean;
   multiline?: boolean;
   scroll?: SemanticScrollInfo;
-  value?: number;
+  /** A slider's number, or the selected option value of a combobox. */
+  value?: number | string;
   min?: number;
   max?: number;
   bounds?: SemanticBounds;
@@ -7805,13 +7904,15 @@ export declare class ObjectDetector extends Script {
   private depth;
   private camera;
   private renderer;
+  private targetDeviceOverride?;
   /**
    * Target device profile used to look up RGB camera intrinsics and pose
-   * for converting detection bounding boxes into world space. Defaults to
-   * `'galaxyxr'`; auto-overridden to `'quest3'` in {@link init} when the
-   * Meta Quest browser is detected. Can be overridden manually before init.
+   * for converting detection bounding boxes into world space. Follows the
+   * device camera's `targetDevice` unless assigned here. Assign `undefined` to
+   * follow it again; unknown profile keys throw.
    */
-  targetDevice: string;
+  get targetDevice(): string;
+  set targetDevice(targetDevice: string | undefined);
   /**
    * Initializes the ObjectDetector.
    * @override
@@ -8734,7 +8835,14 @@ export declare class HumanRecognizer extends Script {
   private depth;
   private camera;
   private renderer;
-  targetDevice: string;
+  private targetDeviceOverride?;
+  /**
+   * Device camera profile used to place detected poses in world space.
+   * Follows the device camera's `targetDevice` unless assigned here. Assign
+   * `undefined` to follow it again; unknown profile keys throw.
+   */
+  get targetDevice(): string;
+  set targetDevice(targetDevice: string | undefined);
   init({ options, deviceCamera, depth, camera, rendererHolder }: {
     options: WorldOptions;
     deviceCamera: XRDeviceCamera;
@@ -8921,7 +9029,14 @@ export declare class FaceRecognizer extends Script {
   depth: Depth;
   private camera;
   private renderer;
-  targetDevice: string;
+  private targetDeviceOverride?;
+  /**
+   * Device camera profile used to place detected faces in world space.
+   * Follows the device camera's `targetDevice` unless assigned here. Assign
+   * `undefined` to follow it again; unknown profile keys throw.
+   */
+  get targetDevice(): string;
+  set targetDevice(targetDevice: string | undefined);
   init({ options, deviceCamera, depth, camera, rendererHolder }: {
     options: WorldOptions;
     deviceCamera: XRDeviceCamera;
@@ -10486,7 +10601,6 @@ declare class SimulatorPointerLockController extends Script<SimulatorPointerLock
   type: string;
   name: string;
   userData: {
-    id: number;
     connected: boolean;
     selected: boolean;
   };
@@ -10624,6 +10738,8 @@ interface UIStyle extends UIStateStyle {
   ':active'?: UIStateStyle;
   ':disabled'?: UIStateStyle;
   ':focus'?: UIStateStyle;
+  /** Applies while a UIToggle is checked or a dropdown option is selected. */
+  ':checked'?: UIStateStyle;
 }
 interface UIElementOptions {
   style?: UIStyle;
@@ -10633,7 +10749,7 @@ interface UIElementOptions {
   interactionEnabled?: boolean;
   reticleMode?: ReticleMode;
 }
-type UIElementKind = 'card' | 'overlay' | 'panel' | 'text' | 'button' | 'slider' | 'scroll' | 'input' | 'image' | 'icon';
+type UIElementKind = 'card' | 'overlay' | 'panel' | 'text' | 'button' | 'slider' | 'toggle' | 'progress' | 'dropdown' | 'dropdownOption' | 'scroll' | 'input' | 'image' | 'icon';
 export declare abstract class UIElement<TEventMap extends THREE.Object3DEventMap = THREE.Object3DEventMap> extends Script<TEventMap> {
   readonly isUI = true;
   private readonly styleTarget;
@@ -11056,7 +11172,7 @@ type UIAppearance = 'surface' | 'none';
 //#endregion
 //#region src/ui/components/UICard.d.ts
 interface UISize {
-  width: number;
+  width: number | 'auto';
   height: number | 'auto';
 }
 interface UIResolvedSize {
@@ -11069,7 +11185,7 @@ interface UICardEdgeOptions {
 type UICardAnchorX = 'left' | 'center' | 'right';
 type UICardAnchorY = 'bottom' | 'center' | 'top';
 interface UICardOptions extends UIElementOptions {
-  size: UISize;
+  size?: Partial<UISize>;
   pixelSize?: number;
   anchorX?: UICardAnchorX;
   anchorY?: UICardAnchorY;
@@ -11089,9 +11205,9 @@ export declare class UICard<TEventMap extends THREE.Object3DEventMap = THREE.Obj
   private readonly edgeTarget;
   private readonly edgeProxy;
   private edgeEnabled;
-  constructor({ size, pixelSize, anchorX, anchorY, appearance, manipulation, edge, ...options }: UICardOptions);
+  constructor({ size, pixelSize, anchorX, anchorY, appearance, manipulation, edge, ...options }?: UICardOptions);
   get size(): UISize;
-  set size(value: UISize);
+  set size(value: Partial<UISize>);
   get manipulation(): boolean | ManipulationOptions | undefined;
   set manipulation(value: boolean | ManipulationOptions | undefined);
   get edge(): false | Required<UICardEdgeOptions>;
@@ -11285,6 +11401,8 @@ export declare class UITextInput<TEventMap extends THREE.Object3DEventMap = THRE
   private _maxLength?;
   constructor({ ariaLabel, value, placeholder, multiline, disabled, readOnly, maxLength, onInput, onChange, onSubmit, onFocus, onBlur, style, ...options }: UITextInputOptions);
   /** Whether a mounted backend can currently accept editing operations. */
+  onObjectSelectStart(event: SelectEvent): void;
+  onObjectSelectEnd(event: SelectEvent): void;
   get ready(): boolean;
   /** A module or text-rendering failure reported by the mounted backend. */
   get error(): Error | undefined;
@@ -11377,6 +11495,109 @@ export declare class UISlider<TEventMap extends THREE.Object3DEventMap = THREE.O
   private requantizeInteraction;
 }
 //#endregion
+//#region src/ui/components/UIToggle.d.ts
+interface UIToggleOptions extends UIElementOptions {
+  ariaLabel: string;
+  checked?: boolean;
+  disabled?: boolean;
+  onChange?: (checked: boolean) => void;
+}
+/** An on/off switch that flips after a valid captured press and release. */
+export declare class UIToggle<TEventMap extends THREE.Object3DEventMap = THREE.Object3DEventMap> extends UIElement<TEventMap> {
+  name: string;
+  readonly ariaLabel: string;
+  onChange?: (checked: boolean) => void;
+  private _checked;
+  private _disabled;
+  constructor({ ariaLabel, checked, disabled, onChange, ...options }: UIToggleOptions);
+  get checked(): boolean;
+  set checked(value: boolean);
+  get disabled(): boolean;
+  set disabled(value: boolean);
+  onObjectSelectStart(event: SelectEvent): void;
+  onObjectSelectEnd(event: SelectEvent): void;
+}
+//#endregion
+//#region src/ui/components/UIProgress.d.ts
+interface UIProgressOptions extends UIElementOptions {
+  ariaLabel: string;
+  value?: number;
+  min?: number;
+  max?: number;
+}
+/**
+ * A display-only bar whose fill shows how far a task has progressed. `value`
+ * is clamped to `[min, max]`; `min` and `max` are fixed at construction.
+ */
+export declare class UIProgress<TEventMap extends THREE.Object3DEventMap = THREE.Object3DEventMap> extends UIElement<TEventMap> {
+  name: string;
+  readonly ariaLabel: string;
+  private readonly _min;
+  private readonly _max;
+  private _value;
+  constructor({ ariaLabel, value, min, max, ...options }: UIProgressOptions);
+  get min(): number;
+  get max(): number;
+  get value(): number;
+  set value(value: number);
+}
+//#endregion
+//#region src/ui/components/UIDropdown.d.ts
+type UIDropdownChoice = Readonly<{
+  value: string;
+  label: string;
+  disabled?: boolean;
+}>;
+interface UIDropdownOptions extends Omit<UIElementOptions, 'children'> {
+  ariaLabel: string;
+  options: ReadonlyArray<{
+    value: string;
+    label: string;
+    disabled?: boolean;
+  }>;
+  value?: string;
+  /** Shown on the closed dropdown while `value` is undefined. */
+  placeholder?: string;
+  disabled?: boolean;
+  onChange?: (value: string) => void;
+}
+/**
+ * A button that shows the selected option and opens a list of options below
+ * or above itself. Picking an enabled option selects it and closes the list.
+ */
+export declare class UIDropdown<TEventMap extends THREE.Object3DEventMap = THREE.Object3DEventMap> extends UIElement<TEventMap> {
+  name: string;
+  readonly ariaLabel: string;
+  readonly options: ReadonlyArray<UIDropdownChoice>;
+  readonly placeholder: string;
+  onChange?: (value: string) => void;
+  private _value?;
+  private _disabled;
+  private _open;
+  private readonly rows;
+  private readonly list;
+  private revealPending;
+  constructor({ ariaLabel, options, value, placeholder, disabled, onChange, ...elementOptions }: UIDropdownOptions);
+  get value(): string | undefined;
+  set value(value: string | undefined);
+  get disabled(): boolean;
+  set disabled(value: boolean);
+  /** Whether the option list is showing. */
+  get open(): boolean;
+  add(..._objects: THREE.Object3D[]): this;
+  attach(_object: THREE.Object3D): this;
+  /** Closes a hidden list and scrolls an open one to the chosen option. */
+  update(): void;
+  dispose(): void;
+  onObjectSelectStart(event: SelectEvent): void;
+  onObjectSelectEnd(event: SelectEvent): void;
+  private readonly close;
+  private setOpen;
+  /** Scrolls the chosen option into view once the open list has a layout. */
+  private revealChosen;
+  private pick;
+}
+//#endregion
 //#region src/ui/components/UIScrollView.d.ts
 interface UIScrollViewOptions extends UIElementOptions {
   ariaLabel?: string;
@@ -11393,6 +11614,8 @@ export declare class UIScrollView<TEventMap extends THREE.Object3DEventMap = THR
   private _scrollHeight;
   private measured;
   constructor({ ariaLabel, scrollTop, onScroll, style, ...options }?: UIScrollViewOptions);
+  onObjectSelectStart(event: SelectEvent): void;
+  onObjectSelectEnd(event: SelectEvent): void;
   get ready(): boolean;
   get scrollTop(): number;
   set scrollTop(offset: number);
@@ -12047,7 +12270,7 @@ export declare class LocalStorageAnchorStore implements AnchorStore {
   private write;
 }
 declare namespace xrblocks_d_exports {
-  export { AI, AIModel, AIOptions, ActiveControllers, Agent, AgentLifecycleCallbacks, AnchorCapability, AnchorManager, AnchorRecord, AnchorRestoreResult, AnchorRestoreStatus, AnchorStorageLike, AnchorStore, AnchoredObjectFactory, AnchoredObjects, AnchorsOptions, AudioListener, AudioListenerOptions, AudioPlayer, AudioPlayerOptions, AutomationModeOptions, BACK, BackgroundKeyOptions, BackgroundMusic, BaseManipulationEvent, CameraParametersSnapshot, CameraSnapshot, CategoryVolumes, ColorStop, Constructor, Context, ContextOptions, Controller, ControllerEventMap, Core, CoreLifecycleState, CoreSound, DEFAULT_DEVICE_CAMERA_HEIGHT, DEFAULT_DEVICE_CAMERA_WIDTH, DEFAULT_EXIT_BUTTON_STYLE, DEFAULT_RGB_TO_DEPTH_PARAMS, DEVICE_CAMERA_PARAMETERS, DOWN, DeepPartial, DeepReadonly, Depth, DepthArray, DepthMesh, DepthMeshOptions, DepthOptions, DepthTextures, DetectedBodyPose, DetectedFace, DetectedMesh, DetectedObject, DetectedPlane, DeviceCameraOptions, DeviceCameraParameters, DigitName, DurationLike, FINGER_ORDER, FORWARD, FaceBlendshape, FaceCamera, FaceCameraMode, FaceCameraOptions, FaceLandmark, FaceLandmarkName, FaceRecognizer, FacesOptions, FingerName, FollowHead, FollowHeadOptions, FollowObject, FollowObjectMode, FollowObjectOptions, FormFactor, FramebufferScaleFactor, GEMINI_DEFAULT_FLASH_MODEL, GEMINI_DEFAULT_IMAGE_MODEL, GEMINI_DEFAULT_LIVE_MODEL, GamepadAction, GamepadBindings, GamepadController, GazeController, Gemini, GeminiInteractionConfig, GeminiOptions, GeminiQueryInput, GenerateSkyboxTool, GestureConfiguration, GestureDetectionResult, GestureEvent, GestureEventDetail, GestureEventType, GestureHandedness, GestureRecognition, GestureRecognitionOptions, GestureRecognizer, GestureScoreMap, GetWeatherArgs, GetWeatherTool, GradientPaint, GradientType, HAND_BONE_IDX_CONNECTION_MAP, HAND_INDEX_TO_LABEL, HAND_JOINT_COUNT, HAND_JOINT_IDX_CONNECTION_MAP, HAND_JOINT_NAMES, HandContext, HandLabel, Handedness, Hands, HandsOptions, HeadGestureConfiguration, HeadGestureContext, HeadGestureDetectionResult, HeadGestureEvent, HeadGestureEventDetail, HeadGestureEventMap, HeadGestureRecognition, HeadGestureRecognitionOptions, HeadGestureRecognizer, HeadGestureScoreMap, HeadPoseSample, HeuristicGestureDetector, HeuristicGestureRecognizer, HeuristicHeadGestureDetector, HeuristicHeadGestureRecognizer, HeuristicHeadGestureRecognizerOptions, HitSurfaceOptions, HoverEvent, HumanRecognizer, HumansOptions, Injectable, InjectableConstructor, Input, InputOptions, Interaction, InteractionOptions, InteractionSource, InteractionSourceType, JointName, JointPositions, KeyEvent, Keycodes, KeysJson, LEFT, LEFT_VIEW_ONLY_LAYER, LayerCapability, LayerManager, LayersOptions, Lighting, LightingOptions, LipMetrics, LiveSessionState, LoadingSpinnerManager, LocalStorageAnchorStore, LongSelectEvent, ManipulationAction, ManipulationEvent, ManipulationHandleOptions, ManipulationOptions, ManipulationPhase, MediaOrSimulatorMediaDeviceInfo, MediaPipeHandContext, MediaPipeHandLandmark, MediaPipeHandPoseEstimator, MeshDetectionOptions, MeshDetector, MeshScript, ModelClass, ModelLoader, ModelLoaderLoadGLTFOptions, ModelLoaderLoadOptions, ModelOptions, ModelSource, ModelViewer, ModelViewerOptions, ModelViewerOrigin, MouseController, NUM_HANDS, NormalizedDetectedObject, OCCLUDABLE_ITEMS_LAYER, ObjectDetectionOptions, ObjectDetector, ObjectGrabEvent, ObjectTouchEvent, ObjectTouchStartEvent, ObjectsOptions, OcclusionPass, OcclusionPassBackend, OcclusionUtils, OpenAI, OpenAIOptions, Options, Orbit, OrbitDirection, OrbitFrame, OrbitOptions, OrbitPath, Paint, PalmPose, Physics, PhysicsOptions, PlaneDetector, PlanesOptions, PlayModelAnimationOptions, PlaySoundOptions, PointerEvents, PoseEstimator, PoseJointName, PoseLandmark, PushPullOptions, QuatTuple, RAPIERCompat, RENDERER_BACKENDS, RIGHT, RIGHT_VIEW_ONLY_LAYER, RapierCharacterController, RapierCollider, RapierColliderDesc, RapierEventQueue, RapierRigidBody, RapierRigidBodyDesc, RapierRotation, RapierShape, RapierVector, RapierWorld, RaycastMode, Registry, RendererBackend, ResizeManipulationEvent, ResizeOptions, ResizeSize, ResolvedSimulatorSceneManifest, ReticleMode, ReticleOptions, Reticles, RgbToDepthParams, RgbaImage, RotateManipulationEvent, RotateOptions, SIMULATOR_HAND_COMMON_BIOMECHANICAL_CONSTRAINTS_DEGREES, SIMULATOR_HAND_POSE_NAMES, SIMULATOR_HAND_POSE_ROTATIONS, SOUND_PRESETS, ScaleManipulationEvent, ScaleOptions, SceneContextDetectionOptions, SceneContextDetectionResult, SceneDetector, SceneOptions, SceneSetOfMarkOptions, SceneVisibilityOptions, ScreenshotSynthesizer, Script, ScriptMixin, ScriptsManager, ScriptsManagerEventMap, ScriptsManagerEventType, SegmentCategory, SegmentationMask, SegmentationOptions, Segmenter, SelectEndEvent, SelectEvent, SelectionEndReason, SemanticBounds, SemanticMetadata, SemanticNode, SemanticScrollInfo, SemanticSource, SemanticTree, SemanticViewData, SerializerRenderer, SerializerRendererFactory, SerializerXRManager, SetOfMark, SetOfMarkContext, SetSimulatorEnvironmentEvent, SetSimulatorHandPhysicsEvent, SetSimulatorModeEvent, Shader, ShaderUniforms, ShowSimulatorInstructionsEvent, Simulator, SimulatorAnchor, SimulatorCamera, SimulatorControlMode, SimulatorControllerState, SimulatorControls, SimulatorCustomInstruction, SimulatorDayNightLightingDefinition, SimulatorDepth, SimulatorDepthMaterial, SimulatorDetectedObjectInput, SimulatorEnvironment, SimulatorHandJointRotationArray, SimulatorHandPhysicsOptions, SimulatorHandPose, SimulatorHandPoseChangeRequestEvent, SimulatorHandPoseJoints, SimulatorHandPoseRotationConstraintsDegrees, SimulatorHandPoseRotationRangeDegrees, SimulatorHandPoseRotations, SimulatorHands, SimulatorLocationDefinition, SimulatorLocations, SimulatorMediaDeviceInfo, SimulatorMesh, SimulatorMode, SimulatorObject, SimulatorObjectDefinition, SimulatorObjectDetectionSource, SimulatorObjectUpdate, SimulatorObjects, SimulatorOptions, SimulatorPhysicsMode, SimulatorPlane, SimulatorPlaneType, SimulatorPointerLockController, SimulatorQuaternionTuple, SimulatorScene, SimulatorSceneManifest, SimulatorUser, SimulatorUserPath, SimulatorVector3Tuple, SkyboxAgent, SolidPaint, SoundOptions, SoundSynthesizer, SparkRendererHolder, SpatialAudio, SpeechRecognition, SpeechRecognitionErrorCode, SpeechRecognitionErrorEvent, SpeechRecognitionEvent, SpeechRecognizer, SpeechRecognizerOptions, SpeechSynthesizer, SpeechSynthesizerOptions, StorablePose, StreamState, StrokeEventMap, StrokeRecognizer, StylizedFace, StylizedFaceOptions, SupportedRenderer, TensorFlowHandPoseEstimator, Tool, ToolCall, ToolOptions, ToolResult, ToolSchema, TrackedAnchor, TrackedAnchorLike, TransformScript, TranslateManipulationEvent, TranslateOptions, UIAppearance, UIButton, UIButtonOptions, UICard, UICardAnchorX, UICardAnchorY, UICardEdgeOptions, UICardOptions, UIColor, UIElement, UIElementOptions, UIExitButton, UIExitButtonOptions, UIIcon, UIIconOptions, UIIconVariant, UIIconWeight, UIImage, UIImageOptions, UILineHeight, UIOverlay, UIOverlayOptions, UIPanel, UIPanelOptions, UIPosition, UIResolvedSize, UIScrollView, UIScrollViewOptions, UISize, UISlider, UISliderOptions, UIStateStyle, UIStyle, UIText, UITextInput, UITextInputKeyModifiers, UITextInputOptions, UITextInputSelection, UITextInputSelectionDirection, UITextOptions, UITheme, UIThemeColors, UIThemePresetName, UIThemeStyleRole, UIThemeStyles, UIThemeUpdate, UITransform, UIUnit, UIValidationBounds, UIValidationCode, UIValidationIssue, UIValidationReport, UIVector2, UP, User, VIEW_DEPTH_GAP, Vec2Tuple, Vec3Tuple, VideoFileStream, VideoFileStreamOptions, VideoFrameMetadata, VideoLayer, VideoLayerPath, VideoLayerPlacement, VideoLayerState, VideoStream, VideoStreamDetails, VideoStreamEventMap, VideoStreamGetSnapshotBase64Options, VideoStreamGetSnapshotBlobOptions, VideoStreamGetSnapshotImageDataOptions, VideoStreamGetSnapshotOptions, VideoStreamGetSnapshotTextureOptions, VideoStreamOptions, VisemeWeights, VisibilityTransition, VisibilityTransitionOptions, VisibleObjectsContext, VolumeCategory, WaitFrame, WeatherData, WebGLOrWebGPURenderer, WebGPURendererOptions, WebXRHandContext, WebXRHandPoseEstimator, WebXRJointRotations, WebXRSessionEventType, WebXRSessionManager, WebXRSessionManagerEventMap, World, WorldOptions, XBObjectOptions, XRButton, XRDeviceCamera, XREffects, XRPass, XRReferenceSpaceCache, XRTransitionOptions, XR_BLOCKS_ASSETS_PATH, ZERO_VECTOR3, ZERO_VISEME, _getBvhImportStatus, add, ai$1 as ai, anchorCapability, applyBVH, applySimulatorHandPoseRotationConstraints, aspectRatioOf, assertWebGLRenderer, average, buildDisplacementMap, callInitWithDependencyInjection, camera$1 as camera, clamp, clamp01, clampRotationToAngle, computeBillboardScale, context, core, cropImage, defaultAnchorStorageKey, depth$1 as depth, detectDeviceCameraTarget, disposeBVH, disposeMaterial, disposeMeshResources, disposeObjectChildren, disposeObjectTree, disposeRenderableResources, enableAcceleratedRaycast, estimateBackgroundColor, estimateHandScale, extractYaw, getAdjacentFingerSpreads, getBoneVectors, getCameraParametersSnapshot, getColorHex, getDeltaTime, getDeviceCameraClipFromView, getDeviceCameraWorldFromClip, getDeviceCameraWorldFromView, getElapsedTime, getFingerBendAngles, getFingerCurl, getFingerDirection, getFingerJoint, getFingerPalmAlignment, getFingerSpread, getFingerStraightness, getFingertipDistance, getFingertipPalmDistance, getObjectTargetPoint, getPalmNormal, getPalmPose, getPalmRight, getPalmUp, getPalmWidth, getRelativeBoneAngles, getThumbBendAngles, getThumbCurl, getThumbDirection, getThumbOpposition, getThumbStraightness, getThumbVerticalDirection, getUIPresentationObject, getUrlParamBool, getUrlParamFloat, getUrlParamInt, getUrlParameter, getVec4ByColorString, getXrCameraLeft, getXrCameraRight, init, initScript, input$1 as input, intrinsicsToProjectionMatrix, isBVHReady, isDeviceCameraPoseAvailable, isLayerCapable, isSerializerRenderer, isWebGPURenderer, keyOutBackground, layerCapability, lerp, loadStereoImageAsTextures, loadingSpinnerManager, lookAtRotation, objectIsDescendantOf, parseBase64DataURL, parseSimulatorHandPoseRotations, placeObjectAtIntersectionFacingTarget, poseInFrontOfCamera, print, quaternionFacingCamera, resolveSerializerRenderer, resolveSimulatorHandPoseRotations, resolveSimulatorRotationsFromKeypoints, scene$1 as scene, showOnlyInLeftEye, showOnlyInRightEye, sound, timer$1 as timer, transformRgbUvToWorld, traverseUtil, ui, urlParams, user$1 as user, visualizeDepth, visualizeDepthMap, world$1 as world, xrDepthMeshOptions, xrDepthMeshPhysicsOptions, xrDepthMeshVisualizationOptions, xrDeviceCameraEnvironmentContinuousOptions, xrDeviceCameraEnvironmentOptions, xrDeviceCameraUserContinuousOptions, xrDeviceCameraUserOptions };
+  export { AI, AIModel, AIOptions, ActiveControllers, Agent, AgentLifecycleCallbacks, AnchorCapability, AnchorManager, AnchorRecord, AnchorRestoreResult, AnchorRestoreStatus, AnchorStorageLike, AnchorStore, AnchoredObjectFactory, AnchoredObjects, AnchorsOptions, AudioListener, AudioListenerOptions, AudioPlayer, AudioPlayerOptions, AutomationModeOptions, BACK, BackgroundKeyOptions, BackgroundMusic, BaseManipulationEvent, CameraParametersSnapshot, CameraSnapshot, CategoryVolumes, ColorStop, Constructor, Context, ContextOptions, Controller, ControllerEventMap, Core, CoreLifecycleState, CoreSound, DEFAULT_DEVICE_CAMERA_HEIGHT, DEFAULT_DEVICE_CAMERA_WIDTH, DEFAULT_EXIT_BUTTON_STYLE, DEFAULT_RGB_TO_DEPTH_PARAMS, DEVICE_CAMERA_PARAMETERS, DOWN, DeepPartial, DeepReadonly, Depth, DepthArray, DepthMesh, DepthMeshOptions, DepthOptions, DepthTextures, DetectedBodyPose, DetectedFace, DetectedMesh, DetectedObject, DetectedPlane, DeviceCameraOptions, DeviceCameraParameters, DigitName, DurationLike, FINGER_ORDER, FORWARD, FaceBlendshape, FaceCamera, FaceCameraMode, FaceCameraOptions, FaceLandmark, FaceLandmarkName, FaceRecognizer, FacesOptions, FingerName, FollowHead, FollowHeadOptions, FollowObject, FollowObjectMode, FollowObjectOptions, FormFactor, FramebufferScaleFactor, GEMINI_DEFAULT_FLASH_MODEL, GEMINI_DEFAULT_IMAGE_MODEL, GEMINI_DEFAULT_LIVE_MODEL, GamepadAction, GamepadBindings, GamepadController, GazeController, Gemini, GeminiInteractionConfig, GeminiOptions, GeminiQueryInput, GeminiTokenProvider, GenerateSkyboxTool, GestureConfiguration, GestureDetectionResult, GestureEvent, GestureEventDetail, GestureEventType, GestureHandedness, GestureRecognition, GestureRecognitionOptions, GestureRecognizer, GestureScoreMap, GetWeatherArgs, GetWeatherTool, GradientPaint, GradientType, HAND_BONE_IDX_CONNECTION_MAP, HAND_INDEX_TO_LABEL, HAND_JOINT_COUNT, HAND_JOINT_IDX_CONNECTION_MAP, HAND_JOINT_NAMES, HandContext, HandLabel, Handedness, Hands, HandsOptions, HeadGestureConfiguration, HeadGestureContext, HeadGestureDetectionResult, HeadGestureEvent, HeadGestureEventDetail, HeadGestureEventMap, HeadGestureRecognition, HeadGestureRecognitionOptions, HeadGestureRecognizer, HeadGestureScoreMap, HeadPoseSample, HeuristicGestureDetector, HeuristicGestureRecognizer, HeuristicHeadGestureDetector, HeuristicHeadGestureRecognizer, HeuristicHeadGestureRecognizerOptions, HitSurfaceOptions, HoverEvent, HumanRecognizer, HumansOptions, Injectable, InjectableConstructor, Input, InputOptions, Interaction, InteractionOptions, InteractionSource, InteractionSourceType, JointName, JointPositions, KeyEvent, Keycodes, KeysJson, LEFT, LEFT_VIEW_ONLY_LAYER, LayerCapability, LayerManager, LayersOptions, Lighting, LightingOptions, LipMetrics, LiveSessionState, LoadingSpinnerManager, LocalStorageAnchorStore, LongSelectEvent, ManipulationAction, ManipulationEvent, ManipulationHandleOptions, ManipulationOptions, ManipulationPhase, MediaOrSimulatorMediaDeviceInfo, MediaPipeHandContext, MediaPipeHandLandmark, MediaPipeHandPoseEstimator, MeshDetectionOptions, MeshDetector, MeshScript, ModelClass, ModelLoader, ModelLoaderLoadGLTFOptions, ModelLoaderLoadOptions, ModelOptions, ModelSource, ModelViewer, ModelViewerOptions, ModelViewerOrigin, MouseController, NUM_HANDS, NormalizedDetectedObject, OCCLUDABLE_ITEMS_LAYER, ObjectDetectionOptions, ObjectDetector, ObjectGrabEvent, ObjectTouchEvent, ObjectTouchStartEvent, ObjectsOptions, OcclusionPass, OcclusionPassBackend, OcclusionUtils, OpenAI, OpenAIOptions, Options, Orbit, OrbitDirection, OrbitFrame, OrbitOptions, OrbitPath, Paint, PalmPose, Physics, PhysicsOptions, PlaneDetector, PlanesOptions, PlayModelAnimationOptions, PlaySoundOptions, PointerEvents, PoseEstimator, PoseJointName, PoseLandmark, PushPullOptions, QuatTuple, RAPIERCompat, RENDERER_BACKENDS, RIGHT, RIGHT_VIEW_ONLY_LAYER, RapierCharacterController, RapierCollider, RapierColliderDesc, RapierEventQueue, RapierRigidBody, RapierRigidBodyDesc, RapierRotation, RapierShape, RapierVector, RapierWorld, RaycastMode, Registry, RendererBackend, ResizeManipulationEvent, ResizeOptions, ResizeSize, ResolvedSimulatorSceneManifest, ReticleMode, ReticleOptions, Reticles, RgbToDepthParams, RgbaImage, RotateManipulationEvent, RotateOptions, SIMULATOR_HAND_COMMON_BIOMECHANICAL_CONSTRAINTS_DEGREES, SIMULATOR_HAND_POSE_NAMES, SIMULATOR_HAND_POSE_ROTATIONS, SOUND_PRESETS, ScaleManipulationEvent, ScaleOptions, SceneContextDetectionOptions, SceneContextDetectionResult, SceneDetector, SceneOptions, SceneSetOfMarkOptions, SceneVisibilityOptions, ScreenshotSynthesizer, Script, ScriptMixin, ScriptsManager, ScriptsManagerEventMap, ScriptsManagerEventType, SegmentCategory, SegmentationMask, SegmentationOptions, Segmenter, SelectEndEvent, SelectEvent, SelectionEndReason, SemanticBounds, SemanticMetadata, SemanticNode, SemanticScrollInfo, SemanticSource, SemanticTree, SemanticViewData, SerializerRenderer, SerializerRendererFactory, SerializerXRManager, SetOfMark, SetOfMarkContext, SetSimulatorEnvironmentEvent, SetSimulatorHandPhysicsEvent, SetSimulatorModeEvent, Shader, ShaderUniforms, ShowSimulatorInstructionsEvent, Simulator, SimulatorAnchor, SimulatorCamera, SimulatorControlMode, SimulatorControllerState, SimulatorControls, SimulatorCustomInstruction, SimulatorDayNightLightingDefinition, SimulatorDepth, SimulatorDepthMaterial, SimulatorDetectedObjectInput, SimulatorEnvironment, SimulatorHandJointRotationArray, SimulatorHandPhysicsOptions, SimulatorHandPose, SimulatorHandPoseChangeRequestEvent, SimulatorHandPoseJoints, SimulatorHandPoseRotationConstraintsDegrees, SimulatorHandPoseRotationRangeDegrees, SimulatorHandPoseRotations, SimulatorHands, SimulatorLocationDefinition, SimulatorLocations, SimulatorMediaDeviceInfo, SimulatorMesh, SimulatorMode, SimulatorObject, SimulatorObjectDefinition, SimulatorObjectDetectionSource, SimulatorObjectUpdate, SimulatorObjects, SimulatorOptions, SimulatorPhysicsMode, SimulatorPlane, SimulatorPlaneType, SimulatorPointerLockController, SimulatorQuaternionTuple, SimulatorScene, SimulatorSceneManifest, SimulatorUser, SimulatorUserPath, SimulatorVector3Tuple, SkyboxAgent, SolidPaint, SoundOptions, SoundSynthesizer, SparkRendererHolder, SpatialAudio, SpeechRecognition, SpeechRecognitionErrorCode, SpeechRecognitionErrorEvent, SpeechRecognitionEvent, SpeechRecognizer, SpeechRecognizerOptions, SpeechSynthesizer, SpeechSynthesizerOptions, StorablePose, StreamState, StrokeEventMap, StrokeRecognizer, StylizedFace, StylizedFaceOptions, SupportedRenderer, TensorFlowHandPoseEstimator, Tool, ToolCall, ToolOptions, ToolResult, ToolSchema, TrackedAnchor, TrackedAnchorLike, TransformScript, TranslateManipulationEvent, TranslateOptions, UIAppearance, UIButton, UIButtonOptions, UICard, UICardAnchorX, UICardAnchorY, UICardEdgeOptions, UICardOptions, UIColor, UIDropdown, UIDropdownOptions, UIElement, UIElementOptions, UIExitButton, UIExitButtonOptions, UIIcon, UIIconOptions, UIIconVariant, UIIconWeight, UIImage, UIImageOptions, UILineHeight, UIOverlay, UIOverlayOptions, UIPanel, UIPanelOptions, UIPosition, UIProgress, UIProgressOptions, UIResolvedSize, UIScrollView, UIScrollViewOptions, UISize, UISlider, UISliderOptions, UIStateStyle, UIStyle, UIText, UITextInput, UITextInputKeyModifiers, UITextInputOptions, UITextInputSelection, UITextInputSelectionDirection, UITextOptions, UITheme, UIThemeColors, UIThemePresetName, UIThemeStyleRole, UIThemeStyles, UIThemeUpdate, UIToggle, UIToggleOptions, UITransform, UIUnit, UIValidationBounds, UIValidationCode, UIValidationIssue, UIValidationReport, UIVector2, UP, User, VIEW_DEPTH_GAP, Vec2Tuple, Vec3Tuple, VideoFileStream, VideoFileStreamOptions, VideoFrameMetadata, VideoLayer, VideoLayerPath, VideoLayerPlacement, VideoLayerState, VideoStream, VideoStreamDetails, VideoStreamEventMap, VideoStreamGetSnapshotBase64Options, VideoStreamGetSnapshotBlobOptions, VideoStreamGetSnapshotImageDataOptions, VideoStreamGetSnapshotOptions, VideoStreamGetSnapshotTextureOptions, VideoStreamOptions, VisemeWeights, VisibilityTransition, VisibilityTransitionOptions, VisibleObjectsContext, VolumeCategory, WaitFrame, WeatherData, WebGLOrWebGPURenderer, WebGPURendererOptions, WebXRHandContext, WebXRHandPoseEstimator, WebXRJointRotations, WebXRSessionEventType, WebXRSessionManager, WebXRSessionManagerEventMap, World, WorldOptions, XBObjectOptions, XRButton, XRDeviceCamera, XREffects, XRPass, XRReferenceSpaceCache, XRTransitionOptions, XR_BLOCKS_ASSETS_PATH, ZERO_VECTOR3, ZERO_VISEME, _getBvhImportStatus, add, ai$1 as ai, anchorCapability, applyBVH, applySimulatorHandPoseRotationConstraints, aspectRatioOf, assertDeviceCameraTarget, assertWebGLRenderer, average, buildDisplacementMap, callInitWithDependencyInjection, camera$1 as camera, clamp, clamp01, clampRotationToAngle, computeBillboardScale, context, core, cropImage, defaultAnchorStorageKey, depth$1 as depth, detectDeviceCameraTarget, disposeBVH, disposeMaterial, disposeMeshResources, disposeObjectChildren, disposeObjectTree, disposeRenderableResources, enableAcceleratedRaycast, estimateBackgroundColor, estimateHandScale, extractYaw, getAdjacentFingerSpreads, getBoneVectors, getCameraParametersSnapshot, getColorHex, getDeltaTime, getDeviceCameraClipFromView, getDeviceCameraWorldFromClip, getDeviceCameraWorldFromView, getElapsedTime, getFingerBendAngles, getFingerCurl, getFingerDirection, getFingerJoint, getFingerPalmAlignment, getFingerSpread, getFingerStraightness, getFingertipDistance, getFingertipPalmDistance, getObjectTargetPoint, getPalmNormal, getPalmPose, getPalmRight, getPalmUp, getPalmWidth, getRelativeBoneAngles, getThumbBendAngles, getThumbCurl, getThumbDirection, getThumbOpposition, getThumbStraightness, getThumbVerticalDirection, getUIPresentationObject, getUrlParamBool, getUrlParamFloat, getUrlParamInt, getUrlParameter, getVec4ByColorString, getXrCameraLeft, getXrCameraRight, init, initScript, input$1 as input, intrinsicsToProjectionMatrix, isBVHReady, isDeviceCameraPoseAvailable, isLayerCapable, isSerializerRenderer, isWebGPURenderer, keyOutBackground, layerCapability, lerp, loadStereoImageAsTextures, loadingSpinnerManager, lookAtRotation, objectIsDescendantOf, parseBase64DataURL, parseSimulatorHandPoseRotations, placeObjectAtIntersectionFacingTarget, poseInFrontOfCamera, print, quaternionFacingCamera, resolveDeviceCameraTarget, resolveSerializerRenderer, resolveSimulatorHandPoseRotations, resolveSimulatorRotationsFromKeypoints, scene$1 as scene, showOnlyInLeftEye, showOnlyInRightEye, sound, timer$1 as timer, transformRgbUvToWorld, traverseUtil, ui, urlParams, user$1 as user, visualizeDepth, visualizeDepthMap, world$1 as world, xrDepthMeshOptions, xrDepthMeshPhysicsOptions, xrDepthMeshVisualizationOptions, xrDeviceCameraEnvironmentContinuousOptions, xrDeviceCameraEnvironmentOptions, xrDeviceCameraUserContinuousOptions, xrDeviceCameraUserOptions };
 }
 //#endregion
 //#region src/entry.d.ts
@@ -12058,5 +12281,5 @@ declare global {
   }
 }
 //#endregion
-export { BackgroundMusic, type ColorStop, type Controller, type ControllerEventMap, type DurationLike, type FaceCameraMode, type GradientPaint, type GradientType, type HeuristicHeadGestureRecognizerOptions, type HitSurfaceOptions, type InteractionSource, type InteractionSourceType, type ModelSource, type ModelViewerOptions, type ModelViewerOrigin, type Paint, type PlayModelAnimationOptions, type PointerEvents, type RAPIERCompat, type RapierCharacterController, type RapierCollider, type RapierColliderDesc, type RapierEventQueue, type RapierRigidBody, type RapierRigidBodyDesc, type RapierRotation, type RapierShape, type RapierVector, type RapierWorld, type ResolvedSimulatorSceneManifest, type ReticleMode, type SerializerRenderer, type SerializerRendererFactory, type SerializerXRManager, type Simulator, type SimulatorCamera, type SimulatorControlMode, type SimulatorControllerState, type SimulatorControls, type SimulatorDayNightLightingDefinition, type SimulatorDepth, type SimulatorDepthMaterial, type SimulatorHands, type SimulatorLocationDefinition, type SimulatorLocations, type SimulatorMediaDeviceInfo, type SimulatorObject, type SimulatorObjectDefinition, type SimulatorObjectUpdate, type SimulatorObjects, type SimulatorPhysicsMode, type SimulatorPointerLockController, type SimulatorQuaternionTuple, type SimulatorScene, type SimulatorSceneManifest, type SimulatorUser, type SimulatorUserPath, type SimulatorVector3Tuple, type SolidPaint, type SpeechRecognition, type SpeechRecognitionErrorCode, type SpeechRecognitionErrorEvent, type SpeechRecognitionEvent, type SupportedRenderer, type UIAppearance, type UIButtonOptions, type UICardAnchorX, type UICardAnchorY, type UICardEdgeOptions, type UICardOptions, type UIColor, type UIElementOptions, type UIExitButtonOptions, type UIIconOptions, type UIIconVariant, type UIIconWeight, type UIImageOptions, type UILineHeight, type UIOverlayOptions, type UIPanelOptions, type UIPosition, type UIResolvedSize, type UIScrollViewOptions, type UISize, type UISliderOptions, type UIStateStyle, type UIStyle, type UITextInputKeyModifiers, type UITextInputOptions, type UITextInputSelection, type UITextInputSelectionDirection, type UITextOptions, type UITheme, type UIThemeColors, type UIThemePresetName, type UIThemeStyleRole, type UIThemeStyles, type UIThemeUpdate, type UITransform, type UIUnit, type UIValidationBounds, type UIValidationCode, type UIValidationIssue, type UIValidationReport, type UIVector2, type WebGLOrWebGPURenderer, type XBObjectOptions, ai$1 as ai, camera$1 as camera, depth$1 as depth, input$1 as input, scene$1 as scene, timer$1 as timer, user$1 as user, world$1 as world };
+export { BackgroundMusic, type ColorStop, type Controller, type ControllerEventMap, type DurationLike, type FaceCameraMode, type GradientPaint, type GradientType, type HeuristicHeadGestureRecognizerOptions, type HitSurfaceOptions, type InteractionSource, type InteractionSourceType, type ModelSource, type ModelViewerOptions, type ModelViewerOrigin, type Paint, type PlayModelAnimationOptions, type PointerEvents, type RAPIERCompat, type RapierCharacterController, type RapierCollider, type RapierColliderDesc, type RapierEventQueue, type RapierRigidBody, type RapierRigidBodyDesc, type RapierRotation, type RapierShape, type RapierVector, type RapierWorld, type ResolvedSimulatorSceneManifest, type ReticleMode, type SerializerRenderer, type SerializerRendererFactory, type SerializerXRManager, type Simulator, type SimulatorCamera, type SimulatorControlMode, type SimulatorControllerState, type SimulatorControls, type SimulatorDayNightLightingDefinition, type SimulatorDepth, type SimulatorDepthMaterial, type SimulatorHands, type SimulatorLocationDefinition, type SimulatorLocations, type SimulatorMediaDeviceInfo, type SimulatorObject, type SimulatorObjectDefinition, type SimulatorObjectUpdate, type SimulatorObjects, type SimulatorPhysicsMode, type SimulatorPointerLockController, type SimulatorQuaternionTuple, type SimulatorScene, type SimulatorSceneManifest, type SimulatorUser, type SimulatorUserPath, type SimulatorVector3Tuple, type SolidPaint, type SpeechRecognition, type SpeechRecognitionErrorCode, type SpeechRecognitionErrorEvent, type SpeechRecognitionEvent, type SupportedRenderer, type UIAppearance, type UIButtonOptions, type UICardAnchorX, type UICardAnchorY, type UICardEdgeOptions, type UICardOptions, type UIColor, type UIDropdownOptions, type UIElementOptions, type UIExitButtonOptions, type UIIconOptions, type UIIconVariant, type UIIconWeight, type UIImageOptions, type UILineHeight, type UIOverlayOptions, type UIPanelOptions, type UIPosition, type UIProgressOptions, type UIResolvedSize, type UIScrollViewOptions, type UISize, type UISliderOptions, type UIStateStyle, type UIStyle, type UITextInputKeyModifiers, type UITextInputOptions, type UITextInputSelection, type UITextInputSelectionDirection, type UITextOptions, type UITheme, type UIThemeColors, type UIThemePresetName, type UIThemeStyleRole, type UIThemeStyles, type UIThemeUpdate, type UIToggleOptions, type UITransform, type UIUnit, type UIValidationBounds, type UIValidationCode, type UIValidationIssue, type UIValidationReport, type UIVector2, type WebGLOrWebGPURenderer, type XBObjectOptions, ai$1 as ai, camera$1 as camera, depth$1 as depth, input$1 as input, scene$1 as scene, timer$1 as timer, user$1 as user, world$1 as world };
 //# sourceMappingURL=xrblocks.d.ts.map

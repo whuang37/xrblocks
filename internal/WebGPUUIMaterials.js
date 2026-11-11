@@ -15,17 +15,20 @@
 *
 * @file xrblocks.js
 * @version v0.24.0
-* @commitid 9a4ab86
-* @builddate 2026-11-09T16:54:38.149Z
+* @commitid b31c1d0
+* @builddate 2026-11-11T16:49:08.213Z
 * @description XR Blocks SDK, built from source with the above commit ID.
 * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
 * and follow rules below:
 * 1. Include the following importmap for maximum compatibility:
 "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js",
 "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/",
-"@pmndrs/uikit": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit@1.0.64/dist/index.min.js",
-"@pmndrs/uikit-pub-sub": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit-pub-sub@1.0.64/dist/index.min.js",
-"@pmndrs/msdfonts": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.64/dist/index.min.js",
+"@pmndrs/uikit": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit@1.0.77/dist/index.min.js",
+"@pmndrs/uikit-pub-sub": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit-pub-sub@1.0.77/dist/index.min.js",
+"@pmndrs/msdfonts": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.77/dist/index.min.js",
+"@pmndrs/msdfonts/inter": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.77/dist/inter.js",
+"@pmndrs/msdfonts/": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.77/dist/",
+"zod": "https://cdn.jsdelivr.net/npm/zod@4.4.3/+esm",
 "@preact/signals-core": "https://cdn.jsdelivr.net/npm/@preact/signals-core@1.14.0/dist/signals-core.mjs",
 "yoga-layout/load": "https://cdn.jsdelivr.net/npm/yoga-layout@3.2.1/dist/src/load.js",
 "lit": "https://esm.sh/lit@3.3.1",
@@ -225,6 +228,7 @@ function buildUnifiedPanelMain(uniforms) {
 	const resolution = asV2(uniforms.u_resolution);
 	const uOpacity = asNum(uniforms.u_opacity);
 	const cornerRadius = asNum(uniforms.u_corner_radius);
+	const cornerRadii = uniforms.u_corner_radii ? asV4(uniforms.u_corner_radii) : void 0;
 	const dropShadowMargin = asNum(uniforms.u_drop_shadow_margin);
 	const hasFill = asNum(uniforms.u_has_fill);
 	const hasStroke = asNum(uniforms.u_has_stroke);
@@ -246,8 +250,31 @@ function buildUnifiedPanelMain(uniforms) {
 				strokeShift.assign(strokeWidth.mul(.5));
 			});
 		});
+		const rawCornerR = float(cornerRadius).toVar();
+		if (cornerRadii !== void 0) {
+			const pickedCornerR = float(-1).toVar();
+			If(p.x.greaterThan(0), () => {
+				If(p.y.greaterThan(0), () => {
+					pickedCornerR.assign(cornerRadii.x);
+				});
+				If(p.y.lessThanEqual(0), () => {
+					pickedCornerR.assign(cornerRadii.y);
+				});
+			});
+			If(p.x.lessThanEqual(0), () => {
+				If(p.y.greaterThan(0), () => {
+					pickedCornerR.assign(cornerRadii.z);
+				});
+				If(p.y.lessThanEqual(0), () => {
+					pickedCornerR.assign(cornerRadii.w);
+				});
+			});
+			If(pickedCornerR.greaterThanEqual(0), () => {
+				rawCornerR.assign(pickedCornerR);
+			});
+		}
 		const casterHalfSize = contentHalfSize.add(vec2(strokeShift));
-		const baseEffR = min(cornerRadius, min(contentHalfSize.x, contentHalfSize.y));
+		const baseEffR = min(rawCornerR, min(contentHalfSize.x, contentHalfSize.y));
 		const casterEffR = baseEffR.add(strokeShift);
 		const dropColor = vec4(0, 0, 0, 0).toVar();
 		If(hasDrop.notEqual(0), () => {
@@ -281,7 +308,7 @@ function buildUnifiedPanelMain(uniforms) {
 					});
 				});
 				const shadowZoneHalfSize = max(vec2(0, 0), contentHalfSize.sub(vec2(strokeInset)));
-				const innerEffR = min(max(0, cornerRadius.sub(strokeInset)), min(shadowZoneHalfSize.x, shadowZoneHalfSize.y));
+				const innerEffR = min(max(0, rawCornerR.sub(strokeInset)), min(shadowZoneHalfSize.x, shadowZoneHalfSize.y));
 				const innerDist = sdRoundedBox(p, shadowZoneHalfSize, innerEffR);
 				const innerAA = fwidth(innerDist);
 				const innerAlphaMask = float(1).sub(smoothstep(innerAA.mul(-.5), innerAA.mul(.5), innerDist));

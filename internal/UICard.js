@@ -15,17 +15,20 @@
 *
 * @file xrblocks.js
 * @version v0.24.0
-* @commitid 9a4ab86
-* @builddate 2026-11-09T16:54:38.149Z
+* @commitid b31c1d0
+* @builddate 2026-11-11T16:49:08.213Z
 * @description XR Blocks SDK, built from source with the above commit ID.
 * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
 * and follow rules below:
 * 1. Include the following importmap for maximum compatibility:
 "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js",
 "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/",
-"@pmndrs/uikit": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit@1.0.64/dist/index.min.js",
-"@pmndrs/uikit-pub-sub": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit-pub-sub@1.0.64/dist/index.min.js",
-"@pmndrs/msdfonts": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.64/dist/index.min.js",
+"@pmndrs/uikit": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit@1.0.77/dist/index.min.js",
+"@pmndrs/uikit-pub-sub": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit-pub-sub@1.0.77/dist/index.min.js",
+"@pmndrs/msdfonts": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.77/dist/index.min.js",
+"@pmndrs/msdfonts/inter": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.77/dist/inter.js",
+"@pmndrs/msdfonts/": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.77/dist/",
+"zod": "https://cdn.jsdelivr.net/npm/zod@4.4.3/+esm",
 "@preact/signals-core": "https://cdn.jsdelivr.net/npm/@preact/signals-core@1.14.0/dist/signals-core.mjs",
 "yoga-layout/load": "https://cdn.jsdelivr.net/npm/yoga-layout@3.2.1/dist/src/load.js",
 "lit": "https://esm.sh/lit@3.3.1",
@@ -346,6 +349,10 @@ const STYLE_KEYS = /* @__PURE__ */ new Set([
 	"borderColor",
 	"borderWidth",
 	"borderRadius",
+	"borderTopLeftRadius",
+	"borderTopRightRadius",
+	"borderBottomRightRadius",
+	"borderBottomLeftRadius",
 	"fontSize",
 	"fontWeight",
 	"lineHeight",
@@ -379,7 +386,11 @@ const STATE_STYLE_KEYS = /* @__PURE__ */ new Set([
 	"opacity",
 	"borderColor",
 	"borderWidth",
-	"borderRadius"
+	"borderRadius",
+	"borderTopLeftRadius",
+	"borderTopRightRadius",
+	"borderBottomRightRadius",
+	"borderBottomLeftRadius"
 ]);
 const NUMBER_KEYS = /* @__PURE__ */ new Set([
 	"minWidth",
@@ -405,6 +416,10 @@ const NUMBER_KEYS = /* @__PURE__ */ new Set([
 	"opacity",
 	"borderWidth",
 	"borderRadius",
+	"borderTopLeftRadius",
+	"borderTopRightRadius",
+	"borderBottomRightRadius",
+	"borderBottomLeftRadius",
 	"fontSize",
 	"innerShadowBlur",
 	"innerShadowSpread",
@@ -446,6 +461,10 @@ const NONNEGATIVE_KEYS = /* @__PURE__ */ new Set([
 	"paddingLeft",
 	"borderWidth",
 	"borderRadius",
+	"borderTopLeftRadius",
+	"borderTopRightRadius",
+	"borderBottomRightRadius",
+	"borderBottomLeftRadius",
 	"fontSize",
 	"lineHeight",
 	"innerShadowBlur",
@@ -1104,29 +1123,42 @@ function measureUICardContentHeight(card, width) {
 function measureUICardMinContentWidth(card) {
 	return contentMeasurers.get(card)?.minWidth();
 }
+/**
+* Closest and farthest a card moves from the viewer, in meters.
+*/
 const CARD_MIN_DISTANCE = .75;
 const CARD_MAX_DISTANCE = 5;
+/**
+* Face-camera smoothing while moving, high enough that the card keeps facing
+* the viewer instead of turning behind the move.
+*/
+const CARD_FACE_CAMERA_SMOOTHING = 1;
+function cardTranslateDefaults() {
+	return {
+		faceCamera: true,
+		smoothing: CARD_FACE_CAMERA_SMOOTHING,
+		scaleWithDistance: true,
+		pushPull: true,
+		minDistance: CARD_MIN_DISTANCE,
+		maxDistance: CARD_MAX_DISTANCE,
+		raySmoothing: true
+	};
+}
 function normalizeCardManipulation(value) {
 	if (value === void 0 || value === false) return value;
 	if (value === true) return {
 		actions: {
-			translate: {
-				faceCamera: true,
-				scaleWithDistance: true,
-				pushPull: true,
-				minDistance: CARD_MIN_DISTANCE,
-				maxDistance: CARD_MAX_DISTANCE
-			},
+			translate: cardTranslateDefaults(),
 			scale: true,
 			resize: true
 		},
 		handle: { action: "translate" }
 	};
 	const actions = value.actions ? { ...value.actions } : void 0;
-	if (actions?.translate === true) actions.translate = { faceCamera: true };
+	if (actions?.translate === true) actions.translate = cardTranslateDefaults();
 	else if (actions?.translate && typeof actions.translate === "object") actions.translate = {
-		...actions.translate,
-		faceCamera: actions.translate.faceCamera ?? true
+		...cardTranslateDefaults(),
+		...actions.translate
 	};
 	if (actions?.rotate && typeof actions.rotate === "object") actions.rotate = {
 		...actions.rotate,

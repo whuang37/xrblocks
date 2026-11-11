@@ -15,17 +15,20 @@
 *
 * @file xrblocks.js
 * @version v0.24.0
-* @commitid 9a4ab86
-* @builddate 2026-11-09T16:54:38.149Z
+* @commitid b31c1d0
+* @builddate 2026-11-11T16:49:08.213Z
 * @description XR Blocks SDK, built from source with the above commit ID.
 * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
 * and follow rules below:
 * 1. Include the following importmap for maximum compatibility:
 "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js",
 "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/",
-"@pmndrs/uikit": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit@1.0.64/dist/index.min.js",
-"@pmndrs/uikit-pub-sub": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit-pub-sub@1.0.64/dist/index.min.js",
-"@pmndrs/msdfonts": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.64/dist/index.min.js",
+"@pmndrs/uikit": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit@1.0.77/dist/index.min.js",
+"@pmndrs/uikit-pub-sub": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit-pub-sub@1.0.77/dist/index.min.js",
+"@pmndrs/msdfonts": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.77/dist/index.min.js",
+"@pmndrs/msdfonts/inter": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.77/dist/inter.js",
+"@pmndrs/msdfonts/": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.77/dist/",
+"zod": "https://cdn.jsdelivr.net/npm/zod@4.4.3/+esm",
 "@preact/signals-core": "https://cdn.jsdelivr.net/npm/@preact/signals-core@1.14.0/dist/signals-core.mjs",
 "yoga-layout/load": "https://cdn.jsdelivr.net/npm/yoga-layout@3.2.1/dist/src/load.js",
 "lit": "https://esm.sh/lit@3.3.1",
@@ -969,10 +972,9 @@ var SimulatorDisplayFov = class {
 		this.mainCamera = mainCamera;
 		this.stereoCameras = stereoCameras;
 		this.options = options;
-		if (mainCamera instanceof THREE.PerspectiveCamera) this.defaultCameraFov = mainCamera.fov;
 	}
 	apply() {
-		if (!(this.mainCamera instanceof THREE.PerspectiveCamera) || this.defaultCameraFov === void 0) return;
+		if (!(this.mainCamera instanceof THREE.PerspectiveCamera)) return;
 		const diagonalFov = this.options.displayDiagonalFov;
 		const aspect = this.mainCamera.aspect;
 		if (diagonalFov === this.appliedDisplayDiagonalFov && (diagonalFov === void 0 || aspect === this.appliedDisplayAspect)) {
@@ -985,6 +987,7 @@ var SimulatorDisplayFov = class {
 			return;
 		}
 		if (!Number.isFinite(diagonalFov) || diagonalFov <= 0 || diagonalFov >= 180) throw new RangeError(`Simulator displayDiagonalFov must be greater than 0 and less than 180 degrees.`);
+		this.defaultCameraFov ??= this.mainCamera.fov;
 		const aspectForDiagonal = aspect > 0 ? aspect : 1;
 		const verticalTangent = Math.tan(THREE.MathUtils.degToRad(diagonalFov / 2)) / Math.hypot(aspectForDiagonal, 1);
 		this.mainCamera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(verticalTangent));
@@ -1015,12 +1018,14 @@ var SimulatorDisplayFov = class {
 		const camera = this.mainCamera;
 		const appliedCameraFov = this.appliedCameraFov;
 		const appliedCameraProjection = this.appliedCameraProjection;
+		const defaultCameraFov = this.defaultCameraFov;
+		this.defaultCameraFov = void 0;
 		this.appliedCameraFov = void 0;
 		this.appliedCameraProjection = void 0;
 		this.appliedDisplayDiagonalFov = void 0;
 		this.appliedDisplayAspect = void 0;
-		if (!(camera instanceof THREE.PerspectiveCamera) || this.defaultCameraFov === void 0 || appliedCameraFov === void 0 || appliedCameraProjection === void 0 || camera.fov !== appliedCameraFov || !camera.projectionMatrix.equals(appliedCameraProjection)) return;
-		camera.fov = this.defaultCameraFov;
+		if (!(camera instanceof THREE.PerspectiveCamera) || defaultCameraFov === void 0 || appliedCameraFov === void 0 || appliedCameraProjection === void 0 || camera.fov !== appliedCameraFov || !camera.projectionMatrix.equals(appliedCameraProjection)) return;
+		camera.fov = defaultCameraFov;
 		camera.updateProjectionMatrix();
 		this.syncStereoCameraProjection();
 	}

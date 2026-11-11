@@ -15,17 +15,20 @@
 *
 * @file xrblocks.js
 * @version v0.24.0
-* @commitid 9a4ab86
-* @builddate 2026-11-09T16:54:38.149Z
+* @commitid b31c1d0
+* @builddate 2026-11-11T16:49:08.213Z
 * @description XR Blocks SDK, built from source with the above commit ID.
 * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
 * and follow rules below:
 * 1. Include the following importmap for maximum compatibility:
 "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js",
 "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/",
-"@pmndrs/uikit": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit@1.0.64/dist/index.min.js",
-"@pmndrs/uikit-pub-sub": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit-pub-sub@1.0.64/dist/index.min.js",
-"@pmndrs/msdfonts": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.64/dist/index.min.js",
+"@pmndrs/uikit": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit@1.0.77/dist/index.min.js",
+"@pmndrs/uikit-pub-sub": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit-pub-sub@1.0.77/dist/index.min.js",
+"@pmndrs/msdfonts": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.77/dist/index.min.js",
+"@pmndrs/msdfonts/inter": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.77/dist/inter.js",
+"@pmndrs/msdfonts/": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.77/dist/",
+"zod": "https://cdn.jsdelivr.net/npm/zod@4.4.3/+esm",
 "@preact/signals-core": "https://cdn.jsdelivr.net/npm/@preact/signals-core@1.14.0/dist/signals-core.mjs",
 "yoga-layout/load": "https://cdn.jsdelivr.net/npm/yoga-layout@3.2.1/dist/src/load.js",
 "lit": "https://esm.sh/lit@3.3.1",
@@ -434,6 +437,7 @@ var UnifiedPanelLayer = class extends PanelLayer {
 				u_stroke_width: { value: 0 },
 				u_stroke_align: { value: 0 },
 				u_corner_radius: { value: 0 },
+				u_corner_radii: { value: new THREE.Vector4(-1, -1, -1, -1) },
 				u_drop_shadow_margin: { value: 0 }
 			}
 		});
@@ -476,6 +480,11 @@ var UnifiedPanelLayer = class extends PanelLayer {
 			this.material.uniforms.u_has_stroke.value = hasStroke ? 1 : 0;
 			const cornerRadius = signalProps.cornerRadius?.value ?? 0;
 			this.material.uniforms.u_corner_radius.value = cornerRadius;
+			const tl = signalProps.borderTopLeftRadius?.value;
+			const tr = signalProps.borderTopRightRadius?.value;
+			const br = signalProps.borderBottomRightRadius?.value;
+			const bl = signalProps.borderBottomLeftRadius?.value;
+			this.material.uniforms.u_corner_radii.value.set(tr ?? -1, br ?? -1, tl ?? -1, bl ?? -1);
 			const dropShadowMargin = signalProps.dropShadowMargin?.value ?? 0;
 			this.material.uniforms.u_drop_shadow_margin.value = dropShadowMargin;
 			this.material.visible = hasFill || hasDropShadow || hasInnerShadow || hasStroke;
@@ -492,6 +501,10 @@ var GradientPanel = class extends ShaderPanel {
 	constructor(properties = {}) {
 		const rawProps = properties;
 		const cornerRadiusSignal = signal(rawProps.borderRadius !== void 0 ? rawProps.borderRadius : properties.cornerRadius ?? DEFAULT_GRADIENT_PANEL_PROPS.cornerRadius);
+		const borderTopLeftRadiusSignal = signal(properties.borderTopLeftRadius);
+		const borderTopRightRadiusSignal = signal(properties.borderTopRightRadius);
+		const borderBottomRightRadiusSignal = signal(properties.borderBottomRightRadius);
+		const borderBottomLeftRadiusSignal = signal(properties.borderBottomLeftRadius);
 		const fillColorSignal = signal(rawProps.backgroundColor !== void 0 ? rawProps.backgroundColor : properties.fillColor ?? DEFAULT_GRADIENT_PANEL_PROPS.fillColor);
 		const backfaceColorSignal = properties.backfaceColor === void 0 ? void 0 : signal(properties.backfaceColor);
 		const innerShadowColorSignal = signal(properties.innerShadowColor ?? DEFAULT_GRADIENT_PANEL_PROPS.innerShadowColor);
@@ -527,8 +540,9 @@ var GradientPanel = class extends ShaderPanel {
 			else if (align === "outside") strokeExpand = sWidth;
 			return s + strokeExpand;
 		});
+		const { fillColor: _fillColor, backgroundColor: _backgroundColor, backfaceColor: _backfaceColor, innerShadowColor: _innerShadowColor, innerShadowBlur: _innerShadowBlur, innerShadowPosition: _innerShadowPosition, innerShadowSpread: _innerShadowSpread, innerShadowFalloff: _innerShadowFalloff, dropShadowColor: _dropShadowColor, dropShadowBlur: _dropShadowBlur, dropShadowPosition: _dropShadowPosition, dropShadowSpread: _dropShadowSpread, dropShadowFalloff: _dropShadowFalloff, strokeColor: _strokeColor, borderColor: _borderColor, strokeWidth: _strokeWidth, borderWidth: _borderWidth, strokeAlign: _strokeAlign, cornerRadius: _cornerRadius, borderRadius: _borderRadius, borderTopLeftRadius: _borderTopLeftRadius, borderTopRightRadius: _borderTopRightRadius, borderBottomRightRadius: _borderBottomRightRadius, borderBottomLeftRadius: _borderBottomLeftRadius, ...superProps } = rawProps;
 		super({
-			...properties,
+			...superProps,
 			overflow: "visible"
 		});
 		this.name = "GradientPanel";
@@ -548,6 +562,10 @@ var GradientPanel = class extends ShaderPanel {
 			strokeWidth: strokeWidthSignal,
 			strokeAlign: strokeAlignSignal,
 			cornerRadius: cornerRadiusSignal,
+			borderTopLeftRadius: borderTopLeftRadiusSignal,
+			borderTopRightRadius: borderTopRightRadiusSignal,
+			borderBottomRightRadius: borderBottomRightRadiusSignal,
+			borderBottomLeftRadius: borderBottomLeftRadiusSignal,
 			dropShadowMargin: expansionMarginSignal
 		});
 		if (backfaceColorSignal) {
@@ -557,6 +575,10 @@ var GradientPanel = class extends ShaderPanel {
 				strokeWidth: strokeWidthSignal,
 				strokeAlign: strokeAlignSignal,
 				cornerRadius: cornerRadiusSignal,
+				borderTopLeftRadius: borderTopLeftRadiusSignal,
+				borderTopRightRadius: borderTopRightRadiusSignal,
+				borderBottomRightRadius: borderBottomRightRadiusSignal,
+				borderBottomLeftRadius: borderBottomLeftRadiusSignal,
 				dropShadowMargin: expansionMarginSignal
 			}, void 0, { side: THREE.BackSide });
 			this.backfaceLayer.name = "BackfaceLayer";
@@ -565,6 +587,10 @@ var GradientPanel = class extends ShaderPanel {
 		}
 		this.addLayer(this.unifiedLayer);
 		this.cornerRadiusSignal = cornerRadiusSignal;
+		this.borderTopLeftRadiusSignal = borderTopLeftRadiusSignal;
+		this.borderTopRightRadiusSignal = borderTopRightRadiusSignal;
+		this.borderBottomRightRadiusSignal = borderBottomRightRadiusSignal;
+		this.borderBottomLeftRadiusSignal = borderBottomLeftRadiusSignal;
 		this.fillColorSignal = fillColorSignal;
 		this.backfaceColorSignal = backfaceColorSignal;
 		this.innerShadowColorSignal = innerShadowColorSignal;
@@ -712,7 +738,7 @@ var GradientPanel = class extends ShaderPanel {
 	* @param props - Object containing properties to update.
 	*/
 	setProperties(props) {
-		const { fillColor: rawFillColor, backgroundColor, backfaceColor, innerShadowColor, innerShadowBlur, innerShadowPosition, innerShadowSpread, innerShadowFalloff, dropShadowColor, dropShadowBlur, dropShadowPosition, dropShadowSpread, dropShadowFalloff, strokeColor: rawStrokeColor, borderColor, strokeWidth: rawStrokeWidth, borderWidth, strokeAlign, cornerRadius: rawCornerRadius, borderRadius, ...superProps } = props;
+		const { fillColor: rawFillColor, backgroundColor, backfaceColor, innerShadowColor, innerShadowBlur, innerShadowPosition, innerShadowSpread, innerShadowFalloff, dropShadowColor, dropShadowBlur, dropShadowPosition, dropShadowSpread, dropShadowFalloff, strokeColor: rawStrokeColor, borderColor, strokeWidth: rawStrokeWidth, borderWidth, strokeAlign, cornerRadius: rawCornerRadius, borderRadius, borderTopLeftRadius, borderTopRightRadius, borderBottomRightRadius, borderBottomLeftRadius, ...superProps } = props;
 		const fillColor = backgroundColor !== void 0 ? backgroundColor : rawFillColor;
 		const strokeColor = borderColor !== void 0 ? borderColor : rawStrokeColor;
 		const strokeWidth = borderWidth !== void 0 ? borderWidth : rawStrokeWidth;
@@ -734,6 +760,10 @@ var GradientPanel = class extends ShaderPanel {
 		if (strokeWidth !== void 0) this.setStrokeWidth(strokeWidth);
 		if (strokeAlign !== void 0) this.setStrokeAlign(strokeAlign);
 		if (cornerRadius !== void 0) this.setCornerRadius(cornerRadius);
+		if ("borderTopLeftRadius" in props) this.borderTopLeftRadiusSignal.value = borderTopLeftRadius;
+		if ("borderTopRightRadius" in props) this.borderTopRightRadiusSignal.value = borderTopRightRadius;
+		if ("borderBottomRightRadius" in props) this.borderBottomRightRadiusSignal.value = borderBottomRightRadius;
+		if ("borderBottomLeftRadius" in props) this.borderBottomLeftRadiusSignal.value = borderBottomLeftRadius;
 	}
 };
 //#endregion
@@ -1662,7 +1692,7 @@ function scrollbarHit(viewport, point) {
 	const size = viewport.size.peek();
 	const maximum = viewport.maxScrollPosition.peek()[1];
 	if (!size || maximum === void 0 || maximum <= 0) return void 0;
-	const width = viewport.properties.peek().scrollbarWidth;
+	const width = Number.parseFloat(String(viewport.properties.peek().scrollbarWidth ?? 0));
 	const [top, right, bottom] = viewport.borderInset.peek() ?? [
 		0,
 		0,
@@ -1726,7 +1756,7 @@ var UIHitRegion = class {
 	}
 	available() {
 		const size = this.node.size.peek();
-		return Boolean(this.node.visible && this.node.displayed.peek() && !this.node.isClipped.peek() && size && size[0] > 0 && size[1] > 0);
+		return Boolean(this.node.isVisible.peek() && size && size[0] > 0 && size[1] > 0);
 	}
 	planes() {
 		return this.node.parentContainer.peek()?.clippingRect.peek()?.planes ?? [];
@@ -2892,13 +2922,16 @@ var UIKitNodeBinding = class UIKitNodeBinding {
 		if (kind === "image") {
 			const { cornerRadius: rawCornerRadius, ...imageStyle } = style;
 			const cornerRadius = numericCornerRadius(rawCornerRadius);
+			const hasExplicitWidth = imageStyle.width !== void 0 && imageStyle.width !== "auto";
+			const hasExplicitHeight = imageStyle.height !== void 0 && imageStyle.height !== "auto";
 			return {
 				...imageStyle,
+				...hasExplicitWidth && hasExplicitHeight && imageStyle.objectFit !== "contain" ? { keepAspectRatio: false } : {},
 				...imageStyle.color === void 0 ? {} : { color: normalizeAlphaHexColor(imageStyle.color) },
-				borderTopLeftRadius: cornerRadius,
-				borderTopRightRadius: cornerRadius,
-				borderBottomLeftRadius: cornerRadius,
-				borderBottomRightRadius: cornerRadius,
+				borderTopLeftRadius: imageStyle.borderTopLeftRadius !== void 0 ? numericCornerRadius(imageStyle.borderTopLeftRadius) : cornerRadius,
+				borderTopRightRadius: imageStyle.borderTopRightRadius !== void 0 ? numericCornerRadius(imageStyle.borderTopRightRadius) : cornerRadius,
+				borderBottomLeftRadius: imageStyle.borderBottomLeftRadius !== void 0 ? numericCornerRadius(imageStyle.borderBottomLeftRadius) : cornerRadius,
+				borderBottomRightRadius: imageStyle.borderBottomRightRadius !== void 0 ? numericCornerRadius(imageStyle.borderBottomRightRadius) : cornerRadius,
 				pointerEvents: this.element.xb?.pointerEvents ?? "auto"
 			};
 		}
@@ -3035,6 +3068,7 @@ var UIKitNodeBinding = class UIKitNodeBinding {
 		imageTextureLoader.loadAsync(source).then((texture) => {
 			texture.colorSpace = THREE.SRGBColorSpace;
 			texture.matrixAutoUpdate = false;
+			if (texture.image && typeof texture.image === "object") normalizeSourceImageSize(texture.image);
 			if (this.disposed) {
 				texture.dispose();
 				return;
@@ -3481,11 +3515,12 @@ var IconCache = class {
 	}
 };
 function createSliderContent(panel) {
-	const thumbSize = 28;
+	const thumbSize = 16;
+	const trackHeight = 4;
 	const rail = new Container({
 		positionType: "absolute",
-		positionLeft: thumbSize / 2,
-		positionRight: thumbSize / 2,
+		positionLeft: 0,
+		positionRight: 0,
 		positionTop: "50%",
 		transformTranslateY: "-50%",
 		height: thumbSize,
@@ -3497,9 +3532,9 @@ function createSliderContent(panel) {
 		positionRight: 0,
 		positionTop: "50%",
 		transformTranslateY: "-50%",
-		height: 10,
+		height: trackHeight,
 		backgroundColor: "transparent",
-		borderRadius: 5,
+		borderRadius: trackHeight / 2,
 		pointerEvents: "none"
 	});
 	const fill = new Container({
@@ -3507,8 +3542,8 @@ function createSliderContent(panel) {
 		positionLeft: 0,
 		positionTop: "50%",
 		transformTranslateY: "-50%",
-		height: 10,
-		borderRadius: 5,
+		height: trackHeight,
+		borderRadius: trackHeight / 2,
 		pointerEvents: "none",
 		zIndexOffset: 1
 	});

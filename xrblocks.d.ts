@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { Intersection, Object3D as Object3D$1, Sphere } from "three";
+import { Intersection, Sphere } from "three";
 import { Pass } from "three/addons/postprocessing/Pass.js";
 import { GLTF, GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { WebGPURenderer } from "three/webgpu";
@@ -39,7 +39,7 @@ type ThreePointerEvent = ThreeMouseEvent & {
   pointerId?: number;
 };
 //#endregion
-//#region node_modules/@pmndrs/uikit/dist/panel/interaction-panel-mesh.d.ts
+//#region node_modules/@pmndrs/uikit/dist/panel/interaction/pointer-events.d.ts
 type AllowedPointerEventsType = 'all' | ((poinerId: number, pointerType: string, pointerState: unknown) => boolean) | {
   allow: string | Array<string>;
 } | {
@@ -49,7 +49,7 @@ declare module 'three' {
   interface Object3D extends PointerEventsProperties {
     spherecast?(sphere: Sphere, intersects: Array<Intersection>): void;
     intersectChildren?: boolean;
-    interactableDescendants?: Array<Object3D$1>;
+    interactableDescendants?: Array<Object3D>;
     ancestorsHaveListeners?: boolean;
     defaultPointerEvents?: PointerEventsProperties['pointerEvents'];
   }
@@ -1345,6 +1345,9 @@ declare class Reticle extends THREE.Mesh<THREE.BufferGeometry, THREE.Material> {
   private readonly newRotation;
   private readonly objectRotation;
   private readonly normalVector;
+  private readonly worldPosition;
+  private pressedScale;
+  private distanceScale;
   /**
    * Creates an instance of Reticle.
    * @param innerRadius - Inner radius of the reticle ring geometry.
@@ -1393,12 +1396,22 @@ declare class Reticle extends THREE.Mesh<THREE.BufferGeometry, THREE.Material> {
    */
   setPressedAmount(pressedAmount: number): void;
   /**
+   * Scales the reticle with its distance from the viewer so it stays legible
+   * far away without covering nearby UI. The scale is 1 at 1 meter and
+   * changes by 0.5 per meter, multiplied by the pressed scale.
+   * @param cameraWorldPosition - The viewer's world-space position.
+   */
+  updateDistanceScale(cameraWorldPosition: THREE.Vector3): void;
+  /** Returns the reticle to its base size, keeping the pressed scale. */
+  resetDistanceScale(): void;
+  /**
    * Shows a ring around the reticle while it hovers over an interactable
    * object.
    */
   setHovering(hovering: boolean): void;
   /** Releases the GPU resources owned by this Reticle. */
   dispose(): void;
+  private updateScale;
   /**
    * Overrides the default raycast method to make the reticle ignored by
    * raycasters.
@@ -3116,6 +3129,16 @@ export declare class ReticleOptions {
    * found. Set to 0 to hide the reticle on a miss.
    */
   defaultRenderDistance: number;
+  /**
+   * Scales reticles with their distance from the viewer, so they stay legible
+   * far away without covering nearby UI. Turn off to keep a fixed world size.
+   */
+  scaleWithDistance: boolean;
+  /**
+   * Shows a ring around a reticle over interactive targets. The reticle's dark
+   * border already outlines it, so this is off by default.
+   */
+  hoverRing: boolean;
 }
 export type RaycastMode = 'continuous' | 'select';
 export declare class InteractionOptions {
@@ -3501,10 +3524,17 @@ export interface TranslateOptions {
   /** Camera-facing rotation smoothing, matching `FaceCamera`. */
   smoothing?: number;
   /**
+   * Smooths the pointer ray that drives a ray move. Small hand movements as
+   * the pinch starts do not move the owner, then the ray blends in and eases
+   * toward the pointer, catching up faster when the hand reverses direction.
+   * Defaults to false.
+   */
+  raySmoothing?: boolean;
+  /**
    * Scales the owner with its distance from the camera while translating,
-   * matching Android XR panels: apparent size stays constant up to 1.75 meters,
-   * then scale grows at 0.5 meters per meter so farther owners look smaller.
-   * Clamped by the Scale action limits.
+   * so owners look larger when pulled closer and smaller when pushed away. A
+   * ray grab point keeps its place on the owner as it scales. Clamped by the
+   * Scale action limits.
    */
   scaleWithDistance?: boolean;
   /**
@@ -9755,6 +9785,11 @@ export declare class Core {
    */
   private physicsStep;
   /**
+   * Shares one reticle options object between the app and the reticle
+   * presenter, so options set before init and changed later both apply.
+   */
+  private applyReticleOptions;
+  /**
    * Lifecycle callback executed when an XR session starts. Notifies all active
    * scripts.
    * @param session - The newly started WebXR session.
@@ -10677,6 +10712,10 @@ interface UIStateStyle {
   borderColor?: Paint;
   borderWidth?: number;
   borderRadius?: number;
+  borderTopLeftRadius?: number;
+  borderTopRightRadius?: number;
+  borderBottomRightRadius?: number;
+  borderBottomLeftRadius?: number;
 }
 interface UIStyle extends UIStateStyle {
   width?: UIUnit;

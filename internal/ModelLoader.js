@@ -15,17 +15,20 @@
 *
 * @file xrblocks.js
 * @version v0.24.0
-* @commitid 9a4ab86
-* @builddate 2026-11-09T16:54:38.149Z
+* @commitid b31c1d0
+* @builddate 2026-11-11T16:49:08.213Z
 * @description XR Blocks SDK, built from source with the above commit ID.
 * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
 * and follow rules below:
 * 1. Include the following importmap for maximum compatibility:
 "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js",
 "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/",
-"@pmndrs/uikit": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit@1.0.64/dist/index.min.js",
-"@pmndrs/uikit-pub-sub": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit-pub-sub@1.0.64/dist/index.min.js",
-"@pmndrs/msdfonts": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.64/dist/index.min.js",
+"@pmndrs/uikit": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit@1.0.77/dist/index.min.js",
+"@pmndrs/uikit-pub-sub": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit-pub-sub@1.0.77/dist/index.min.js",
+"@pmndrs/msdfonts": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.77/dist/index.min.js",
+"@pmndrs/msdfonts/inter": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.77/dist/inter.js",
+"@pmndrs/msdfonts/": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.77/dist/",
+"zod": "https://cdn.jsdelivr.net/npm/zod@4.4.3/+esm",
 "@preact/signals-core": "https://cdn.jsdelivr.net/npm/@preact/signals-core@1.14.0/dist/signals-core.mjs",
 "yoga-layout/load": "https://cdn.jsdelivr.net/npm/yoga-layout@3.2.1/dist/src/load.js",
 "lit": "https://esm.sh/lit@3.3.1",
@@ -44,6 +47,7 @@ import { A as isUIElement, F as suspendTransformScripts, I as MeshScript, L as S
 import { a as HAND_JOINT_IDX_CONNECTION_MAP, n as DEFAULT_DEVICE_CAMERA_WIDTH, r as HAND_BONE_IDX_CONNECTION_MAP } from "./constants.js";
 import { h as deepMerge, l as SimulatorOptions, m as deepFreeze, p as HAND_JOINT_NAMES } from "./HandPoses.js";
 import { c as isWebGPURenderer, i as disposeObjectTree, l as isSerializerRenderer, o as RendererHolder, r as disposeObjectChildren, s as assertWebGLRenderer, t as disposeMaterial } from "./ThreeDisposal.js";
+import { t as RETICLE_GRADIENT_START_RATIO } from "./ReticleConstants.js";
 import * as THREE from "three";
 import { FullScreenQuad, Pass } from "three/addons/postprocessing/Pass.js";
 import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";
@@ -4143,6 +4147,8 @@ var ReticleOptions = class {
 		this.enabled = true;
 		this.projectOnDepthMesh = false;
 		this.defaultRenderDistance = 0;
+		this.scaleWithDistance = true;
+		this.hoverRing = false;
 	}
 };
 var InteractionOptions = class {
@@ -5182,10 +5188,12 @@ function hasFinitePlanarBounds(bounds) {
 //#region src/interaction/ReticlePresenter.ts
 const NORMAL_MATRIX = new THREE.Matrix3();
 const WORLD_NORMAL = new THREE.Vector3();
+const CAMERA_POSITION = new THREE.Vector3();
 /** Presents resolved state. It never performs a raycast or changes targeting. */
 var ReticlePresenter = class {
-	constructor(options = new ReticleOptions()) {
+	constructor(options = new ReticleOptions(), camera) {
 		this.options = options;
+		this.camera = camera;
 	}
 	present(snapshot, resolved) {
 		const reticle = snapshot.controller.reticle;
@@ -5215,6 +5223,7 @@ var ReticlePresenter = class {
 			reticle.position.copy(ray.origin).addScaledVector(reticle.direction, this.options.defaultRenderDistance);
 			WORLD_NORMAL.copy(reticle.direction).negate();
 			reticle.setRotationFromNormalVector(WORLD_NORMAL);
+			this.place(reticle);
 			return;
 		}
 		const { intersection } = resolved;
@@ -5222,7 +5231,7 @@ var ReticlePresenter = class {
 		reticle.intersection = intersection;
 		const showsTarget = resolved.reticleMode === "auto";
 		reticle.targetObject = showsTarget ? resolved.target : void 0;
-		reticle.setHovering(showsTarget && resolved.target !== void 0);
+		reticle.setHovering(this.options.hoverRing && showsTarget && resolved.target !== void 0);
 		reticle.position.copy(intersection.point);
 		if (intersection.normal) {
 			resolved.hitObject.updateWorldMatrix(true, false);
@@ -5230,6 +5239,17 @@ var ReticlePresenter = class {
 			WORLD_NORMAL.copy(intersection.normal).applyMatrix3(NORMAL_MATRIX).normalize();
 		} else WORLD_NORMAL.copy(ray.direction).negate().normalize();
 		reticle.setRotationFromNormalVector(WORLD_NORMAL);
+		this.place(reticle);
+	}
+	/** Lifts the reticle off its surface along WORLD_NORMAL and scales it. */
+	place(reticle) {
+		reticle.position.addScaledVector(WORLD_NORMAL, reticle.offset);
+		if (!this.camera || !this.options.scaleWithDistance) {
+			reticle.resetDistanceScale();
+			return;
+		}
+		this.camera.getWorldPosition(CAMERA_POSITION);
+		reticle.updateDistanceScale(CAMERA_POSITION);
 	}
 	clear(controller) {
 		if (!controller.reticle) return;
@@ -5248,12 +5268,23 @@ const BACK = Object.freeze(new THREE.Vector3(0, 0, 1));
 const LEFT = Object.freeze(new THREE.Vector3(-1, 0, 0));
 const RIGHT = Object.freeze(new THREE.Vector3(1, 0, 0));
 const ZERO_VECTOR3 = Object.freeze(new THREE.Vector3(0, 0, 0));
+/**
+* Returns the share of the remaining gap that exponential smoothing with a
+* `timeConstantSeconds` closes over `deltaSeconds`, independent of frame rate.
+*/
+function smoothingAlpha(deltaSeconds, timeConstantSeconds) {
+	return 1 - Math.exp(-deltaSeconds / timeConstantSeconds);
+}
+/** Returns the time constant, in seconds, of a `smoothing` rate. */
+function smoothingTimeConstant(smoothing) {
+	return 1 / (smoothing * 60);
+}
 //#endregion
 //#region src/utils/FaceCameraMath.ts
 const DEFAULT_FACE_CAMERA_SMOOTHING = .1;
 const DEFAULT_FACE_CAMERA_CAPSULE_HALF_HEIGHT = .25;
 function faceCameraSlerpAlpha(smoothing, deltaSeconds) {
-	return 1 - Math.exp(-smoothing * deltaSeconds * 60);
+	return smoothingAlpha(deltaSeconds, smoothingTimeConstant(smoothing));
 }
 /** Computes the local rotation that makes an object face the camera. */
 function faceCameraQuaternion(worldPosition, cameraPosition, parentWorldQuaternion, mode = "capsule", capsuleHalfHeight = DEFAULT_FACE_CAMERA_CAPSULE_HALF_HEIGHT, result = new THREE.Quaternion(), scratch) {
@@ -5270,6 +5301,11 @@ function faceCameraQuaternion(worldPosition, cameraPosition, parentWorldQuaterni
 }
 //#endregion
 //#region src/interaction/manipulation/ManipulationMath.ts
+/**
+* Time constant, in seconds, of the ease toward the pointer used by ray
+* smoothing.
+*/
+const MANIPULATION_EASE_SECONDS = .072;
 const EPSILON = 1e-8;
 function worldPositionToLocal(worldPosition, parentWorldMatrix) {
 	if (!parentWorldMatrix) return worldPosition.clone();
@@ -5608,14 +5644,66 @@ const PUSH_PULL_DEADZONE = .15;
 const XR_STANDARD_THUMBSTICK_Y_AXIS = 3;
 const DEFAULT_PUSH_PULL_SPEED = 1.5;
 const MIN_RAY_DEPTH = .05;
-const CONSTANT_SIZE_DISTANCE = 1.75;
-const FAR_SCALE_RATE = .5;
+/**
+* Squared length below which a ray's cross product with world up is treated
+* as zero, meaning the ray points straight up or down and the ray frame uses
+* RAY_FRAME_FALLBACK_AXIS instead.
+*/
+const RAY_FRAME_PARALLEL_EPSILON_SQ = 1e-8;
+/**
+* Distance, in meters, at which the scaled distance equals the real one.
+*/
+const REFERENCE_SCALE_DISTANCE = 1.75;
+/**
+* Change in the scaled distance per meter of real distance, so owners look
+* larger closer and smaller farther.
+*/
+const DISTANCE_SCALE_RATE$1 = .5;
+/**
+* Hand travel, in meters, that the ray ignores as the pinch starts.
+*/
+const RAY_DEADZONE_DISTANCE = .03;
+/** Hand turn, in radians, that the ray ignores as the pinch starts. */
+const RAY_DEADZONE_ANGLE = THREE.MathUtils.degToRad(1.6);
+/** Hand turn, in radians, by which the ray follows the hand fully. */
+const RAY_FULL_ANGLE = THREE.MathUtils.degToRad(7);
+/** Shorter origin time constant while the hand reverses, in seconds. */
+const RAY_REVERSAL_SMOOTHING_TIME = .018;
+/** Angle between the remaining gap and the motion where reversal begins. */
+const RAY_REVERSAL_START_ANGLE = THREE.MathUtils.degToRad(45);
+/** Angle where the reversal time constant applies fully. */
+const RAY_REVERSAL_FULL_ANGLE = THREE.MathUtils.degToRad(100);
+/** Speed, in meters per second, below which the smoothed origin is still. */
+const RAY_MIN_VELOCITY = .001;
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const RAY_FRAME_FALLBACK_AXIS = new THREE.Vector3(0, 0, 1);
+/** Grab offset used when a move has no ray capture. */
+const ZERO_OFFSET = new THREE.Vector3();
+const _rawDirection = new THREE.Vector3();
+const _targetOrigin = new THREE.Vector3();
+const _targetDirection = new THREE.Vector3();
+const _previousOrigin = new THREE.Vector3();
+const _gap = new THREE.Vector3();
+const _rayPoint = new THREE.Vector3();
+const _rayOffset = new THREE.Vector3();
+const _rayFrameRotation = new THREE.Quaternion();
+const _probePosition = new THREE.Vector3();
+const _limitOffset = new THREE.Vector3();
+const _frameForward = new THREE.Vector3();
+const _frameRight = new THREE.Vector3();
+const _frameUp = new THREE.Vector3();
+const _frameBasis = new THREE.Matrix4();
+const _slerpRotation = new THREE.Quaternion();
+const _slerpPartial = new THREE.Quaternion();
 /** Captures and proposes Translate data. It does not own sessions or events. */
 var TranslateDriver = class {
 	constructor(camera, timer) {
 		this.camera = camera;
 		this.timer = timer;
 		this.action = ManipulationAction.Translate;
+		this.viewerPosition = new THREE.Vector3();
+		this.smoothedRay = new THREE.Ray();
+		this.limitCorrection = new THREE.Vector3();
 	}
 	capture(session) {
 		const snapshot = session.primary.snapshot;
@@ -5639,28 +5727,42 @@ var TranslateDriver = class {
 			scaleOptions: cloneScaleOptions(session.config.scale)
 		};
 		if (snapshot.ray) {
-			baseline.rayDepth = snapshot.ray.direction.dot(session.primary.capture.point.clone().sub(snapshot.ray.origin));
-			baseline.rayPoint = snapshot.ray.at(baseline.rayDepth, new THREE.Vector3()).clone();
+			const { origin, direction } = snapshot.ray;
+			baseline.rayDepth = direction.dot(session.primary.capture.point.clone().sub(origin));
+			const rayPoint = snapshot.ray.at(baseline.rayDepth, new THREE.Vector3());
+			baseline.rayOffset = worldPosition.clone().sub(rayPoint);
+			if (options.faceCamera) baseline.rayOffset.applyQuaternion(rayFrame(direction, _rayFrameRotation).invert());
+			if (options.raySmoothing) {
+				const unit = direction.clone().normalize();
+				baseline.raySmoothing = {
+					startOrigin: origin.clone(),
+					startDirection: unit.clone(),
+					origin: origin.clone(),
+					direction: unit,
+					velocity: new THREE.Vector3(),
+					weight: 0
+				};
+			}
 		}
 		return baseline;
 	}
 	propose(session, baseline) {
 		const snapshot = session.primary.snapshot;
-		const viewer = this.camera?.getWorldPosition(new THREE.Vector3());
-		let delta;
+		const viewer = this.camera?.getWorldPosition(this.viewerPosition);
 		let point;
-		if (snapshot.ray && baseline.rayDepth !== void 0 && baseline.rayPoint) {
-			baseline.rayDepth = this.pushPull(session, baseline, snapshot.ray, baseline.rayDepth, viewer);
-			point = snapshot.ray.at(baseline.rayDepth, new THREE.Vector3());
-			delta = point.clone().sub(baseline.rayPoint);
+		let worldPosition;
+		if (snapshot.ray && baseline.rayDepth !== void 0 && baseline.rayOffset) {
+			const ray = this.smoothRay(baseline, snapshot.ray);
+			baseline.rayDepth = this.pushPull(session, baseline, ray, baseline.rayDepth, viewer);
+			point = ray.at(baseline.rayDepth, new THREE.Vector3());
+			worldPosition = this.rayWorldPosition(baseline, ray, baseline.rayDepth, viewer, new THREE.Vector3());
 		} else {
-			delta = snapshot.position.clone().sub(baseline.sourcePosition);
-			point = session.primary.capture.point.clone().add(delta);
+			const moved = snapshot.position.clone().sub(baseline.sourcePosition);
+			point = session.primary.capture.point.clone().add(moved);
+			worldPosition = baseline.worldPosition.clone().add(moved);
 		}
-		const worldPosition = baseline.worldPosition.clone().add(delta);
-		const correction = this.limitDistance(baseline, worldPosition, viewer);
-		delta.add(correction);
-		point.add(correction);
+		point.add(this.limitDistance(baseline, worldPosition, viewer, this.limitCorrection));
+		const delta = worldPosition.clone().sub(baseline.worldPosition);
 		const parent = session.owner.parent;
 		parent?.updateWorldMatrix(true, false);
 		const localPosition = worldPositionToLocal(worldPosition, parent?.matrixWorld);
@@ -5679,23 +5781,71 @@ var TranslateDriver = class {
 				if (!isFiniteVector(localPosition)) return;
 				session.owner.position.copy(localPosition);
 				if (baseline.cameraDistance !== void 0) session.owner.scale.copy(scale);
-				if (localQuaternion) {
-					const speed = delta.length();
-					const effectiveAlpha = Math.min(1, rotationAlpha + speed * 3);
-					session.owner.quaternion.slerp(localQuaternion, effectiveAlpha);
-				}
+				if (localQuaternion) session.owner.quaternion.slerp(localQuaternion, rotationAlpha);
 			}
 		};
 	}
 	/**
-	* Moves `worldPosition` back within the distance limits from the viewer and
-	* returns the correction that was applied.
+	* Returns the ray that drives the move. With `raySmoothing`, the raw ray is
+	* held by the deadzone, blended in by the unlock ramp, and then eased once
+	* per frame. Without a timer it follows the blended ray directly. The
+	* smoothed ray is reused by the next call, so callers must not keep it.
 	*/
-	limitDistance(baseline, worldPosition, viewer) {
-		const correction = new THREE.Vector3();
+	smoothRay(baseline, raw) {
+		const state = baseline.raySmoothing;
+		if (!state) return raw;
+		const rawDirection = _rawDirection.copy(raw.direction).normalize();
+		state.weight = Math.max(state.weight, rayUnlockWeight(state, raw.origin, rawDirection));
+		const targetOrigin = _targetOrigin.copy(state.startOrigin).lerp(raw.origin, state.weight);
+		const targetDirection = slerpDirection(_targetDirection.copy(state.startDirection), rawDirection, state.weight);
+		if (this.timer) this.easeRay(state, targetOrigin, targetDirection, this.timer);
+		else {
+			state.origin.copy(targetOrigin);
+			state.direction.copy(targetDirection);
+		}
+		return this.smoothedRay.set(state.origin, state.direction);
+	}
+	/**
+	* Eases the smoothed ray toward the target ray, once per frame, and tracks
+	* the smoothed origin's velocity for reversals.
+	*/
+	easeRay(state, targetOrigin, targetDirection, timer) {
+		const time = timer.getElapsed();
+		const deltaTime = timer.getDelta();
+		if (state.time === time) return;
+		state.time = time;
+		if (!isPositiveFinite(deltaTime)) return;
+		const previous = _previousOrigin.copy(state.origin);
+		state.origin.lerp(targetOrigin, smoothingAlpha(deltaTime, originSmoothingTime(state, targetOrigin)));
+		state.velocity.subVectors(state.origin, previous).divideScalar(deltaTime);
+		slerpDirection(state.direction, targetDirection, smoothingAlpha(deltaTime, MANIPULATION_EASE_SECONDS));
+	}
+	/**
+	* Writes the owner's world position for a grab point at `depth` along `ray`
+	* into `target`. The capture offset turns with the ray when the owner faces
+	* the camera and scales with the owner when `scaleWithDistance` is on.
+	*/
+	rayWorldPosition(baseline, ray, depth, viewer, target) {
+		const point = ray.at(depth, _rayPoint);
+		const offset = _rayOffset.copy(baseline.rayOffset ?? ZERO_OFFSET);
+		if (baseline.options.faceCamera) offset.applyQuaternion(rayFrame(ray.direction, _rayFrameRotation));
+		const position = target.copy(point).add(offset);
+		if (baseline.cameraDistance === void 0 || !viewer) return position;
+		for (let pass = 0; pass < 2; pass++) {
+			const factor = this.distanceScaleFactor(baseline, position, viewer);
+			position.copy(point).addScaledVector(offset, factor);
+		}
+		return position;
+	}
+	/**
+	* Moves `worldPosition` back within the distance limits from the viewer and
+	* writes the correction that was applied into `correction`.
+	*/
+	limitDistance(baseline, worldPosition, viewer, correction) {
+		correction.set(0, 0, 0);
 		const limits = baseline.distanceLimits;
 		if (!limits || !viewer) return correction;
-		const offset = worldPosition.clone().sub(viewer);
+		const offset = _limitOffset.copy(worldPosition).sub(viewer);
 		const distance = offset.length();
 		if (!isPositiveFinite(distance)) return correction;
 		const clamped = THREE.MathUtils.clamp(distance, limits.min, limits.max);
@@ -5719,9 +5869,8 @@ var TranslateDriver = class {
 		const next = Math.max(Math.min(MIN_RAY_DEPTH, depth), depth * Math.exp(-stick * speed * this.timer.getDelta()));
 		const limits = baseline.distanceLimits;
 		if (!limits || !viewer) return next;
-		const distanceAt = (value) => ray.at(value, new THREE.Vector3()).sub(baseline.rayPoint).add(baseline.worldPosition).distanceTo(viewer);
-		const current = distanceAt(depth);
-		const candidate = distanceAt(next);
+		const current = this.rayWorldPosition(baseline, ray, depth, viewer, _probePosition).distanceTo(viewer);
+		const candidate = this.rayWorldPosition(baseline, ray, next, viewer, _probePosition).distanceTo(viewer);
 		if (candidate > current && candidate > limits.max) return depth;
 		if (candidate < current && candidate < limits.min) return depth;
 		return next;
@@ -5729,12 +5878,55 @@ var TranslateDriver = class {
 	scaleWithDistance(baseline, worldPosition, viewer) {
 		const scale = baseline.scale.clone();
 		if (baseline.cameraDistance === void 0 || !viewer) return scale;
+		return scale.multiplyScalar(this.distanceScaleFactor(baseline, worldPosition, viewer));
+	}
+	/** Returns the distance scale factor at `worldPosition`, or 1 if invalid. */
+	distanceScaleFactor(baseline, worldPosition, viewer) {
+		if (baseline.cameraDistance === void 0) return 1;
 		const factor = clampScaleFactor(sizeDistance(viewer.distanceTo(worldPosition)) / sizeDistance(baseline.cameraDistance), baseline.scale, baseline.scaleOptions);
-		return isPositiveFinite(factor) ? scale.multiplyScalar(factor) : scale;
+		return isPositiveFinite(factor) ? factor : 1;
 	}
 };
+/**
+* Returns the distance that sets an owner's scale at a real `distance` from
+* the viewer. Scale is the ratio of this value now to its value at capture.
+* It stays positive for any distance, since DISTANCE_SCALE_RATE is below 1.
+*/
 function sizeDistance(distance) {
-	return distance <= CONSTANT_SIZE_DISTANCE ? distance : CONSTANT_SIZE_DISTANCE + FAR_SCALE_RATE * (distance - CONSTANT_SIZE_DISTANCE);
+	return REFERENCE_SCALE_DISTANCE + DISTANCE_SCALE_RATE$1 * (distance - REFERENCE_SCALE_DISTANCE);
+}
+/**
+* Writes the rotation of the ray-hit frame into `target`: forward along
+* `direction`, right horizontal, and up perpendicular to both.
+*/
+function rayFrame(direction, target) {
+	const forward = _frameForward.copy(direction).normalize();
+	const right = _frameRight.copy(forward).cross(WORLD_UP);
+	if (right.lengthSq() < RAY_FRAME_PARALLEL_EPSILON_SQ) right.copy(forward).cross(RAY_FRAME_FALLBACK_AXIS);
+	right.normalize();
+	const up = _frameUp.copy(right).cross(forward);
+	return target.setFromRotationMatrix(_frameBasis.makeBasis(right, up, forward.negate()));
+}
+/** Deadzone and ramp weight: 0 inside the deadzone, 1 at full engagement. */
+function rayUnlockWeight(state, origin, direction) {
+	const distance = origin.distanceTo(state.startOrigin);
+	const angle = direction.angleTo(state.startDirection);
+	return Math.max(THREE.MathUtils.clamp((distance - RAY_DEADZONE_DISTANCE) / .07, 0, 1), THREE.MathUtils.clamp((angle - RAY_DEADZONE_ANGLE) / (RAY_FULL_ANGLE - RAY_DEADZONE_ANGLE), 0, 1));
+}
+/**
+* Origin time constant, shortened as the remaining gap turns against the
+* smoothed velocity so reversals do not lag behind the hand.
+*/
+function originSmoothingTime(state, target) {
+	const gap = _gap.subVectors(target, state.origin);
+	if (state.velocity.length() < RAY_MIN_VELOCITY || gap.lengthSq() === 0) return MANIPULATION_EASE_SECONDS;
+	const reversal = THREE.MathUtils.clamp((gap.angleTo(state.velocity) - RAY_REVERSAL_START_ANGLE) / (RAY_REVERSAL_FULL_ANGLE - RAY_REVERSAL_START_ANGLE), 0, 1);
+	return THREE.MathUtils.lerp(MANIPULATION_EASE_SECONDS, RAY_REVERSAL_SMOOTHING_TIME, reversal);
+}
+/** Rotates unit vector `from` toward unit vector `to` by `t` in place. */
+function slerpDirection(from, to, t) {
+	const rotation = _slerpRotation.setFromUnitVectors(from, to);
+	return from.applyQuaternion(_slerpPartial.identity().slerp(rotation, t)).normalize();
 }
 /** Returns the push/pull speed, or undefined when disabled or invalid. */
 function resolvePushPull(value) {
@@ -6192,7 +6384,7 @@ var Interaction = class {
 		this.scene = dependencies.scene;
 		this.manipulation = new ManipulationManager((script, event) => this.callbacks.invokeManipulation(script, event), (controller) => this.suppressedUntilRelease.add(controller), dependencies.camera, dependencies.timer);
 		this.reticleOptions = dependencies.reticleOptions ?? new ReticleOptions();
-		this.reticle = dependencies.reticle ?? new ReticlePresenter(this.reticleOptions);
+		this.reticle = dependencies.reticle ?? new ReticlePresenter(this.reticleOptions, dependencies.camera);
 		this.longSelectDuration = dependencies.longSelectDuration ?? DEFAULT_LONG_SELECT_DURATION;
 		this.raycastMode = dependencies.raycastMode ?? "continuous";
 		this.resolver = new HitResolver(this.callbacks, this.manipulation, this.registry);
@@ -9152,13 +9344,18 @@ var Depth = class Depth {
 	}
 };
 //#endregion
+//#region src/utils/GlslUtils.ts
+/** Formats a number as a GLSL float literal, which needs a decimal point. */
+const glslFloat = (value) => Number.isInteger(value) ? `${value}.0` : `${value}`;
+//#endregion
 //#region src/interaction/reticle/ReticleShader.ts
 /**
 * Shader for the Reticle UI component.
 *
-* This shader renders a dynamic, anti-aliased circle that provides visual
-* feedback for user interaction. It can smoothly transition between a hollow
-* ring (idle/hover state) and a solid, shrinking circle (pressed state).
+* This shader renders a dynamic, anti-aliased circle with a dark outer border
+* that provides visual feedback for user interaction. Its translucent inner
+* fill smoothly turns opaque in the pressed state while the ring keeps its
+* proportions.
 * The anti-aliasing is achieved using screen-space derivatives (fwidth) to
 * ensure crisp edges at any resolution or distance.
 */
@@ -9187,10 +9384,11 @@ const ReticleShader = {
 
   varying vec2 vTexCoord;
 
+  const float RETICLE_GRADIENT_START_RATIO = ${glslFloat(RETICLE_GRADIENT_START_RATIO)};
+
   void main(void) {
     // Distance from center of quad.
     highp float dist = distance(vTexCoord, vec2(0.5f, 0.5f));
-    if (dist > 0.45) discard;
 
     // Get the rate of change of dist on x and y.
     highp vec2 dist_grad = vec2(dFdx(dist), dFdy(dist));
@@ -9215,28 +9413,14 @@ const ReticleShader = {
     const vec4 outer_ring_color = vec4(0.077, 0.077, 0.077, 1.0);
     // 0.5 - stoke_width (0.75dp = 0.04 approx)
     const float gradient_end = 0.46;
-    // 73% of gradient_end
-    const float gradient_start = 0.33;
-    // gradient_end - 130% stoke_width. Additional 30% to account for the down scaling.
-    const float pressed_inner_radius = 0.41;
+    const float gradient_start = gradient_end * RETICLE_GRADIENT_START_RATIO;
 
-    vec4 unpressed_inner_color =
-            mix(inner_base_color, inner_gradient_color,
+    vec4 inner_color = mix(inner_base_color, pressed_inner_color, uPressed);
+    vec4 gradient_color =
+            mix(inner_color, inner_gradient_color,
                     smoothstep(gradient_start, gradient_end, dist));
-    vec4 unpressed_color =
-            mix(unpressed_inner_color, outer_ring_color,
-                    step(gradient_end, dist));
-
-    // Builds a smooth gradient to fade between colors.
-    highp float smooth_distance = antialias_dist * 4.0;
-    float percent_to_inner_rad = max(pressed_inner_radius - dist, 0.0) / pressed_inner_radius;
-    highp float pressed_color_t = 1.0 - percent_to_inner_rad;
-    pressed_color_t -= (1.0 - smooth_distance);
-    pressed_color_t *= (1.0 / smooth_distance);
-    pressed_color_t = clamp(pressed_color_t, 0.0, 1.0);
-    vec4 pressed_color = mix(pressed_inner_color, outer_ring_color, pressed_color_t);
-
-    vec4 final_color = mix(unpressed_color, pressed_color, uPressed);
+    vec4 final_color =
+            mix(gradient_color, outer_ring_color, step(gradient_end, dist));
     gl_FragColor = final_color * outer_alpha;
     // Converts to straight alpha.
     gl_FragColor.rgb = gl_FragColor.rgb / max(gl_FragColor.a, 0.001);
@@ -9248,6 +9432,19 @@ const ReticleShader = {
 const HOVER_RING_BRIGHTNESS = .4;
 const HOVER_RING_OPACITY = .7;
 const RETICLE_RENDER_ORDER = 2e9;
+/** Scale of a fully pressed reticle relative to its unpressed size. */
+const PRESSED_SCALE = .7;
+/**
+* Change in distance scale per meter from REFERENCE_DISTANCE.
+*/
+const DISTANCE_SCALE_RATE = .5;
+/** Distance from the viewer, in meters, where the distance scale is 1. */
+const REFERENCE_DISTANCE = 1;
+/**
+* Default outer radius of the reticle in meters at REFERENCE_DISTANCE, before
+* it scales with distance.
+*/
+const DEFAULT_RETICLE_OUTER_RADIUS = .012;
 /**
 * A 3D visual marker used to indicate a user's aim or interaction
 * point in an XR scene. It orients itself to surfaces it intersects with and
@@ -9261,7 +9458,7 @@ var Reticle = class extends THREE.Mesh {
 	* @param depthTest - Determines if the reticle should be occluded by other
 	* objects. Defaults to `false` to ensure it is always visible.
 	*/
-	constructor(innerRadius = 0, outerRadius = .019, depthTest = false) {
+	constructor(innerRadius = 0, outerRadius = DEFAULT_RETICLE_OUTER_RADIUS, depthTest = false) {
 		const uniforms = {
 			uColor: { value: new THREE.Color(16777215) },
 			uPressed: { value: 0 }
@@ -9282,6 +9479,9 @@ var Reticle = class extends THREE.Mesh {
 		this.newRotation = new THREE.Quaternion();
 		this.objectRotation = new THREE.Quaternion();
 		this.normalVector = new THREE.Vector3();
+		this.worldPosition = new THREE.Vector3();
+		this.pressedScale = 1;
+		this.distanceScale = 1;
 		this.uniforms = uniforms;
 		this.depthTestEnabled = depthTest;
 		this.rotationSmoothing = .8;
@@ -9356,7 +9556,8 @@ var Reticle = class extends THREE.Mesh {
 	setPressed(pressed) {
 		this.uniforms.uPressed.value = pressed ? 1 : 0;
 		this.syncUniforms?.();
-		this.scale.setScalar(pressed ? .7 : 1);
+		this.pressedScale = pressed ? PRESSED_SCALE : 1;
+		this.updateScale();
 	}
 	/**
 	* Sets the pressed state as a continuous value for smooth animations.
@@ -9366,7 +9567,26 @@ var Reticle = class extends THREE.Mesh {
 	setPressedAmount(pressedAmount) {
 		this.uniforms.uPressed.value = pressedAmount;
 		this.syncUniforms?.();
-		this.scale.setScalar(lerp(1, .7, pressedAmount));
+		this.pressedScale = lerp(1, PRESSED_SCALE, pressedAmount);
+		this.updateScale();
+	}
+	/**
+	* Scales the reticle with its distance from the viewer so it stays legible
+	* far away without covering nearby UI. The scale is 1 at 1 meter and
+	* changes by 0.5 per meter, multiplied by the pressed scale.
+	* @param cameraWorldPosition - The viewer's world-space position.
+	*/
+	updateDistanceScale(cameraWorldPosition) {
+		this.worldPosition.copy(this.position);
+		if (this.parent) this.worldPosition.applyMatrix4(this.parent.matrixWorld);
+		const distance = this.worldPosition.distanceTo(cameraWorldPosition);
+		this.distanceScale = 1 + DISTANCE_SCALE_RATE * (distance - REFERENCE_DISTANCE);
+		this.updateScale();
+	}
+	/** Returns the reticle to its base size, keeping the pressed scale. */
+	resetDistanceScale() {
+		this.distanceScale = 1;
+		this.updateScale();
 	}
 	/**
 	* Shows a ring around the reticle while it hovers over an interactable
@@ -9385,6 +9605,9 @@ var Reticle = class extends THREE.Mesh {
 		this.intersection = void 0;
 		this.targetObject = void 0;
 		super.dispose();
+	}
+	updateScale() {
+		this.scale.setScalar(this.distanceScale * this.pressedScale);
 	}
 	/**
 	* Overrides the default raycast method to make the reticle ignored by

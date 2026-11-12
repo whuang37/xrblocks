@@ -15,8 +15,8 @@
 *
 * @file xrblocks.js
 * @version v0.24.0
-* @commitid b31c1d0
-* @builddate 2026-11-11T16:49:08.213Z
+* @commitid 8fed547
+* @builddate 2026-11-12T22:19:54.672Z
 * @description XR Blocks SDK, built from source with the above commit ID.
 * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
 * and follow rules below:
@@ -43,7 +43,7 @@ physical world space, also add locomotion methods like pinch to teleport.
 or generate from primitive shapes of use vox formats for voxels or
 lego-styles.
 */
-import { S as UIElement, b as objectIsDescendantOf, c as validateUIAppearance, v as registerSemanticControl } from "./UICard.js";
+import { S as UIElement, b as objectIsDescendantOf, c as validateUIAppearance, f as registerSemanticControl } from "./UICard.js";
 //#region src/ui/components/UIScrollView.ts
 const DEFAULT_VIEWPORT_HEIGHT = 240;
 const states$1 = /* @__PURE__ */ new WeakMap();

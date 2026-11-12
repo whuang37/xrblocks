@@ -15,8 +15,8 @@
 *
 * @file xrblocks.js
 * @version v0.24.0
-* @commitid b31c1d0
-* @builddate 2026-11-11T16:49:08.213Z
+* @commitid 8fed547
+* @builddate 2026-11-12T22:19:54.672Z
 * @description XR Blocks SDK, built from source with the above commit ID.
 * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
 * and follow rules below:
@@ -43,10 +43,11 @@ physical world space, also add locomotion methods like pinch to teleport.
 or generate from primitive shapes of use vox formats for voxels or
 lego-styles.
 */
-import { A as isUIElement, F as suspendTransformScripts, I as MeshScript, L as Script, P as resumeTransformScripts, T as getUIElementKind, _ as isSemanticControlDisabled, a as measureUICardMinContentWidth, b as objectIsDescendantOf, d as isManipulationActionEnabled, f as normalizeManipulationConfig, g as isSemanticControl, h as getSemanticControl, i as measureUICardContentHeight, l as cloneScaleOptions, m as ManipulationAction, n as getResolvedUICardSize, p as normalizeRotationAxis, u as isHandleAction } from "./UICard.js";
+import { A as isUIElement, F as suspendTransformScripts, I as MeshScript, L as Script, P as resumeTransformScripts, T as getUIElementKind, _ as normalizeRotationAxis, a as measureUICardMinContentWidth, b as objectIsDescendantOf, d as isSemanticControlDisabled, g as normalizeManipulationConfig, h as isManipulationActionEnabled, i as measureUICardContentHeight, l as getSemanticControl, m as isHandleAction, n as getResolvedUICardSize, p as cloneScaleOptions, u as isSemanticControl, v as ManipulationAction } from "./UICard.js";
 import { a as HAND_JOINT_IDX_CONNECTION_MAP, n as DEFAULT_DEVICE_CAMERA_WIDTH, r as HAND_BONE_IDX_CONNECTION_MAP } from "./constants.js";
 import { h as deepMerge, l as SimulatorOptions, m as deepFreeze, p as HAND_JOINT_NAMES } from "./HandPoses.js";
 import { c as isWebGPURenderer, i as disposeObjectTree, l as isSerializerRenderer, o as RendererHolder, r as disposeObjectChildren, s as assertWebGLRenderer, t as disposeMaterial } from "./ThreeDisposal.js";
+import { t as glslFloat } from "./GlslUtils.js";
 import { t as RETICLE_GRADIENT_START_RATIO } from "./ReticleConstants.js";
 import * as THREE from "three";
 import { FullScreenQuad, Pass } from "three/addons/postprocessing/Pass.js";
@@ -4929,10 +4930,9 @@ function touchBounds(object, bounds, recursive) {
 		const geometry = node.geometry;
 		if (geometry) {
 			const bounded = node;
-			if (bounded.boundingBox !== void 0) {
-				if (bounded.boundingBox === null) bounded.computeBoundingBox();
-				localBounds.copy(bounded.boundingBox);
-			} else {
+			if (bounded.boundingBox === null) bounded.computeBoundingBox();
+			if (bounded.boundingBox?.isBox3) localBounds.copy(bounded.boundingBox);
+			else {
 				if (geometry.boundingBox === null) geometry.computeBoundingBox();
 				localBounds.copy(geometry.boundingBox);
 			}
@@ -4954,14 +4954,78 @@ function cloneIntersection(intersection) {
 		uv1: intersection.uv1?.clone()
 	};
 }
+const OUTER_BAND_YIELD_DEPTH = .1;
+function outerBandDistance(intersection) {
+	return intersection.outerBandDistance;
+}
 /** Resolves one ordered raw hit list into one blocking surface and target. */
 var HitResolver = class {
 	constructor(callbacks, manipulation, registry = new HitRegistry()) {
 		this.callbacks = callbacks;
 		this.manipulation = manipulation;
 		this.registry = registry;
+		this.orderedHits = [];
+		this.passiveHits = [];
 	}
 	resolve(intersections, sourceType) {
+		const resolved = this.resolveOrdered(this.yieldOuterBands(intersections, sourceType), sourceType);
+		this.orderedHits.length = 0;
+		return resolved;
+	}
+	/**
+	* Moves band hits behind any interactive surface within
+	* OUTER_BAND_YIELD_DEPTH of the nearest hit, and orders those bands by their
+	* distance outside their owner, keeping ray order between equal distances.
+	* Other surfaces there, such as a wall, stay behind the bands. Returns
+	* `intersections` itself when the nearest hit is not a band.
+	*/
+	yieldOuterBands(intersections, sourceType) {
+		const first = intersections[0];
+		if (!first || outerBandDistance(first) === void 0) return intersections;
+		let end = 1;
+		while (end < intersections.length && intersections[end].distance - first.distance <= OUTER_BAND_YIELD_DEPTH) end++;
+		const target = this.orderedHits;
+		const passive = this.passiveHits;
+		target.length = 0;
+		passive.length = 0;
+		for (let index = 0; index < end; index++) {
+			const hit = intersections[index];
+			if (outerBandDistance(hit) !== void 0) continue;
+			if (this.takesHitFromBand(hit, sourceType)) target.push(hit);
+			else passive.push(hit);
+		}
+		const bandsStart = target.length;
+		for (let index = 0; index < end; index++) {
+			const hit = intersections[index];
+			const distance = outerBandDistance(hit);
+			if (distance === void 0) continue;
+			let slot = target.length;
+			while (slot > bandsStart) {
+				const previous = outerBandDistance(target[slot - 1]);
+				if (previous === void 0 || previous <= distance) break;
+				target[slot] = target[slot - 1];
+				slot--;
+			}
+			target[slot] = hit;
+		}
+		for (const hit of passive) target.push(hit);
+		passive.length = 0;
+		for (let index = end; index < intersections.length; index++) target.push(intersections[index]);
+		return target;
+	}
+	/**
+	* Returns whether a hit just behind a band takes the hit from it: one that
+	* resolves to a target through a manipulation, semantic control or target
+	* handler, or lands on an owner with manipulation, such as a card grabbed by
+	* its edge. Passive surfaces, such as a card without manipulation or a
+	* decorative panel, do not.
+	*/
+	takesHitFromBand(intersection, sourceType) {
+		const resolved = this.resolveOrdered([intersection], sourceType);
+		if (!resolved) return false;
+		return resolved.target !== void 0 || hasManipulableOwner(resolved.objectPath);
+	}
+	resolveOrdered(intersections, sourceType) {
 		for (const rawIntersection of intersections) {
 			const registered = this.registry.resolve(rawIntersection.object);
 			if (registered.physical.xb?.pointerEvents === "none") continue;
@@ -5025,6 +5089,18 @@ var HitResolver = class {
 		return "auto";
 	}
 };
+/**
+* Returns whether the nearest object on `path` that sets `manipulation`
+* enables it, before any object that disables interaction.
+*/
+function hasManipulableOwner(path) {
+	for (const object of path) {
+		if (object.xb?.interactionEnabled === false) return false;
+		const manipulation = object.xb?.manipulation;
+		if (manipulation !== void 0) return normalizeManipulationConfig(manipulation) !== void 0;
+	}
+	return false;
+}
 function hasPrivateAncestor(object) {
 	let current = object;
 	while (current) {
@@ -5303,7 +5379,7 @@ function faceCameraQuaternion(worldPosition, cameraPosition, parentWorldQuaterni
 //#region src/interaction/manipulation/ManipulationMath.ts
 /**
 * Time constant, in seconds, of the ease toward the pointer used by ray
-* smoothing.
+* smoothing and resize smoothing.
 */
 const MANIPULATION_EASE_SECONDS = .072;
 const EPSILON = 1e-8;
@@ -5349,6 +5425,17 @@ function scaleLimitVector(value, fallback, allowInfinity) {
 //#region src/interaction/manipulation/drivers/ResizeDriver.ts
 const DEFAULT_MIN_SIZE = .1;
 const SIZE_EPSILON = 1e-4;
+/**
+* With `overshoot`, the share of the pointer travel past a size limit that the
+* dragged edge still follows.
+*/
+const RESIZE_OVERSHOOT_RATIO = .045;
+/**
+* Farthest the dragged edge goes past a size limit, in meters.
+*/
+const RESIZE_OVERSHOOT_MAX = .021;
+const _fixed = new THREE.Vector2();
+const _offset = new THREE.Vector3();
 const CARD_ANCHORS = {
 	left: 0,
 	bottom: 0,
@@ -5358,7 +5445,8 @@ const CARD_ANCHORS = {
 };
 /** Captures and proposes corner Resize data for `UICard` owners. */
 var ResizeDriver = class {
-	constructor() {
+	constructor(timer) {
+		this.timer = timer;
 		this.action = ManipulationAction.Resize;
 		this.sessionCorners = /* @__PURE__ */ new WeakMap();
 	}
@@ -5368,12 +5456,20 @@ var ResizeDriver = class {
 		if (!card || !options) return void 0;
 		const anchor = options.anchor ?? "center";
 		if (anchor !== "center" && anchor !== "opposite") return void 0;
+		const smoothing = options.smoothing ?? false;
+		if (typeof smoothing !== "boolean") return void 0;
+		const overshoot = options.overshoot ?? false;
+		if (typeof overshoot !== "boolean") return void 0;
 		const minSize = resolveLimit(options.minSize, DEFAULT_MIN_SIZE);
-		const maxSize = resolveLimit(options.maxSize, Infinity);
+		const maxSize = resolveLimit(options.maxSize, 10);
 		if (!minSize || !maxSize || minSize.width > maxSize.width || minSize.height > maxSize.height) return;
+		let contentMinWidth;
 		if (options.minSize?.width === void 0) {
 			const content = measureUICardMinContentWidth(card);
-			if (content !== void 0) minSize.width = Math.min(Math.max(minSize.width, content), maxSize.width);
+			if (content !== void 0) {
+				contentMinWidth = Math.min(content, maxSize.width);
+				minSize.width = Math.max(minSize.width, contentMinWidth);
+			}
 		}
 		const width = card.size.width === "auto" ? getResolvedUICardSize(card)?.width : card.size.width;
 		if (width === void 0) return void 0;
@@ -5413,7 +5509,10 @@ var ResizeDriver = class {
 				minSize,
 				maxSize,
 				fitContent: options.minSize?.height === void 0,
-				preserveAspectRatio: options.preserveAspectRatio === true
+				preserveAspectRatio: options.preserveAspectRatio === true,
+				smoothing,
+				overshoot,
+				contentMinWidth
 			}
 		};
 	}
@@ -5421,10 +5520,11 @@ var ResizeDriver = class {
 		const card = asCard(session.owner);
 		const pointer = pointerOnPlane(session.primary.snapshot, baseline);
 		if (!card || !pointer) return void 0;
-		const { corner, cardAnchor, options } = baseline;
-		const fixed = options.anchor === "center" ? new THREE.Vector2(CARD_ANCHORS.center, CARD_ANCHORS.center) : new THREE.Vector2(1 - corner.x, 1 - corner.y);
-		let width = resizeAxis(baseline.width, pointer.x - baseline.pointer.x, corner.x, fixed.x, options.minSize.width, options.maxSize.width);
-		let height = baseline.height === "auto" ? "auto" : resizeAxis(baseline.height, pointer.y - baseline.pointer.y, corner.y, fixed.y, options.minSize.height, options.maxSize.height);
+		const { corner, options } = baseline;
+		const fixed = fixedPoint(baseline, _fixed);
+		let width = resizeAxis(baseline.width, pointer.x - baseline.pointer.x, corner.x, fixed.x, options.minSize.width, options.maxSize.width, options.overshoot);
+		if (options.contentMinWidth !== void 0) width = Math.max(width, Math.min(options.contentMinWidth, baseline.width));
+		let height = baseline.height === "auto" ? "auto" : resizeAxis(baseline.height, pointer.y - baseline.pointer.y, corner.y, fixed.y, options.minSize.height, options.maxSize.height, options.overshoot);
 		const locked = options.preserveAspectRatio && baseline.height !== "auto";
 		if (locked && height !== "auto") {
 			const widthRatio = width / baseline.width;
@@ -5434,8 +5534,7 @@ var ResizeDriver = class {
 			height = baseline.height * ratio;
 		}
 		if (height !== "auto" && options.fitContent) {
-			const content = contentHeight(card, baseline, width);
-			const floor = content === void 0 ? void 0 : Math.min(content, options.maxSize.height);
+			const floor = contentHeightFloor(card, baseline, width);
 			if (floor !== void 0 && height < floor) {
 				if (locked) {
 					const ratio = lockedContentRatio(card, baseline, width / baseline.width, floor);
@@ -5444,13 +5543,38 @@ var ResizeDriver = class {
 				} else height = floor;
 			}
 		}
-		const worldPosition = new THREE.Vector3((fixed.x - cardAnchor.x) * (baseline.width - width), height === "auto" || baseline.height === "auto" ? 0 : (fixed.y - cardAnchor.y) * (baseline.height - height), 0).applyMatrix4(baseline.matrixWorld);
+		const smoothed = this.smoothSize(baseline, width, height);
+		if (smoothed) ({width, height} = smoothed);
+		return this.sizeProposal(session, card, baseline, width, height);
+	}
+	/**
+	* Returns the proposal to commit when a drag ends. With `overshoot`, a size
+	* past a limit snaps back to the limit at once.
+	*/
+	release(session, baseline, proposal) {
+		const card = asCard(session.owner);
+		if (!card || !baseline.options.overshoot) return proposal;
+		if (proposal.action !== this.action) return proposal;
+		const { minSize, maxSize } = baseline.options;
+		const width = clampToLimits(proposal.width, baseline.width, minSize.width, maxSize.width);
+		let height = proposal.height === "auto" || baseline.height === "auto" ? proposal.height : clampToLimits(proposal.height, baseline.height, minSize.height, maxSize.height);
+		if (width < proposal.width && height !== "auto" && baseline.options.fitContent) {
+			const floor = contentHeightFloor(card, baseline, width);
+			if (floor !== void 0) height = Math.max(height, floor);
+		}
+		if (width === proposal.width && height === proposal.height) return proposal;
+		return this.sizeProposal(session, card, baseline, width, height) ?? proposal;
+	}
+	sizeProposal(session, card, baseline, width, height) {
+		const { cardAnchor } = baseline;
+		const fixed = fixedPoint(baseline, _fixed);
+		const worldPosition = _offset.set((fixed.x - cardAnchor.x) * (baseline.width - width), height === "auto" || baseline.height === "auto" ? 0 : (fixed.y - cardAnchor.y) * (baseline.height - height), 0).applyMatrix4(baseline.matrixWorld);
 		const parent = session.owner.parent;
 		parent?.updateWorldMatrix(true, false);
 		const position = worldPositionToLocal(worldPosition, parent?.matrixWorld);
 		if (!Number.isFinite(width) || !isFiniteVector(position)) return void 0;
 		if (height !== "auto" && !Number.isFinite(height)) return void 0;
-		const unchanged = (baseline.autoWidth || baseline.autoHeight) && Math.abs(width - baseline.width) < SIZE_EPSILON && (height === "auto" || Math.abs(height - baseline.height) < SIZE_EPSILON);
+		const unchanged = (baseline.autoWidth || baseline.autoHeight) && (!baseline.autoWidth || card.size.width === "auto") && (!baseline.autoHeight || card.size.height === "auto") && Math.abs(width - baseline.width) < SIZE_EPSILON && (height === "auto" || Math.abs(height - baseline.height) < SIZE_EPSILON);
 		const proposedHeight = unchanged && baseline.autoHeight ? "auto" : height;
 		return {
 			action: this.action,
@@ -5465,7 +5589,32 @@ var ResizeDriver = class {
 			}
 		};
 	}
+	/**
+	* Eases the proposed size from the last smoothed size, stepping once per
+	* frame, and returns the baseline's smoothed size. Without smoothing or a
+	* timer it returns undefined, and the size is used unchanged.
+	*/
+	smoothSize(baseline, width, height) {
+		if (!baseline.options.smoothing || !this.timer) return void 0;
+		const smoothed = baseline.smoothedSize ??= {
+			width: baseline.width,
+			height: baseline.height
+		};
+		const time = this.timer.getElapsed();
+		if (baseline.smoothingTime !== time) {
+			baseline.smoothingTime = time;
+			const alpha = smoothingAlpha(this.timer.getDelta(), MANIPULATION_EASE_SECONDS);
+			smoothed.width += (width - smoothed.width) * alpha;
+			smoothed.height = height === "auto" || smoothed.height === "auto" ? height : smoothed.height + (height - smoothed.height) * alpha;
+		}
+		return smoothed;
+	}
 };
+/** Returns the content height at `width`, capped by the maximum height. */
+function contentHeightFloor(card, baseline, width) {
+	const content = contentHeight(card, baseline, width);
+	return content === void 0 ? void 0 : Math.min(content, baseline.options.maxSize.height);
+}
 /** Measures the content height at `width`, reusing the last measurement. */
 function contentHeight(card, baseline, width) {
 	const cached = baseline.contentFloor;
@@ -5510,9 +5659,29 @@ function lockedRatio(ratio, baseline) {
 function asCard(owner) {
 	return isUIElement(owner) && getUIElementKind(owner) === "card" ? owner : void 0;
 }
-function resizeAxis(size, delta, corner, fixed, minimum, maximum) {
-	const next = size + (corner === 1 ? 1 : -1) * delta / Math.abs(corner - fixed);
-	return THREE.MathUtils.clamp(next, Math.min(minimum, size), Math.max(maximum, size));
+/**
+* Writes the normalized card coordinates of the point kept fixed while
+* resizing into `target`.
+*/
+function fixedPoint(baseline, target) {
+	const { corner, options } = baseline;
+	return options.anchor === "center" ? target.set(CARD_ANCHORS.center, CARD_ANCHORS.center) : target.set(1 - corner.x, 1 - corner.y);
+}
+/**
+* Resizes one axis by a pointer delta. With `overshoot`, the dragged edge goes
+* slightly past a limit instead of stopping there.
+*/
+function resizeAxis(size, delta, corner, fixed, minimum, maximum, overshoot) {
+	const span = Math.abs(corner - fixed);
+	const next = size + (corner === 1 ? 1 : -1) * delta / span;
+	const limited = clampToLimits(next, size, minimum, maximum);
+	if (!overshoot || next === limited) return limited;
+	const edge = Math.min(RESIZE_OVERSHOOT_RATIO * Math.abs(next - limited) * span, RESIZE_OVERSHOOT_MAX);
+	return Math.max(0, limited + Math.sign(next - limited) * edge / span);
+}
+/** Clamps a size to its limits, widened to include the starting size. */
+function clampToLimits(value, start, minimum, maximum) {
+	return THREE.MathUtils.clamp(value, Math.min(minimum, start), Math.max(maximum, start));
 }
 function pointerOnPlane(snapshot, baseline) {
 	const world = snapshot.ray ? snapshot.ray.intersectPlane(baseline.plane, new THREE.Vector3()) : baseline.plane.projectPoint(snapshot.position, new THREE.Vector3());
@@ -5953,8 +6122,8 @@ var ManipulationManager = class {
 		this.roles = /* @__PURE__ */ new Map();
 		this.rotateDriver = new RotateDriver();
 		this.scaleDriver = new ScaleDriver();
-		this.resizeDriver = new ResizeDriver();
 		this.translateDriver = new TranslateDriver(camera, timer);
+		this.resizeDriver = new ResizeDriver(timer);
 	}
 	resolve(path) {
 		let childHandle;
@@ -6126,7 +6295,7 @@ var ManipulationManager = class {
 		if (finalSnapshot) {
 			if (session.primary.snapshot.controller === source) session.primary.snapshot.copyFrom(finalSnapshot);
 			else if (session.auxiliary?.controller === source) session.auxiliary.copyFrom(finalSnapshot);
-			this.updateSession(session);
+			this.updateSession(session, session.primary.snapshot.controller === source);
 		}
 		if (session.primary.snapshot.controller === source) {
 			this.finishSession(session, "end", true, updated);
@@ -6224,13 +6393,19 @@ var ManipulationManager = class {
 	finishPhase(session, phase, reuseLastProposal = false) {
 		const active = session.phase;
 		if (!active) return;
-		const proposal = reuseLastProposal ? active.lastProposal ?? this.propose(session) : this.propose(session) ?? active.lastProposal;
+		const proposal = this.release(session, active, reuseLastProposal ? active.lastProposal ?? this.propose(session) : this.propose(session) ?? active.lastProposal);
 		session.phase = void 0;
 		this.dispatchPhase(session, active, phase, proposal);
 	}
-	updateSession(session) {
+	/**
+	* Proposes and applies the current frame. A `releasing` update already
+	* carries the size a released Resize snaps back to, so no event reports an
+	* overshoot that is never drawn.
+	*/
+	updateSession(session, releasing = false) {
 		if (!session.phase) return;
-		const proposal = this.propose(session);
+		const proposed = this.propose(session);
+		const proposal = releasing ? this.releasedProposal(session, session.phase, proposed) : proposed;
 		if (!proposal) return;
 		session.phase.lastProposal = proposal;
 		if (!session.phase.defaultPrevented) proposal.apply();
@@ -6243,7 +6418,7 @@ var ManipulationManager = class {
 	}
 	finishSession(session, phase, suppressAuxiliary, reuseLastProposal = false) {
 		const active = session.phase;
-		const proposal = active ? reuseLastProposal ? active.lastProposal ?? this.propose(session) : this.propose(session) ?? active.lastProposal : void 0;
+		const proposal = active ? this.release(session, active, reuseLastProposal ? active.lastProposal ?? this.propose(session) : this.propose(session) ?? active.lastProposal) : void 0;
 		this.removeSession(session, suppressAuxiliary);
 		if (active) this.dispatchPhase(session, active, phase, proposal);
 	}
@@ -6283,6 +6458,18 @@ var ManipulationManager = class {
 		if (baseline.action === ManipulationAction.Rotate) return this.rotateDriver.propose(session, baseline);
 		if (baseline.action === ManipulationAction.Resize) return this.resizeDriver.propose(session, baseline);
 		return this.scaleDriver.propose(session, baseline);
+	}
+	/** Commits a released Resize that overshot its limits back to them. */
+	release(session, active, proposal) {
+		const released = this.releasedProposal(session, active, proposal);
+		if (released && released !== proposal && !active.defaultPrevented) released.apply();
+		return released;
+	}
+	/** Returns the proposal a released phase commits, without applying it. */
+	releasedProposal(session, active, proposal) {
+		const baseline = active.baseline;
+		if (!proposal || baseline.action !== ManipulationAction.Resize) return proposal;
+		return this.resizeDriver.release(session, baseline, proposal);
 	}
 	dispatchPhase(session, active, phase, proposal) {
 		if (!proposal) return;
@@ -6372,6 +6559,7 @@ var Interaction = class {
 		this.resolvedRays = /* @__PURE__ */ new Map();
 		this.hoverPaths = /* @__PURE__ */ new Map();
 		this.captures = /* @__PURE__ */ new Map();
+		this.cursorSlots = /* @__PURE__ */ new WeakMap();
 		this.exclusiveControls = /* @__PURE__ */ new Map();
 		this.touches = /* @__PURE__ */ new Map();
 		this.suppressedUntilRelease = /* @__PURE__ */ new Set();
@@ -6513,7 +6701,7 @@ var Interaction = class {
 		return false;
 	}
 	isSelectingAt(object) {
-		for (const capture of this.captures.values()) if (capture.kind === "target" && objectIsDescendantOf(capture.scroll?.active ? capture.scroll.owner : capture.selection.surface, object)) return true;
+		for (const capture of this.captures.values()) if (captureSelects(capture, object)) return true;
 		return false;
 	}
 	isHovered(object) {
@@ -6534,30 +6722,71 @@ var Interaction = class {
 		}
 		return match ? clonePublicIntersection(match.intersection, match.surface) : null;
 	}
-	/** Writes up to two internal cursor points in controller order. */
-	writeCursorPointsAt(object, first, second) {
-		let firstIndex = Number.POSITIVE_INFINITY;
-		let secondIndex = Number.POSITIVE_INFINITY;
-		let firstPoint;
-		let secondPoint;
+	/**
+	* Writes up to two internal cursor points on `object`, one slot per
+	* pointer, and whether each slot has one in `present`. A pointer keeps its
+	* slot while another leaves, and free slots fill in controller order. A
+	* pointer that holds a capture on `object` keeps its slot and last point on
+	* it while its ray is elsewhere. When `selecting` is given, also writes
+	* whether each slot's controller is selecting the object, as isSelectingAt
+	* reports for all controllers.
+	*/
+	writeCursorPointsAt(object, first, second, present, selecting) {
+		let slots = this.cursorSlots.get(object);
+		if (!slots) {
+			slots = [createCursorSlot(), createCursorSlot()];
+			this.cursorSlots.set(object, slots);
+		}
+		for (const slot of slots) {
+			const controller = slot.controller;
+			if (controller && !this.pointsAt(controller, object) && !(slot.hasPoint && this.controllerSelects(controller, object))) slot.controller = void 0;
+		}
+		for (const slot of slots) {
+			if (slot.controller) continue;
+			slot.controller = this.nextCursorController(object, slots);
+			slot.hasPoint = false;
+		}
+		object.updateWorldMatrix(true, false);
+		for (let index = 0; index < slots.length; index++) {
+			const slot = slots[index];
+			const target = index === 0 ? first : second;
+			const controller = slot.controller;
+			const resolved = controller && this.resolvedRays.get(controller);
+			if (resolved && objectIsDescendantOf(resolved.surface, object)) {
+				target.copy(resolved.intersection.point);
+				object.worldToLocal(slot.localPoint.copy(target));
+				slot.hasPoint = true;
+			} else if (slot.hasPoint) object.localToWorld(target.copy(slot.localPoint));
+			present[index] = slot.hasPoint;
+			if (selecting) selecting[index] = slot.hasPoint && this.controllerSelects(controller, object);
+		}
+	}
+	pointsAt(controller, object) {
+		const resolved = this.resolvedRays.get(controller);
+		return !!resolved && objectIsDescendantOf(resolved.surface, object);
+	}
+	/**
+	* Returns the lowest-indexed controller pointing at `object` that has no
+	* cursor slot yet.
+	*/
+	nextCursorController(object, slots) {
+		let next;
+		let nextIndex = Number.POSITIVE_INFINITY;
 		for (const [controller, resolved] of this.resolvedRays) {
 			if (!objectIsDescendantOf(resolved.surface, object)) continue;
+			if (slots[0].controller === controller) continue;
+			if (slots[1].controller === controller) continue;
 			const index = controllerIndex(controller);
-			if (index < firstIndex) {
-				secondIndex = firstIndex;
-				secondPoint = firstPoint;
-				firstIndex = index;
-				firstPoint = resolved.intersection.point;
-			} else if (index < secondIndex) {
-				secondIndex = index;
-				secondPoint = resolved.intersection.point;
+			if (index < nextIndex) {
+				next = controller;
+				nextIndex = index;
 			}
 		}
-		if (!firstPoint) return 0;
-		first.copy(firstPoint);
-		if (!secondPoint) return 1;
-		second.copy(secondPoint);
-		return 2;
+		return next;
+	}
+	controllerSelects(controller, object) {
+		const capture = controller && this.captures.get(controller);
+		return !!capture && captureSelects(capture, object);
 	}
 	isManipulating(object) {
 		return this.manipulation.isManipulating(object);
@@ -7171,6 +7400,15 @@ function clonePublicIntersection(intersection, surface) {
 		uv: intersection.uv?.clone(),
 		uv1: intersection.uv1?.clone()
 	};
+}
+function createCursorSlot() {
+	return {
+		hasPoint: false,
+		localPoint: new THREE.Vector3()
+	};
+}
+function captureSelects(capture, object) {
+	return capture.kind === "target" && objectIsDescendantOf(capture.scroll?.active ? capture.scroll.owner : capture.selection.surface, object);
 }
 function controllerIndex(controller) {
 	const value = controller.userData.id;
@@ -9343,10 +9581,6 @@ var Depth = class Depth {
 		if (firstError !== void 0) throw firstError;
 	}
 };
-//#endregion
-//#region src/utils/GlslUtils.ts
-/** Formats a number as a GLSL float literal, which needs a decimal point. */
-const glslFloat = (value) => Number.isInteger(value) ? `${value}.0` : `${value}`;
 //#endregion
 //#region src/interaction/reticle/ReticleShader.ts
 /**

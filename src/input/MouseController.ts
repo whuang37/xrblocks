@@ -28,7 +28,6 @@ export class MouseController
   };
   type = 'MouseController';
   name = 'Mouse Controller';
-  editorIcon = 'mouse';
 
   /**
    * User data for the controller, including its connection status, unique ID,

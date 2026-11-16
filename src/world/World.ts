@@ -33,8 +33,6 @@ export class World extends Script {
     timer: THREE.Timer,
   };
 
-  editorIcon = 'sensors';
-
   /**
    * Configuration options for all world-sensing features.
    */

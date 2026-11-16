@@ -131,7 +131,6 @@ export class SimulatorInterface {
         lighting
       );
     }
-    this.showGeminiLivePanel(simulatorOptions);
     this.createHandPosePanel(simulatorOptions, simulatorHands);
     this.createOverlayInstructions(
       simulatorOptions,
@@ -273,16 +272,6 @@ export class SimulatorInterface {
       element.customInstructions =
         simulatorOptions.instructions.customInstructions;
       element.simulatorMode = simulatorMode;
-      document.body.appendChild(element);
-      this.elements.push(element);
-    }
-  }
-
-  showGeminiLivePanel(simulatorOptions: SimulatorOptions) {
-    if (simulatorOptions.geminiLivePanel.enabled) {
-      const element = document.createElement(
-        simulatorOptions.geminiLivePanel.element
-      );
       document.body.appendChild(element);
       this.elements.push(element);
     }

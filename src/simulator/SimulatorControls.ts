@@ -8,7 +8,6 @@ import {Keycodes} from '../utils/Keycodes';
 
 import {SimulatorControllerMode} from './controlModes/SimulatorControllerMode';
 import {SimulatorControlMode} from './controlModes/SimulatorControlMode';
-import {SimulatorEditorMode} from './controlModes/SimulatorEditorMode';
 import {SimulatorPoseMode} from './controlModes/SimulatorPoseMode';
 import {SimulatorPointerLockMode} from './controlModes/SimulatorPointerLockMode';
 import {SimulatorUserMode} from './controlModes/SimulatorUserMode';
@@ -108,15 +107,6 @@ export class SimulatorControls {
         cycleSimulatorMode
       ),
       [SimulatorMode.POINTER_LOCK]: new SimulatorPointerLockMode(
-        this.simulatorControllerState,
-        this.downKeys,
-        hands,
-        navMesh,
-        setStereoRenderMode,
-        toggleUserInterface,
-        cycleSimulatorMode
-      ),
-      [SimulatorMode.EDITOR]: new SimulatorEditorMode(
         this.simulatorControllerState,
         this.downKeys,
         hands,

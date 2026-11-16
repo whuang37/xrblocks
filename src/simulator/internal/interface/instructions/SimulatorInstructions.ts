@@ -45,7 +45,6 @@ export class SimulatorInstructions extends LitElement {
     if (this.simulatorMode) {
       switch (this.simulatorMode) {
         case SimulatorMode.USER:
-        case SimulatorMode.EDITOR:
         case SimulatorMode.POINTER_LOCK:
           return [
             html`<xrblocks-simulator-user-instructions

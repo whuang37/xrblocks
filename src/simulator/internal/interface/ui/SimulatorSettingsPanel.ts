@@ -273,7 +273,6 @@ export class SimulatorSettingsPanel
       {label: 'Navigation', value: SimulatorMode.POSE},
       {label: 'Hands', value: SimulatorMode.CONTROLLER},
       {label: 'Pointer Lock', value: SimulatorMode.POINTER_LOCK},
-      {label: 'Editor', value: SimulatorMode.EDITOR},
     ];
 
     return html`

@@ -44,7 +44,6 @@ export function getOverlayInstructionsForMode(
         ],
       ];
     case SimulatorMode.USER:
-    case SimulatorMode.EDITOR:
     default:
       return [
         [{keys: ['W', 'A', 'S', 'D'], label: 'Move'}],

@@ -38,7 +38,6 @@ export class RemoteControl extends Script {
     camera: THREE.Camera,
   };
 
-  editorIcon = 'settings_remote';
   transport?: WebSocketRemoteControlTransport;
 
   dependencies!: {

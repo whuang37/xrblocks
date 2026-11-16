@@ -34,7 +34,6 @@ export interface ReticleUniforms {
 export class Reticle extends THREE.Mesh<THREE.BufferGeometry, THREE.Material> {
   /** Text description of the PanelMesh */
   name = 'Reticle';
-  editorIcon = 'target';
 
   /** The world-space direction vector of the ray that hit the target. */
   direction = new THREE.Vector3();

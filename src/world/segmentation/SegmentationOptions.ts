@@ -11,7 +11,7 @@ export class SegmentationOptions {
   /**
    * Minimum delay in milliseconds between continuous segmentation runs.
    * A value of 0 runs again as soon as the previous inference finishes.
-   * Defaults to 66 (~15 fps), the rate the magic_window grab loop used before
+   * Defaults to 66 (~15 fps), the rate the gallery camera-compositing example used before
    * segmentation moved onto its own polling loop.
    */
   pollingIntervalMs = 66;

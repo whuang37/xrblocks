@@ -15,7 +15,6 @@ export class EmbodiedControl extends Script {
     camera: THREE.Camera,
   };
 
-  editorIcon = 'sports_martial_arts';
   executor?: EmbodiedControlExecutor;
   private options: Required<EmbodiedControlOptions>;
   private core?: Core;

@@ -15,8 +15,6 @@ export class Context extends Script {
     screenshotSynthesizer: ScreenshotSynthesizer,
   };
 
-  editorIcon = 'account_tree';
-
   /**
    * Configuration options for all context-sensing features.
    */

@@ -9,15 +9,13 @@ export enum SimulatorMode {
   POSE = 'Navigation',
   CONTROLLER = 'Hands',
   POINTER_LOCK = 'PointerLock',
-  EDITOR = 'Editor',
 }
 
 const DEFAULT_MODE_TOGGLE_ORDER = {
   [SimulatorMode.USER]: SimulatorMode.POSE,
   [SimulatorMode.POSE]: SimulatorMode.CONTROLLER,
   [SimulatorMode.CONTROLLER]: SimulatorMode.POINTER_LOCK,
-  [SimulatorMode.POINTER_LOCK]: SimulatorMode.EDITOR,
-  [SimulatorMode.EDITOR]: SimulatorMode.USER,
+  [SimulatorMode.POINTER_LOCK]: SimulatorMode.USER,
 };
 
 export interface SimulatorCustomInstruction {
@@ -68,10 +66,6 @@ export class SimulatorOptions {
   handPosePanel = {
     enabled: true,
     element: 'xrblocks-simulator-hand-pose-panel',
-  };
-  geminiLivePanel = {
-    enabled: false,
-    element: 'xrblocks-simulator-geminilive',
   };
   stereo = {
     enabled: false,

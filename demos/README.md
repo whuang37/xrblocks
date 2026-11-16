@@ -13,8 +13,8 @@ submit to `/samples/`.
 Follow the [development guide](../README.md#development-guide) to serve the
 repository, then open your demo path, for example:
 
-- `http://localhost:8080/demos/math3d/`
-- [Roomcraft](roomcraft/): `http://localhost:8080/demos/roomcraft/` for editable 3D scenes, no-key examples, and optional Gemini scene authoring.
+- `http://localhost:8080/demos/context/`
+- Standalone applications, including Roomcraft, are maintained in [XR Blocks Gallery](https://github.com/xrblocks/gallery).
 
 ## Contributing a New Demo
 

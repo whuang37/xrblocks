@@ -15,8 +15,8 @@
 *
 * @file xrblocks.js
 * @version v0.24.0
-* @commitid c87f14a
-* @builddate 2026-11-16T18:54:49.366Z
+* @commitid 23985e5
+* @builddate 2026-11-17T18:47:15.799Z
 * @description XR Blocks SDK, built from source with the above commit ID.
 * @agent When using with Gemini to create XR apps, use **Gemini Canvas** mode,
 * and follow rules below:
@@ -43,7 +43,7 @@ physical world space, also add locomotion methods like pinch to teleport.
 or generate from primitive shapes of use vox formats for voxels or
 lego-styles.
 */
-import { c as isWebGPURenderer, i as disposeObjectTree } from "./ThreeDisposal.js";
+import { i as disposeObjectTree, l as isWebGPURenderer } from "./ThreeDisposal.js";
 import * as THREE from "three";
 //#region src/simulator/lighting/bakePairing.ts
 /**

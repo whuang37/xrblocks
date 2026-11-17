@@ -2,18 +2,13 @@
 title: Stereo
 ---
 
-Render independent images for each eye to present spatial photos, videos, and stereoscopic media in WebXR.
+Present different media to the left and right eyes. In the simulator, use
+**1** and **2** to inspect the individual eye views. Check the combined result
+on a stereo device; a desktop view cannot prove binocular alignment or comfort.
 
-### Desktop Controls (User Mode)
+The complete source below shows the per-eye setup and media assets.
 
-- **Switch Eye View:** Press <kbd>1</kbd> to inspect the left eye view, or <kbd>2</kbd> for the right eye view.
-- **Move Camera:** Use <kbd>W</kbd>, <kbd>A</kbd>, <kbd>S</kbd>, <kbd>D</kbd> to move forward, left, backward, and right.
-- **Elevate Camera:** Use <kbd>Q</kbd> and <kbd>E</kbd> to move down and up.
-- **Rotate Camera:** Right-click and drag the mouse to look around.
-
-### XR Controls
-
-- **View in XR:** Experience true stereoscopic depth automatically rendered for each eye in the headset.
+[Stereo media and XR layers](/sdk/media) · [Simulator controls](/sdk/simulator) · [Example catalog](/examples)
 
 import {DocsIFrame} from '../DocsIFrame.jsx';
 import {DocsSource} from '../DocsSource.jsx';

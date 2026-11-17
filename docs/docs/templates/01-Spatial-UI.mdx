@@ -2,21 +2,15 @@
 title: Spatial UI
 ---
 
-Build a movable, resizable interface with the core `UICard`, layout, text,
-image, button, and slider components. The controls update the card immediately
-on desktop and in XR.
+Build a movable, resizable card with text, an image, buttons, a slider,
+and a toggle. Change image brightness, hide the photo, then reset the controls.
+The existing elements update without rebuilding the UI tree.
 
-### Desktop Controls (User Mode)
+Drag the card edge to move it or a corner to resize its layout. Two-source
+scaling changes the whole card's scale; it is different from corner resizing.
+Test the controls with mouse input and the available XR input sources.
 
-- **Move UI:** Left-click and drag the border/edge of the UI card.
-- **Scale UI:** Hover over the UI card and scroll with the mouse wheel.
-- **Interact:** Left-click buttons or drag sliders to adjust values.
-
-### XR Controls
-
-- **Move UI:** Pinch the border/edge of the card and drag.
-- **Scale UI:** Pinch the card with two hands and stretch or pinch closer to resize.
-- **Interact:** Ray-pinch buttons and drag sliders.
+[Build spatial UI](/sdk/ui) · [Simulator controls](/sdk/simulator) · [Example catalog](/examples)
 
 import {DocsIFrame} from '../DocsIFrame.jsx';
 import {DocsSource} from '../DocsSource.jsx';

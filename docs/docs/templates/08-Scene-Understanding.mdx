@@ -2,9 +2,15 @@
 title: Scene Understanding
 ---
 
-Scan the surroundings and list detected object labels. Desktop simulation uses
-known scene objects; XR uses the camera, depth, and on-device MediaPipe
-detector.
+Scan the surroundings and list detected object labels. MediaPipe runs on the
+selected camera input; in the simulator this normally means rendered-room
+frames. Depth supports positioning the results in world space.
+
+Handle an empty result while data or models load, when nothing is detected, or
+when the required evidence is unavailable. The separate simulator ground-truth
+override is not enabled by this template.
+
+[Objects, people, and faces](/sdk/world/detection) · [Example catalog](/examples)
 
 import {DocsIFrame} from '../DocsIFrame.jsx';
 import {DocsSource} from '../DocsSource.jsx';

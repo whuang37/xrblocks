@@ -2,18 +2,14 @@
 title: Spatial Placement
 ---
 
-Detect physical surfaces in real time and anchor virtual content onto the environment using the WebXR Depth Sensing API and surface normal alignment.
+Preview a marker at a depth-ray hit, then select the surface to place a marker
+there. Its orientation follows the surface normal. A missing hit hides the preview.
 
-### Desktop Controls (User Mode)
+This example sets a transform once. It does not create a spatial anchor or save
+a location across sessions. The simulator supplies synthetic room depth; native
+depth requires device support.
 
-- **Move Camera:** Use <kbd>W</kbd>, <kbd>A</kbd>, <kbd>S</kbd>, <kbd>D</kbd> to move forward, left, backward, and right.
-- **Elevate Camera:** Use <kbd>Q</kbd> and <kbd>E</kbd> to move down and up.
-- **Rotate Camera:** Right-click and drag the mouse to look around.
-- **Aim & Place:** Move the cursor over a surface to preview marker placement, and left-click to anchor it.
-
-### XR Controls
-
-- **Aim & Place:** Point at any detected surface in the room to view the preview marker, and ray-pinch or pull the controller trigger to place it.
+[Placement](/sdk/placement) · [Anchors](/sdk/anchors) · [Simulator controls](/sdk/simulator) · [Example catalog](/examples)
 
 import {DocsIFrame} from '../DocsIFrame.jsx';
 import {DocsSource} from '../DocsSource.jsx';

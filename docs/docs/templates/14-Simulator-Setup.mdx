@@ -2,23 +2,18 @@
 title: Simulator Setup
 ---
 
-Configure a desktop-first XR prototyping environment with the XR Blocks desktop simulator, including virtual hand tracking, plane detection debug visualizers, and navigation meshes.
+Start the simulator automatically with its interface, hand input, plane debug
+views, and navigation mesh enabled. The initial mode is User.
 
-### Desktop Controls
+Use the settings interface to change the environment or mode. This example
+enables mode cycling with **Left Shift**. A navigation mesh grounds the camera
+and disables free vertical movement; it does not constrain hand reach.
 
-#### User Mode (Camera Navigation)
+The [simulator controls guide](/sdk/simulator) owns the current movement and
+hand-control instructions. Debug views help inspect evidence; hide them when
+checking the application's user-facing feedback.
 
-- **Move Camera:** Use <kbd>W</kbd>, <kbd>A</kbd>, <kbd>S</kbd>, <kbd>D</kbd> to move forward, left, backward, and right.
-- **Elevate Camera:** Use <kbd>Q</kbd> and <kbd>E</kbd> to move down and up.
-- **Rotate:** Right-click and drag the mouse to look around.
-- **Switch Mode:** Click the on-screen mode toggle button or press <kbd>Tab</kbd> to switch to Hands Mode.
-
-#### Hands Mode (Virtual Hands)
-
-- **Move Active Hand:** Use <kbd>W</kbd>, <kbd>A</kbd>, <kbd>S</kbd>, <kbd>D</kbd> to translate the hand.
-- **Elevate Active Hand:** Use <kbd>Q</kbd> and <kbd>E</kbd> to move the hand up and down.
-- **Switch Hand:** Press <kbd>T</kbd> to toggle between the left and right hand.
-- **Simulate Pinch:** Press <kbd>Space</kbd> or left-click to simulate a pinch/grab.
+[Simulator environments](/sdk/simulator/environments) · [Example catalog](/examples)
 
 import {DocsIFrame} from '../DocsIFrame.jsx';
 import {DocsSource} from '../DocsSource.jsx';

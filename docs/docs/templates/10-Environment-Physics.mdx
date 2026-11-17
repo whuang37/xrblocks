@@ -2,18 +2,15 @@
 title: Environment Physics
 ---
 
-Launch physical projectiles into the room that dynamically collide with and bounce off the live environment depth mesh using Rapier3D physics.
+Launch projectiles that collide with a depth-derived environment mesh. The
+application supplies Rapier and enables depth before engine initialization.
+Select to launch, then inspect collisions with the available geometry.
 
-### Desktop Controls (User Mode)
+Desktop collision uses synthetic depth. On a device, missing or noisy room
+coverage can change the result. Test performance and provide a way to recover
+objects that get trapped by incomplete geometry.
 
-- **Launch Projectile:** Left-click to fire a physics projectile in the direction you are looking.
-- **Move Camera:** Use <kbd>W</kbd>, <kbd>A</kbd>, <kbd>S</kbd>, <kbd>D</kbd> to move forward, left, backward, and right.
-- **Elevate Camera:** Use <kbd>Q</kbd> and <kbd>E</kbd> to move down and up.
-- **Rotate:** Right-click and drag the mouse to look around.
-
-### XR Controls
-
-- **Launch Projectile:** Ray-pinch with hands or pull the controller trigger to fire projectiles into the physical room.
+[Physics](/sdk/physics) · [Depth](/sdk/world/depth) · [Simulator controls](/sdk/simulator) · [Example catalog](/examples)
 
 import {DocsIFrame} from '../DocsIFrame.jsx';
 import {DocsSource} from '../DocsSource.jsx';

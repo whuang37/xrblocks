@@ -2,18 +2,14 @@
 title: XR Modes
 ---
 
-Seamlessly switch between passthrough AR and immersive VR backgrounds using `XRTransition` while preserving all 3D scene state and object positions.
+Select to fade between passthrough and a colored virtual background. The
+application's objects remain in the scene while the background changes.
 
-### Desktop Controls (User Mode)
+`XRTransition` changes visual presentation inside the current session. It does
+not replace an immersive-AR session with an immersive-VR session. Use startup
+configuration when the application needs a different session type.
 
-- **Toggle AR / VR Mode:** Left-click to switch between AR passthrough and immersive VR backgrounds.
-- **Move Camera:** Use <kbd>W</kbd>, <kbd>A</kbd>, <kbd>S</kbd>, <kbd>D</kbd> to move forward, left, backward, and right.
-- **Elevate Camera:** Use <kbd>Q</kbd> and <kbd>E</kbd> to move down and up.
-- **Rotate:** Right-click and drag the mouse to look around.
-
-### XR Controls
-
-- **Toggle AR / VR Mode:** Ray-pinch with hands or pull the controller trigger to transition between passthrough AR and immersive VR.
+[Rendering and background transitions](/sdk/rendering) · [Startup](/sdk/configuration) · [Example catalog](/examples)
 
 import {DocsIFrame} from '../DocsIFrame.jsx';
 import {DocsSource} from '../DocsSource.jsx';
